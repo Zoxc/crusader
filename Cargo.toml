@@ -1,2 +1,5 @@
 [workspace]
 members = ["tool", "library"]
+
+[profile.release]
+panic = "abort"
