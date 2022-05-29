@@ -1,35 +1,15 @@
 use bincode::serialize_into;
 use plotters::prelude::*;
 use rand::{prelude::StdRng, Rng, SeedableRng};
-use serde::{Deserialize, Serialize};
 use std::{
-    io::{Cursor, ErrorKind, Read, Write},
+    io::{Cursor, ErrorKind, Write},
     net::{TcpStream, UdpSocket},
     sync::Arc,
     thread,
     time::{Duration, Instant},
 };
 
-#[derive(Serialize, Deserialize)]
-pub(crate) enum ServerMessage {
-    NewClient(u64),
-}
-
-#[derive(Serialize, Deserialize)]
-pub(crate) enum ClientMessage {
-    NewClient,
-}
-
-#[derive(Serialize, Deserialize)]
-pub(crate) struct LoadConfig {
-    from_server: bool,
-}
-
-#[derive(Serialize, Deserialize)]
-pub(crate) struct Ping {
-    index: u32,
-    timestamp: u128,
-}
+use crate::protocol::{ClientMessage, Hello, Ping, ServerMessage};
 
 pub(crate) fn data() -> Vec<u8> {
     let mut vec = Vec::with_capacity(512 * 1024);
@@ -43,7 +23,32 @@ pub(crate) fn data() -> Vec<u8> {
     vec
 }
 
+fn hello(mut stream: &mut TcpStream) {
+    let hello = Hello::new();
+
+    serialize_into(&mut stream, &hello).unwrap();
+    let server_hello: Hello = bincode::deserialize_from(&mut stream).unwrap();
+
+    if hello != server_hello {
+        panic!(
+            "Mismatched server hello, got {:?}, expected {:?}",
+            server_hello, hello
+        );
+    }
+}
+
 pub fn test(host: &str) {
+    let mut control = TcpStream::connect((host, 30481)).expect("unable to bind control TCP socket");
+
+    hello(&mut control);
+
+    serialize_into(&mut control, &ClientMessage::NewClient).unwrap();
+    let reply: ServerMessage = bincode::deserialize_from(&mut control).unwrap();
+    let id = match reply {
+        ServerMessage::NewClient(id) => id,
+        _ => panic!("Unexpected message {:?}", reply),
+    };
+
     let socket = UdpSocket::bind("127.0.0.1:0").expect("unable to bind UDP socket");
     socket
         .set_read_timeout(Some(Duration::from_millis(500)))
@@ -63,10 +68,10 @@ pub fn test(host: &str) {
 
     let loaders: Vec<_> = (0..loading_streams)
         .map(|_| {
-            (
-                data.clone(),
-                TcpStream::connect((host, 30481)).expect("unable to bind TCP socket"),
-            )
+            let mut stream = TcpStream::connect((host, 30481)).expect("unable to bind TCP socket");
+            hello(&mut stream);
+            serialize_into(&mut control, &ClientMessage::Associate(id)).unwrap();
+            (data.clone(), stream)
         })
         .collect();
 
@@ -94,7 +99,7 @@ pub fn test(host: &str) {
 
             let ping = Ping {
                 index,
-                timestamp: current.as_nanos(),
+                timestamp: current.as_micros() as u64,
             };
 
             let mut cursor = Cursor::new(&mut buf[..]);
@@ -137,9 +142,7 @@ pub fn test(host: &str) {
             let buf = &mut buf[..len];
             let ping: Ping = bincode::deserialize(buf).unwrap();
 
-            let latency = current.as_nanos().saturating_sub(ping.timestamp);
-
-            //println!("pingy {:?}", Duration::from_nanos(latency as u64));
+            let latency = (current.as_micros() as u64).saturating_sub(ping.timestamp);
 
             storage.push((ping, latency));
         }
@@ -154,11 +157,13 @@ pub fn test(host: &str) {
                 thread::sleep(Duration::from_secs(grace));
                 println!("Loading");
 
-                let config = LoadConfig { from_server: false };
+                serialize_into(&mut stream, &ClientMessage::LoadFromClient).unwrap();
 
-                stream.write(&bincode::serialize(&config).unwrap()).unwrap();
-
-                stream.read(&mut [0]).unwrap();
+                let reply: ServerMessage = bincode::deserialize_from(&mut stream).unwrap();
+                match reply {
+                    ServerMessage::WaitingOnLoad => (),
+                    _ => panic!("Unexpected message {:?}", reply),
+                }
 
                 let load_start = Instant::now();
 
@@ -180,29 +185,24 @@ pub fn test(host: &str) {
         .into_iter()
         .for_each(|loader| loader.join().unwrap());
 
+    serialize_into(&mut control, &ClientMessage::Done).unwrap();
+
     let root = BitMapBackend::new("plot.png", (1024, 768)).into_drawing_area();
 
     root.fill(&WHITE).unwrap();
 
-    let max_latency = pings.iter().map(|d| d.1).max().unwrap_or_default() as f64 / (1000.0 * 1000.0);
+    let max_latency =
+        pings.iter().map(|d| d.1).max().unwrap_or_default() as f64 / (1000.0 * 1000.0);
 
     let mut chart = ChartBuilder::on(&root)
         .margin(6)
-        .caption(
-            "Latency under load",
-            ("sans-serif", 30),
-        )
+        .caption("Latency under load", ("sans-serif", 30))
         .set_label_area_size(LabelAreaPosition::Left, 60)
         .set_label_area_size(LabelAreaPosition::Right, 60)
         .set_label_area_size(LabelAreaPosition::Bottom, 40)
-        .build_cartesian_2d(
-            0.0..(secs as f64),
-            0.0..max_latency,
-        ).unwrap()
-       .set_secondary_coord(
-            0.0..(secs as f64),
-            0.0..1000.0f64,
-        );
+        .build_cartesian_2d(0.0..(secs as f64), 0.0..max_latency)
+        .unwrap()
+        .set_secondary_coord(0.0..(secs as f64), 0.0..1000.0f64);
 
     chart
         .configure_mesh()
@@ -211,23 +211,36 @@ pub fn test(host: &str) {
         .x_labels(30)
         .y_desc("Latency (ms)")
         .x_desc("Elapsed time (seconds)")
-        .draw().unwrap();
-  chart
+        .draw()
+        .unwrap();
+    chart
         .configure_secondary_axes()
         .y_desc("Bandwidth (Mbps)")
-        .draw().unwrap();
+        .draw()
+        .unwrap();
 
     pings.sort_by_key(|d| d.0.index);
 
-    chart.draw_series(LineSeries::new(
-        pings.iter().map(|(ping, latency)| (ping.timestamp as f64 / (1000.0 * 1000.0 * 1000.0), *latency as f64 / (1000.0 * 1000.0))),
-        &BLUE,
-    )).unwrap();
-    
-    chart.draw_secondary_series(LineSeries::new(
-        pings.iter().map(|(ping, _)| (ping.timestamp as f64 / (1000.0 * 1000.0 * 1000.0), 100.0)),
-        &RED,
-    )).unwrap();
+    chart
+        .draw_series(LineSeries::new(
+            pings.iter().map(|(ping, latency)| {
+                (
+                    ping.timestamp as f64 / (1000.0 * 1000.0 * 1000.0),
+                    *latency as f64 / (1000.0 * 1000.0),
+                )
+            }),
+            &BLUE,
+        ))
+        .unwrap();
+
+    chart
+        .draw_secondary_series(LineSeries::new(
+            pings
+                .iter()
+                .map(|(ping, _)| (ping.timestamp as f64 / (1000.0 * 1000.0 * 1000.0), 100.0)),
+            &RED,
+        ))
+        .unwrap();
 
     // To avoid the IO failure being ignored silently, we manually call the present function
     root.present().expect("Unable to write result to file, please make sure 'plotters-doc-data' dir exists under current dir");
