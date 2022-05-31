@@ -1,4 +1,5 @@
 use bytes::BytesMut;
+use futures::{pin_mut, select, FutureExt};
 use parking_lot::Mutex;
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -8,6 +9,7 @@ use std::time::Duration;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::io::{AsyncRead, ReadBuf};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::{join, time};
 use tokio_util::codec::{Decoder, Framed};
 
@@ -78,6 +80,7 @@ impl Encoder<BytesMut> for CountingCodec {
 
 struct Client {
     created: Instant,
+    message: UnboundedSender<ServerMessage>,
 }
 
 struct State {
@@ -104,6 +107,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
     }
 
     let mut client = None;
+    let mut receiver = None;
 
     loop {
         let request: ClientMessage = receive(&mut stream).await?;
@@ -111,8 +115,13 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             ClientMessage::NewClient => {
                 println!("Serving {}, version {}", addr, hello.version);
 
+                let (tx, rx) = unbounded_channel();
+
+                receiver = Some(rx);
+
                 let client = Arc::new(Client {
                     created: Instant::now(),
+                    message: tx,
                 });
                 let id = Arc::as_ptr(&client) as u64;
                 state.clients.lock().insert(id, client);
@@ -124,12 +133,39 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         .clients
                         .lock()
                         .get(&id)
+                        .cloned()
                         .ok_or_else(|| "Unable to assoicate client")?,
                 );
             }
-            ClientMessage::GetMeasurements => {
-                //thread::spawn(f)
-            }
+            ClientMessage::GetMeasurements => loop {
+                let message = {
+                    let request = receive::<_, ClientMessage, _>(&mut stream).fuse();
+                    pin_mut!(request);
+
+                    let message = receiver
+                        .as_mut()
+                        .ok_or("Not the main client")?
+                        .recv()
+                        .fuse();
+                    pin_mut!(message);
+
+                    select! {
+                        request = request => {
+                            match request? {
+                                ClientMessage::Done => return Ok(()),
+                                _ => {
+                                    Err("Closed early")?
+                                }
+                            }
+                        },
+                        message = message =>  message,
+                    }
+                };
+
+                if let Some(message) = message {
+                    send(&mut stream, &message).await?;
+                }
+            },
             ClientMessage::LoadFromClient => {
                 let mut raw =
                     Framed::with_capacity(stream.into_inner(), CountingCodec, 1024 * 1024);
@@ -141,6 +177,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes2 = bytes.clone();
 
+                let client = client.clone();
                 tokio::spawn(async move {
                     let mut interval = time::interval(Duration::from_millis(interval));
                     let mut previous = start;
@@ -157,6 +194,17 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         let delta = current - data;
 
                         data = current;
+
+                        if let Some(client) = &client {
+                            client
+                                .message
+                                .send(ServerMessage::Measure {
+                                    time: current_time.duration_since(start).as_micros() as u64,
+                                    duration: elapsed.as_micros() as u64,
+                                    bytes: delta,
+                                })
+                                .ok();
+                        }
 
                         let mbits = (delta as f64 * 8.0) / 1000.0 / 1000.0;
                         let rate = mbits / elapsed.as_secs_f64();

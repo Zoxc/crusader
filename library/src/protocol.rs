@@ -27,7 +27,11 @@ impl Hello {
 pub enum ServerMessage {
     NewClient(u64),
     WaitingOnLoad,
-    Measure {},
+    Measure {
+        time: u64,
+        duration: u64,
+        bytes: u64,
+    },
     MeasurementsDone,
 }
 

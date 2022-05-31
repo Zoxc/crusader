@@ -19,7 +19,7 @@ use tokio::{
     net::{self},
     time,
 };
-use tokio_util::codec::Framed;
+use tokio_util::codec::{Framed, FramedRead, FramedWrite};
 
 use crate::protocol::{codec, receive, send, ClientMessage, Hello, Ping, ServerMessage};
 
@@ -92,7 +92,7 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
     let grace = 2;
     let load_duration = 9;
-    let interval_ms = 100;
+    let interval_ms = 1000;
     let secs = load_duration * 1 + grace * 2;
     let duration = Duration::from_secs(secs);
 
@@ -211,10 +211,35 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
+    send(&mut control, &ClientMessage::GetMeasurements).await?;
+
+    let (rx, tx) = control.into_inner().into_split();
+    let mut rx = FramedRead::new(rx, codec());
+    let mut tx = FramedWrite::new(tx, codec());
+
+    tokio::spawn(async move {
+        loop {
+            let reply: ServerMessage = receive(&mut rx).await.unwrap();
+            match reply {
+                ServerMessage::Measure {
+                    time: _,
+                    duration,
+                    bytes,
+                } => {
+                    let mbits = (bytes as f64 * 8.0) / 1000.0 / 1000.0;
+                    let rate = mbits / Duration::from_micros(duration).as_secs_f64();
+                    println!("Rate: {:>10.2} Mbps, Bytes: {}", rate, bytes);
+                }
+                ServerMessage::MeasurementsDone => break,
+                _ => panic!("Unexpected message {:?}", reply),
+            };
+        }
+    });
+
     sender.await?;
     receiver.await?;
 
-    send(&mut control, &ClientMessage::Done).await?;
+    send(&mut tx, &ClientMessage::Done).await?;
 
     Ok(())
 }
