@@ -179,6 +179,17 @@ pub fn test(host: &str) {
         })
         .collect();
 
+    serialize_into(&mut control, &ClientMessage::GetMeasurements).unwrap();
+
+    loop {
+        let reply: ServerMessage = bincode::deserialize_from(&mut control).unwrap();
+        match reply {
+            ServerMessage::Measure {} => (id),
+            ServerMessage::MeasurementsDone => break,
+            _ => panic!("Unexpected message {:?}", reply),
+        };
+    }
+
     sender.join().unwrap();
     let mut pings = receiver.join().unwrap();
     loaders

@@ -22,6 +22,8 @@ impl Hello {
 pub enum ServerMessage {
     NewClient(u64),
     WaitingOnLoad,
+    Measure {},
+    MeasurementsDone,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -30,6 +32,7 @@ pub enum ClientMessage {
     Associate(u64),
     Done,
     LoadFromClient,
+    GetMeasurements,
 }
 
 #[derive(Serialize, Deserialize)]

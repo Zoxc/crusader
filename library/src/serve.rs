@@ -61,6 +61,7 @@ fn client(state: Arc<State>, mut stream: TcpStream) -> Result<(), Box<dyn Error>
                         .ok_or_else(|| "Unable to assoicate client")?,
                 );
             }
+            ClientMessage::GetMeasurements => thread::spawn(f),
             ClientMessage::LoadFromClient => {
                 let mut buf = [0; 1024 * 1024];
 
