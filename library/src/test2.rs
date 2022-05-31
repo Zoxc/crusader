@@ -1,21 +1,10 @@
-use bincode::serialize_into;
 use bytes::{Bytes, BytesMut};
-use futures::{sink::SinkExt, stream::StreamExt, Sink, Stream};
-use plotters::prelude::*;
-use rand::{prelude::StdRng, Rng, SeedableRng};
-use serde::{Deserialize, Serialize};
-use std::{
-    error::Error,
-    io::{Cursor, ErrorKind, Write},
-    net::{SocketAddr, TcpStream, UdpSocket},
-    sync::Arc,
-    thread,
-    time::{Duration, Instant},
-};
-use tokio::net::{self, TcpSocket};
-use tokio_util::codec::{length_delimited, Framed, LengthDelimitedCodec};
+use futures::{Sink, Stream};
+use std::error::Error;
+use tokio::net::{self};
+use tokio_util::codec::Framed;
 
-use crate::protocol::{codec, receive, send, ClientMessage, Hello, Ping, ServerMessage};
+use crate::protocol::{codec, receive, send, Hello};
 
 async fn hello<S: Sink<Bytes> + Stream<Item = Result<BytesMut, S::Error>> + Unpin>(
     stream: &mut S,
@@ -57,5 +46,5 @@ pub fn test(host: &str) {
     let rt = tokio::runtime::Runtime::new().unwrap();
 
     // Spawn the root task
-    rt.block_on(test_async(host));
+    rt.block_on(test_async(host)).unwrap();
 }
