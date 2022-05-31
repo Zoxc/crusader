@@ -1,4 +1,9 @@
+use std::error::Error;
+
+use bytes::{Bytes, BytesMut};
+use futures::{Sink, SinkExt, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
+use tokio_util::codec::{length_delimited, LengthDelimitedCodec};
 
 pub const MAGIC: u64 = 0x5372ab82ae7c59cb;
 pub const VERSION: u64 = 0;
@@ -39,4 +44,31 @@ pub enum ClientMessage {
 pub struct Ping {
     pub index: u32,
     pub timestamp: u64,
+}
+
+pub fn codec() -> LengthDelimitedCodec {
+    length_delimited::Builder::new()
+        .little_endian()
+        .length_field_type::<u64>()
+        .new_codec()
+}
+
+pub async fn send<S: Sink<Bytes> + Unpin>(
+    sink: &mut S,
+    value: &impl Serialize,
+) -> Result<(), Box<dyn Error>>
+where
+    S::Error: Error + 'static,
+{
+    Ok(sink.send(bincode::serialize(value)?.into()).await?)
+}
+
+pub async fn receive<S: Stream<Item = Result<BytesMut, E>> + Unpin, T: for<'a> Deserialize<'a>, E>(
+    stream: &mut S,
+) -> Result<T, Box<dyn Error>>
+where
+    E: Error + 'static,
+{
+    let bytes = stream.next().await.ok_or("Expected object")??;
+    Ok(bincode::deserialize(&bytes)?)
 }

@@ -17,10 +17,10 @@ fn main() {
 
     match &cli.command {
         Commands::Test { server } => {
-            library::test::test(&server);
+            library::test2::test(&server);
         }
         Commands::Serve => {
-            library::serve::serve();
+            library::serve2::serve();
         }
     }
 }

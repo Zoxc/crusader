@@ -1,13 +1,19 @@
 use bincode::serialize_into;
+use bytes::{Bytes, BytesMut};
+use futures::{sink::SinkExt, stream::StreamExt, Sink, Stream};
 use plotters::prelude::*;
 use rand::{prelude::StdRng, Rng, SeedableRng};
+use serde::{Deserialize, Serialize};
 use std::{
+    error::Error,
     io::{Cursor, ErrorKind, Write},
-    net::{TcpStream, UdpSocket},
+    net::{SocketAddr, TcpStream, UdpSocket},
     sync::Arc,
     thread,
     time::{Duration, Instant},
 };
+use tokio::net::{self, TcpSocket};
+use tokio_util::codec::{length_delimited, Framed, LengthDelimitedCodec};
 
 use crate::protocol::{ClientMessage, Hello, Ping, ServerMessage};
 
@@ -35,6 +41,88 @@ fn hello(mut stream: &mut TcpStream) {
             server_hello, hello
         );
     }
+}
+/*
+async fn connect_to_server(server: &str) -> Result<(net::TcpSocket, SocketAddr), Box<dyn Error>> {
+    for server in net::lookup_host((server, 30481)).await? {
+        TcpSocket::n
+        if let Some(socket) = net::TcpSocket::connect(self, server).await.ok() {
+            println!("Connected to server {}", server);
+            return (socket, server);
+        }
+    }
+
+    Err("Unable to lookup server")
+}*/
+
+fn codec() -> LengthDelimitedCodec {
+    length_delimited::Builder::new()
+        .little_endian()
+        .length_field_type::<u64>()
+        .new_codec()
+}
+
+async fn send<S: Sink<Bytes> + Unpin>(
+    sink: &mut S,
+    value: &impl Serialize,
+) -> Result<(), Box<dyn Error>>
+where
+    S::Error: Error + 'static,
+{
+    Ok(sink.send(bincode::serialize(value)?.into()).await?)
+}
+
+async fn receive<S: Stream<Item = Result<BytesMut, E>> + Unpin, T: for<'a> Deserialize<'a>, E>(
+    stream: &mut S,
+) -> Result<T, Box<dyn Error>>
+where
+    E: Error + 'static,
+{
+    let bytes = stream.next().await.ok_or("Expected object")??;
+    Ok(bincode::deserialize(&bytes)?)
+}
+
+async fn hello2<S: Sink<Bytes> + Stream<Item = Result<BytesMut, S::Error>> + Unpin>(
+    stream: &mut S,
+) -> Result<(), Box<dyn Error>>
+where
+    S::Error: Error + 'static,
+{
+    let hello = Hello::new();
+
+    send(stream, &hello).await?;
+    let server_hello: Hello = receive(stream).await?;
+
+    if hello != server_hello {
+        panic!(
+            "Mismatched server hello, got {:?}, expected {:?}",
+            server_hello, hello
+        );
+    }
+
+    Ok(())
+}
+
+async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
+    let control = net::TcpStream::connect((server, 30481)).await?;
+
+    let server = control.peer_addr()?;
+
+    println!("Connected to server {}", server);
+
+    let mut control = Framed::new(control, codec());
+
+    hello2(&mut control).await?;
+
+    Ok(())
+}
+
+pub fn test2(host: &str) {
+    // Create the runtime
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    // Spawn the root task
+    rt.block_on(test_async(host));
 }
 
 pub fn test(host: &str) {
