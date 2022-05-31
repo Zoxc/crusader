@@ -1,12 +1,13 @@
 use bytes::BytesMut;
 use parking_lot::Mutex;
 use std::error::Error;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::io::{AsyncRead, ReadBuf};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::{join, time};
 use tokio_util::codec::{Decoder, Framed};
 
@@ -46,7 +47,9 @@ impl Decoder for CountingCodec {
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<usize>, io::Error> {
         if !buf.is_empty() {
-            Ok(Some(buf.len()))
+            let len = buf.len();
+            buf.clear();
+            Ok(Some(len))
         } else {
             Ok(None)
         }
@@ -100,14 +103,14 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
         return Ok(());
     }
 
-    println!("Serving {}, version {}", addr, hello.version);
-
     let mut client = None;
 
     loop {
         let request: ClientMessage = receive(&mut stream).await?;
         match request {
             ClientMessage::NewClient => {
+                println!("Serving {}, version {}", addr, hello.version);
+
                 let client = Arc::new(Client {
                     created: Instant::now(),
                 });
@@ -146,7 +149,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         interval.tick().await;
 
                         let current_time = Instant::now();
-                        let elapsed = start.saturating_duration_since(previous);
+                        let elapsed = current_time.saturating_duration_since(previous);
                         previous = current_time;
 
                         let current = bytes2.load(Ordering::Relaxed);
@@ -165,14 +168,20 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     }
                 });
 
+                println!("Loading started for {}", addr);
+
                 while let Some(size) = raw.next().await {
                     let size = size?;
                     bytes.fetch_add(size as u64, Ordering::Relaxed);
                 }
 
+                println!("Loading complete for {}", addr);
+
                 return Ok(());
             }
             ClientMessage::Done => {
+                println!("Serving complete for {}", addr);
+
                 return Ok(());
             }
         };
@@ -197,6 +206,27 @@ async fn listen(state: Arc<State>, listener: TcpListener) {
     }
 }
 
+async fn pong(addr: SocketAddr) {
+    tokio::spawn(async move {
+        let socket = UdpSocket::bind(addr).await.unwrap();
+
+        let mut buf = [0; 256];
+
+        loop {
+            let (len, src) = socket
+                .recv_from(&mut buf)
+                .await
+                .expect("unable to get udp ping");
+
+            let buf = &mut buf[..len];
+            socket
+                .send_to(buf, &src)
+                .await
+                .expect("unable to reply to udp ping");
+        }
+    });
+}
+
 async fn serve_async() {
     let state = Arc::new(State {
         clients: Mutex::new(HashMap::new()),
@@ -205,10 +235,17 @@ async fn serve_async() {
     let state2 = state.clone();
 
     let port = 30481;
-    let v4 = TcpListener::bind(("0.0.0.0", port)).await.unwrap();
-    let v6 = TcpListener::bind(("[::]", port)).await.unwrap();
+    let v4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))
+        .await
+        .unwrap();
+    let v6 = TcpListener::bind((Ipv6Addr::UNSPECIFIED, port))
+        .await
+        .unwrap();
 
-    join!(listen(state, v4), listen(state2, v6));
+    let pong_v4 = pong(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
+    let pong_v6 = pong(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port));
+
+    join!(listen(state, v4), listen(state2, v6), pong_v4, pong_v6);
 }
 
 pub fn serve() {

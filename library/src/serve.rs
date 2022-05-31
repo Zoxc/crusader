@@ -152,7 +152,6 @@ pub fn serve() {
         loop {
             let (len, src) = socket.recv_from(&mut buf).expect("unable to get udp ping");
 
-            // Redeclare `buf` as slice of the received data and send reverse data back to origin.
             let buf = &mut buf[..len];
             socket
                 .send_to(buf, &src)

@@ -1,5 +1,6 @@
 use bincode::serialize_into;
 use bytes::{Bytes, BytesMut};
+use futures::future::FutureExt;
 use futures::{sink::SinkExt, stream::StreamExt, Sink, Stream};
 use plotters::prelude::*;
 use rand::{prelude::StdRng, Rng, SeedableRng};
