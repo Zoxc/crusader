@@ -36,6 +36,8 @@ enum TestState {
     Grace2,
     LoadFromServer,
     Grace3,
+    LoadFromBoth,
+    Grace4,
     End,
 }
 
@@ -130,6 +132,18 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         TestState::LoadFromClient,
     );
 
+    upload_loaders(
+        id,
+        server,
+        1,
+        loading_streams,
+        grace,
+        data.clone(),
+        bandwidth_interval,
+        state_rx.clone(),
+        TestState::LoadFromBoth,
+    );
+
     let download = download_loaders(
         id,
         server,
@@ -139,6 +153,17 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         setup_start,
         state_rx.clone(),
         TestState::LoadFromServer,
+    );
+
+    let both_download = download_loaders(
+        id,
+        server,
+        loading_streams,
+        grace,
+        bandwidth_interval,
+        setup_start,
+        state_rx.clone(),
+        TestState::LoadFromBoth,
     );
 
     send(&mut control, &ClientMessage::GetMeasurements).await?;
@@ -168,8 +193,6 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
             };
         }
 
-        println!("exiting GetMeasurements");
-
         bandwidth
     });
 
@@ -195,16 +218,22 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     state_tx.send(TestState::Grace1).unwrap();
     time::sleep(grace).await;
 
-    state_tx.send(TestState::LoadFromClient).unwrap();
+    state_tx.send(TestState::LoadFromServer).unwrap();
     time::sleep(load_duration).await;
 
     state_tx.send(TestState::Grace2).unwrap();
     time::sleep(grace).await;
 
-    state_tx.send(TestState::LoadFromServer).unwrap();
+    state_tx.send(TestState::LoadFromClient).unwrap();
     time::sleep(load_duration).await;
 
     state_tx.send(TestState::Grace3).unwrap();
+    time::sleep(grace).await;
+
+    state_tx.send(TestState::LoadFromBoth).unwrap();
+    time::sleep(load_duration).await;
+
+    state_tx.send(TestState::Grace4).unwrap();
     time::sleep(grace).await;
 
     state_tx.send(TestState::End).unwrap();
@@ -220,33 +249,45 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
     let bandwidth = bandwidth.await?;
 
-    let stream_bandwidths: Vec<Vec<_>> = (0..loading_streams)
-        .map(|i| {
-            bandwidth
-                .iter()
-                .filter(|e| e.0.id == i)
-                .map(|e| (e.1, e.2))
-                .collect()
-        })
-        .collect();
+    let get_stream = |group, id| {
+        bandwidth
+            .iter()
+            .filter(|e| e.0.group == group && e.0.id == id)
+            .map(|e| (e.1, e.2))
+            .collect()
+    };
 
-    let stream_bandwidths: Vec<Vec<_>> = stream_bandwidths
-        .into_iter()
-        .map(|stream| to_rates(stream))
-        .collect();
+    let get_upload = |group| -> Vec<Vec<_>> {
+        let streams: Vec<Vec<_>> = (0..loading_streams).map(|i| get_stream(group, i)).collect();
+
+        streams.into_iter().map(|stream| to_rates(stream)).collect()
+    };
 
     let download: Vec<_> = stream::iter(download)
         .then(|data| async move { to_rates(data.await.unwrap()) })
         .collect()
         .await;
 
-    let bandwidth = average(stream_bandwidths, bandwidth_interval);
+    let both_download: Vec<_> = stream::iter(both_download)
+        .then(|data| async move { to_rates(data.await.unwrap()) })
+        .collect()
+        .await;
 
-    let download = average(download, bandwidth_interval);
+    let upload = sum(get_upload(0), bandwidth_interval);
+
+    let both_upload = sum(get_upload(1), bandwidth_interval);
+
+    let upload = sum(vec![upload, both_upload], bandwidth_interval);
+
+    let download = sum(download, bandwidth_interval);
+
+    let both_download = sum(both_download, bandwidth_interval);
+
+    let download = sum(vec![download, both_download], bandwidth_interval);
 
     graph(
         pings,
-        bandwidth,
+        upload,
         download,
         start.duration_since(setup_start).as_secs_f64(),
         duration.as_secs_f64(),
@@ -271,7 +312,7 @@ fn to_rates(stream: Vec<(u64, u64)>) -> Vec<(u64, f64)> {
         .collect()
 }
 
-fn average(input: Vec<Vec<(u64, f64)>>, interval: Duration) -> Vec<(u64, f64)> {
+fn sum(input: Vec<Vec<(u64, f64)>>, interval: Duration) -> Vec<(u64, f64)> {
     let interval = interval.as_micros() as u64;
 
     let bandwidth: Vec<_> = input
@@ -613,11 +654,7 @@ fn graph(
 
     let max_bandwidth = f64::max(max(&download), max(&bandwidth));
 
-    println!("max_bandwidth{:?}", max_bandwidth);
-
-    println!("max_latency{:?}", max_latency);
-
-    let max_latency = max_latency * 2.0;
+    let max_latency = max_latency * 3.0;
 
     let font = (FontFamily::SansSerif, 18);
 
@@ -659,19 +696,19 @@ fn graph(
     pings.sort_by_key(|d| d.0.index);
 
     chart
-        .draw_series(LineSeries::new(
-            pings.iter().map(|(ping, latency)| {
-                (
-                    Duration::from_micros(ping.timestamp).as_secs_f64() - start,
-                    *latency as f64 / 1000.0,
-                )
-            }),
-            &RGBColor(50, 50, 50),
+        .draw_secondary_series(LineSeries::new(
+            download
+                .iter()
+                .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
+            &RGBColor(95, 145, 62),
         ))
         .unwrap()
-        .label("Latency")
+        .label("Download")
         .legend(move |(x, y)| {
-            Rectangle::new([(x, y - 5), (x + 18, y + 3)], RGBColor(50, 50, 50).filled())
+            Rectangle::new(
+                [(x, y - 5), (x + 18, y + 3)],
+                RGBColor(95, 145, 62).filled(),
+            )
         });
 
     chart
@@ -691,19 +728,19 @@ fn graph(
         });
 
     chart
-        .draw_secondary_series(LineSeries::new(
-            download
-                .iter()
-                .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
-            &RGBColor(95, 145, 62),
+        .draw_series(LineSeries::new(
+            pings.iter().map(|(ping, latency)| {
+                (
+                    Duration::from_micros(ping.timestamp).as_secs_f64() - start,
+                    *latency as f64 / 1000.0,
+                )
+            }),
+            &RGBColor(50, 50, 50),
         ))
         .unwrap()
-        .label("Download")
+        .label("Latency")
         .legend(move |(x, y)| {
-            Rectangle::new(
-                [(x, y - 5), (x + 18, y + 3)],
-                RGBColor(95, 145, 62).filled(),
-            )
+            Rectangle::new([(x, y - 5), (x + 18, y + 3)], RGBColor(50, 50, 50).filled())
         });
 
     chart
