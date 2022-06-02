@@ -92,7 +92,7 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
     let grace = 2;
     let load_duration = 9;
-    let interval_ms = 1000;
+    let interval_ms = 10;
     let secs = load_duration * 1 + grace * 2;
     let duration = Duration::from_secs(secs);
 
@@ -178,7 +178,7 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
             let latency = (current.as_micros() as u64).saturating_sub(ping.timestamp);
 
-            println!("Ping {}", latency as f64 / 1000.0);
+            //println!("Ping {}", latency as f64 / 1000.0);
 
             storage.push((ping, latency));
         }
@@ -217,31 +217,107 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     let mut rx = FramedRead::new(rx, codec());
     let mut tx = FramedWrite::new(tx, codec());
 
-    tokio::spawn(async move {
+    let bandwidth = tokio::spawn(async move {
+        let mut bandwidth = Vec::new();
+
         loop {
             let reply: ServerMessage = receive(&mut rx).await.unwrap();
             match reply {
                 ServerMessage::Measure {
-                    time: _,
+                    time,
                     duration,
                     bytes,
                 } => {
                     let mbits = (bytes as f64 * 8.0) / 1000.0 / 1000.0;
                     let rate = mbits / Duration::from_micros(duration).as_secs_f64();
-                    println!("Rate: {:>10.2} Mbps, Bytes: {}", rate, bytes);
+                    //println!("Rate: {:>10.2} Mbps, Bytes: {}", rate, bytes);
+                    bandwidth.push((time, rate));
                 }
                 ServerMessage::MeasurementsDone => break,
                 _ => panic!("Unexpected message {:?}", reply),
             };
         }
+
+        println!("exiting GetMeasurements");
+
+        bandwidth
     });
 
     sender.await?;
-    receiver.await?;
+    let pings = receiver.await?;
 
     send(&mut tx, &ClientMessage::Done).await?;
 
+    let bandwidth = bandwidth.await?;
+
+    graph(pings, bandwidth, secs);
+
     Ok(())
+}
+
+fn graph(mut pings: Vec<(Ping, u64)>, bandwidth: Vec<(u64, f64)>, secs: u64) {
+    use plotters::prelude::*;
+
+    //println!("band{:#?}", bandwidth);
+
+    let root = BitMapBackend::new("plot.png", (1024, 768)).into_drawing_area();
+
+    root.fill(&WHITE).unwrap();
+
+    let max_latency = pings.iter().map(|d| d.1).max().unwrap_or_default() as f64 / 1000.0;
+
+    let max_bandwidth = bandwidth.iter().map(|d| d.1).fold(0. / 0., f64::max);
+
+    let mut chart = ChartBuilder::on(&root)
+        .margin(6)
+        .caption("Latency under load", ("sans-serif", 30))
+        .set_label_area_size(LabelAreaPosition::Left, 60)
+        .set_label_area_size(LabelAreaPosition::Right, 60)
+        .set_label_area_size(LabelAreaPosition::Bottom, 40)
+        .build_cartesian_2d(0.0..(secs as f64), 0.0..max_latency)
+        .unwrap()
+        .set_secondary_coord(0.0..(secs as f64), 0.0..max_bandwidth);
+
+    chart
+        .configure_mesh()
+        .disable_x_mesh()
+        .disable_y_mesh()
+        .x_labels(30)
+        .y_desc("Latency (ms)")
+        .x_desc("Elapsed time (seconds)")
+        .draw()
+        .unwrap();
+    chart
+        .configure_secondary_axes()
+        .y_desc("Bandwidth (Mbps)")
+        .draw()
+        .unwrap();
+
+    pings.sort_by_key(|d| d.0.index);
+
+    chart
+        .draw_series(LineSeries::new(
+            pings.iter().map(|(ping, latency)| {
+                (
+                    ping.timestamp as f64 / (1000.0 * 1000.0),
+                    *latency as f64 / 1000.0,
+                )
+            }),
+            &BLUE,
+        ))
+        .unwrap();
+
+    chart
+        .draw_secondary_series(LineSeries::new(
+            bandwidth
+                .iter()
+                .map(|(time, rate)| (*time as f64 / (1000.0 * 1000.0), *rate)),
+            &RED,
+        ))
+        .unwrap();
+
+    // To avoid the IO failure being ignored silently, we manually call the present function
+    root.present().expect("Unable to write result to file, please make sure 'plotters-doc-data' dir exists under current dir");
 }
 
 pub fn test(host: &str) {

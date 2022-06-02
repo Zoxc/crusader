@@ -10,6 +10,7 @@ use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::io::{AsyncRead, ReadBuf};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::task::yield_now;
 use tokio::{join, time};
 use tokio_util::codec::{Decoder, Framed};
 
@@ -152,7 +153,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     select! {
                         request = request => {
                             match request? {
-                                ClientMessage::Done => return Ok(()),
+                                ClientMessage::Done => None,
                                 _ => {
                                     Err("Closed early")?
                                 }
@@ -164,6 +165,9 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 if let Some(message) = message {
                     send(&mut stream, &message).await?;
+                } else {
+                    send(&mut stream, &ServerMessage::MeasurementsDone).await?;
+                    return Ok(());
                 }
             },
             ClientMessage::LoadFromClient => {
@@ -172,7 +176,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 let start = Instant::now();
 
-                let interval = 1000;
+                let interval = 10;
 
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes2 = bytes.clone();
@@ -208,9 +212,9 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                         let mbits = (delta as f64 * 8.0) / 1000.0 / 1000.0;
                         let rate = mbits / elapsed.as_secs_f64();
-                        println!("Rate: {:>10.2} Mbps, Bytes: {}", rate, delta);
+                        //println!("Rate: {:>10.2} Mbps, Bytes: {}", rate, delta);
 
-                        if start.elapsed() > Duration::from_secs(8) {
+                        if start.elapsed() > Duration::from_secs(40) {
                             break;
                         }
                     }
@@ -221,6 +225,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 while let Some(size) = raw.next().await {
                     let size = size?;
                     bytes.fetch_add(size as u64, Ordering::Relaxed);
+                    yield_now().await;
                 }
 
                 println!("Loading complete for {}", addr);

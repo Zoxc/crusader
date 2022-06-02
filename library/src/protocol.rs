@@ -44,7 +44,7 @@ pub enum ClientMessage {
     GetMeasurements,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Ping {
     pub index: u32,
     pub timestamp: u64,
