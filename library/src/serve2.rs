@@ -4,7 +4,7 @@ use parking_lot::Mutex;
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::io::{AsyncRead, ReadBuf};
@@ -82,6 +82,7 @@ impl Encoder<BytesMut> for CountingCodec {
 struct Client {
     created: Instant,
     message: UnboundedSender<ServerMessage>,
+    bandwidth_interval: Duration,
 }
 
 struct State {
@@ -113,7 +114,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
     loop {
         let request: ClientMessage = receive(&mut stream).await?;
         match request {
-            ClientMessage::NewClient => {
+            ClientMessage::NewClient { bandwidth_interval } => {
                 println!("Serving {}, version {}", addr, hello.version);
 
                 let (tx, rx) = unbounded_channel();
@@ -121,6 +122,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 receiver = Some(rx);
 
                 let client = Arc::new(Client {
+                    bandwidth_interval: Duration::from_micros(bandwidth_interval),
                     created: Instant::now(),
                     message: tx,
                 });
@@ -170,53 +172,38 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     return Ok(());
                 }
             },
-            ClientMessage::LoadFromClient => {
+            ClientMessage::LoadFromClient(test_stream) => {
+                let client = client.ok_or("No associated client")?;
+
                 let mut raw =
                     Framed::with_capacity(stream.into_inner(), CountingCodec, 1024 * 1024);
 
-                let start = Instant::now();
-
-                let interval = 10;
-
                 let bytes = Arc::new(AtomicU64::new(0));
-                let bytes2 = bytes.clone();
+                let bytes_ = bytes.clone();
+                let done = Arc::new(AtomicBool::new(false));
+                let done_ = done.clone();
 
-                let client = client.clone();
                 tokio::spawn(async move {
-                    let mut interval = time::interval(Duration::from_millis(interval));
-                    let mut previous = start;
-                    let mut data = 0;
+                    let mut interval = time::interval(client.bandwidth_interval);
                     loop {
                         interval.tick().await;
 
                         let current_time = Instant::now();
-                        let elapsed = current_time.saturating_duration_since(previous);
-                        previous = current_time;
+                        let current_bytes = bytes_.load(Ordering::Relaxed);
 
-                        let current = bytes2.load(Ordering::Relaxed);
-
-                        let delta = current - data;
-
-                        data = current;
-
-                        if let Some(client) = &client {
-                            client
-                                .message
-                                .send(ServerMessage::Measure {
-                                    time: current_time.duration_since(start).as_micros() as u64,
-                                    duration: elapsed.as_micros() as u64,
-                                    bytes: delta,
-                                })
-                                .ok();
-                        }
-
-                        let mbits = (delta as f64 * 8.0) / 1000.0 / 1000.0;
-                        let rate = mbits / elapsed.as_secs_f64();
-                        //println!("Rate: {:>10.2} Mbps, Bytes: {}", rate, delta);
-
-                        if start.elapsed() > Duration::from_secs(40) {
+                        if done_.load(Ordering::Acquire) {
                             break;
                         }
+
+                        client
+                            .message
+                            .send(ServerMessage::Measure {
+                                stream: test_stream,
+                                time: current_time.duration_since(client.created).as_micros()
+                                    as u64,
+                                bytes: current_bytes,
+                            })
+                            .ok();
                     }
                 });
 
@@ -227,6 +214,8 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     bytes.fetch_add(size as u64, Ordering::Relaxed);
                     yield_now().await;
                 }
+
+                done.store(true, Ordering::Release);
 
                 println!("Loading complete for {}", addr);
 

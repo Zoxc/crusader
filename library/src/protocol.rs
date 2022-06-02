@@ -23,13 +23,18 @@ impl Hello {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct TestStream {
+    pub group: u32,
+    pub id: u32,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ServerMessage {
     NewClient(u64),
-    WaitingOnLoad,
     Measure {
+        stream: TestStream,
         time: u64,
-        duration: u64,
         bytes: u64,
     },
     MeasurementsDone,
@@ -37,10 +42,10 @@ pub enum ServerMessage {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ClientMessage {
-    NewClient,
+    NewClient { bandwidth_interval: u64 },
     Associate(u64),
     Done,
-    LoadFromClient,
+    LoadFromClient(TestStream),
     GetMeasurements,
 }
 
