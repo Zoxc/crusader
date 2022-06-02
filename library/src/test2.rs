@@ -1,9 +1,11 @@
 use bytes::{Bytes, BytesMut};
 use futures::future::FutureExt;
 use futures::{pin_mut, select, Sink, Stream};
+use futures::{stream, StreamExt};
 use rand::prelude::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{
     error::Error,
     io::Cursor,
@@ -24,6 +26,7 @@ use tokio_util::codec::{Framed, FramedRead, FramedWrite, LengthDelimitedCodec};
 use crate::protocol::{
     codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
 };
+use crate::serve2::CountingCodec;
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 enum TestState {
@@ -31,6 +34,8 @@ enum TestState {
     Grace1,
     LoadFromClient,
     Grace2,
+    LoadFromServer,
+    Grace3,
     End,
 }
 
@@ -106,8 +111,8 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
     let loading_streams: u32 = 16;
 
-    let grace = Duration::from_secs(2);
-    let load_duration = Duration::from_secs(9);
+    let grace = Duration::from_secs(1);
+    let load_duration = Duration::from_secs(2);
     let ping_interval = Duration::from_millis(10);
     let estimated_duration = load_duration * 1 + grace * 2;
 
@@ -123,6 +128,17 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         bandwidth_interval,
         state_rx.clone(),
         TestState::LoadFromClient,
+    );
+
+    let download = download_loaders(
+        id,
+        server,
+        loading_streams,
+        grace,
+        bandwidth_interval,
+        setup_start,
+        state_rx.clone(),
+        TestState::LoadFromServer,
     );
 
     send(&mut control, &ClientMessage::GetMeasurements).await?;
@@ -174,25 +190,26 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
     time::sleep(Duration::from_millis(100)).await;
 
-    // Main logic
     let start = Instant::now();
 
     state_tx.send(TestState::Grace1).unwrap();
-
     time::sleep(grace).await;
 
     state_tx.send(TestState::LoadFromClient).unwrap();
-
     time::sleep(load_duration).await;
 
     state_tx.send(TestState::Grace2).unwrap();
+    time::sleep(grace).await;
 
+    state_tx.send(TestState::LoadFromServer).unwrap();
+    time::sleep(load_duration).await;
+
+    state_tx.send(TestState::Grace3).unwrap();
     time::sleep(grace).await;
 
     state_tx.send(TestState::End).unwrap();
 
     let duration = start.elapsed();
-    // End
 
     ping_send.await?;
     let pings = ping_recv.await?;
@@ -215,26 +232,49 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
     let stream_bandwidths: Vec<Vec<_>> = stream_bandwidths
         .into_iter()
-        .map(|stream| {
-            (0..stream.len())
-                .map(|i| {
-                    let rate = if i > 0 {
-                        let bytes = stream[i].1 - stream[i - 1].1;
-                        let duration = Duration::from_micros(stream[i].0 - stream[i - 1].0);
-                        let mbits = (bytes as f64 * 8.0) / (1000.0 * 1000.0);
-                        mbits / duration.as_secs_f64()
-                    } else {
-                        0.0
-                    };
-                    (stream[i].0, rate)
-                })
-                .collect()
-        })
+        .map(|stream| to_rates(stream))
         .collect();
 
-    let interval = bandwidth_interval.as_micros() as u64;
+    let download: Vec<_> = stream::iter(download)
+        .then(|data| async move { to_rates(data.await.unwrap()) })
+        .collect()
+        .await;
 
-    let bandwidth: Vec<_> = stream_bandwidths
+    let bandwidth = average(stream_bandwidths, bandwidth_interval);
+
+    let download = average(download, bandwidth_interval);
+
+    graph(
+        pings,
+        bandwidth,
+        download,
+        start.duration_since(setup_start).as_secs_f64(),
+        duration.as_secs_f64(),
+    );
+
+    Ok(())
+}
+
+fn to_rates(stream: Vec<(u64, u64)>) -> Vec<(u64, f64)> {
+    (0..stream.len())
+        .map(|i| {
+            let rate = if i > 0 {
+                let bytes = stream[i].1 - stream[i - 1].1;
+                let duration = Duration::from_micros(stream[i].0 - stream[i - 1].0);
+                let mbits = (bytes as f64 * 8.0) / (1000.0 * 1000.0);
+                mbits / duration.as_secs_f64()
+            } else {
+                0.0
+            };
+            (stream[i].0, rate)
+        })
+        .collect()
+}
+
+fn average(input: Vec<Vec<(u64, f64)>>, interval: Duration) -> Vec<(u64, f64)> {
+    let interval = interval.as_micros() as u64;
+
+    let bandwidth: Vec<_> = input
         .into_iter()
         .map(|stream| interpolate(stream, interval))
         .collect();
@@ -251,8 +291,6 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         .max()
         .unwrap_or(0);
 
-    println!("111 min {min}, max {max}");
-
     let mut data = Vec::new();
 
     for point in (min..=max).step_by(interval as usize) {
@@ -268,14 +306,7 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         data.push((point, value));
     }
 
-    graph(
-        pings,
-        data,
-        start.duration_since(setup_start).as_secs_f64(),
-        duration.as_secs_f64(),
-    );
-
-    Ok(())
+    data
 }
 
 fn interpolate(input: Vec<(u64, f64)>, interval: u64) -> Vec<(u64, f64)> {
@@ -285,8 +316,6 @@ fn interpolate(input: Vec<(u64, f64)>, interval: u64) -> Vec<(u64, f64)> {
 
     let min = input.first().unwrap().0 / interval * interval;
     let max = (input.first().unwrap().0 / interval + interval - 1) * interval;
-
-    println!("min {min}, max {max}");
 
     let mut data = Vec::new();
 
@@ -386,6 +415,88 @@ fn upload_loaders(
     }
 }
 
+fn download_loaders(
+    id: u64,
+    server: SocketAddr,
+    count: u32,
+    grace: Duration,
+    bandwidth_interval: Duration,
+    setup_start: Instant,
+    state_rx: watch::Receiver<TestState>,
+    state: TestState,
+) -> Vec<JoinHandle<Vec<(u64, u64)>>> {
+    let loaders = setup_loaders(id, server, count);
+
+    loaders
+        .into_iter()
+        .map(|loader| {
+            let mut state_rx = state_rx.clone();
+
+            tokio::spawn(async move {
+                let stream = loader.await.unwrap();
+
+                let (rx, tx) = stream.into_inner().into_split();
+                let mut tx = FramedWrite::new(tx, codec());
+                let mut rx = FramedRead::with_capacity(rx, CountingCodec, 512 * 1024);
+
+                wait_for_state(&mut state_rx, state).await;
+
+                send(&mut tx, &ClientMessage::LoadFromServer).await.unwrap();
+
+                tokio::spawn(async move {
+                    loop {
+                        if *state_rx.borrow_and_update() != state {
+                            break;
+                        }
+                        state_rx.changed().await.unwrap();
+
+                        send(&mut tx, &ClientMessage::Done).await.unwrap();
+                    }
+                });
+
+                let bytes = Arc::new(AtomicU64::new(0));
+                let bytes_ = bytes.clone();
+
+                let done = Arc::new(AtomicBool::new(false));
+                let done_ = done.clone();
+
+                let measures = tokio::spawn(async move {
+                    let mut measures = Vec::new();
+                    let mut interval = time::interval(bandwidth_interval);
+                    loop {
+                        interval.tick().await;
+
+                        let current_time = Instant::now();
+                        let current_bytes = bytes_.load(Ordering::Acquire);
+
+                        if done_.load(Ordering::Acquire) {
+                            break;
+                        }
+
+                        measures.push((
+                            current_time.duration_since(setup_start).as_micros() as u64,
+                            current_bytes,
+                        ));
+                    }
+                    measures
+                });
+
+                while let Some(size) = rx.next().await {
+                    let size = size.unwrap();
+                    bytes.fetch_add(size as u64, Ordering::Release);
+                    yield_now().await;
+                }
+
+                time::sleep(grace).await;
+
+                done.store(true, Ordering::Release);
+
+                measures.await.unwrap()
+            })
+        })
+        .collect()
+}
+
 async fn wait_for_state(state_rx: &mut watch::Receiver<TestState>, state: TestState) {
     loop {
         if *state_rx.borrow_and_update() == state {
@@ -473,7 +584,13 @@ async fn ping_recv(
     storage
 }
 
-fn graph(mut pings: Vec<(Ping, u64)>, bandwidth: Vec<(u64, f64)>, start: f64, duration: f64) {
+fn graph(
+    mut pings: Vec<(Ping, u64)>,
+    bandwidth: Vec<(u64, f64)>,
+    download: Vec<(u64, f64)>,
+    start: f64,
+    duration: f64,
+) {
     use plotters::prelude::*;
 
     //println!("band{:#?}", bandwidth);
@@ -484,37 +601,57 @@ fn graph(mut pings: Vec<(Ping, u64)>, bandwidth: Vec<(u64, f64)>, start: f64, du
 
     let max_latency = pings.iter().map(|d| d.1).max().unwrap_or(100) as f64 / 1000.0;
 
-    let mut max_bandwidth = bandwidth.iter().map(|d| d.1).fold(0. / 0., f64::max);
+    let max = |input: &Vec<(u64, f64)>| {
+        let mut max = input.iter().map(|d| d.1).fold(0. / 0., f64::max);
 
-    if max_bandwidth.is_nan() {
-        max_bandwidth = 100.0;
-    }
+        if max.is_nan() {
+            max = 100.0;
+        }
+
+        max
+    };
+
+    let max_bandwidth = f64::max(max(&download), max(&bandwidth));
 
     println!("max_bandwidth{:?}", max_bandwidth);
 
     println!("max_latency{:?}", max_latency);
 
+    let max_latency = max_latency * 2.0;
+
+    let font = (FontFamily::SansSerif, 18);
+
     let mut chart = ChartBuilder::on(&root)
         .margin(6)
-        .caption("Latency under load", ("sans-serif", 30))
-        .set_label_area_size(LabelAreaPosition::Left, 60)
-        .set_label_area_size(LabelAreaPosition::Right, 60)
-        .set_label_area_size(LabelAreaPosition::Bottom, 40)
+        .caption("Latency under load", (FontFamily::SansSerif, 20))
+        .set_label_area_size(LabelAreaPosition::Left, 100)
+        .set_label_area_size(LabelAreaPosition::Right, 100)
+        .set_label_area_size(LabelAreaPosition::Bottom, 50)
         .build_cartesian_2d(0.0..duration, 0.0..max_latency)
         .unwrap()
         .set_secondary_coord(0.0..duration, 0.0..max_bandwidth);
 
     chart
+        .plotting_area()
+        .fill(&RGBColor(248, 248, 248))
+        .unwrap();
+
+    chart
         .configure_mesh()
         .disable_x_mesh()
         .disable_y_mesh()
-        .x_labels(30)
+        .x_labels(20)
+        .y_labels(10)
+        .x_label_style(font)
+        .y_label_style(font)
         .y_desc("Latency (ms)")
         .x_desc("Elapsed time (seconds)")
         .draw()
         .unwrap();
     chart
         .configure_secondary_axes()
+        .label_style(font)
+        .y_labels(10)
         .y_desc("Bandwidth (Mbps)")
         .draw()
         .unwrap();
@@ -529,17 +666,52 @@ fn graph(mut pings: Vec<(Ping, u64)>, bandwidth: Vec<(u64, f64)>, start: f64, du
                     *latency as f64 / 1000.0,
                 )
             }),
-            &BLUE,
+            &RGBColor(50, 50, 50),
         ))
-        .unwrap();
+        .unwrap()
+        .label("Latency")
+        .legend(move |(x, y)| {
+            Rectangle::new([(x, y - 5), (x + 18, y + 3)], RGBColor(50, 50, 50).filled())
+        });
 
     chart
         .draw_secondary_series(LineSeries::new(
             bandwidth
                 .iter()
                 .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
-            &RED,
+            &RGBColor(37, 83, 169),
         ))
+        .unwrap()
+        .label("Upload")
+        .legend(move |(x, y)| {
+            Rectangle::new(
+                [(x, y - 5), (x + 18, y + 3)],
+                RGBColor(37, 83, 169).filled(),
+            )
+        });
+
+    chart
+        .draw_secondary_series(LineSeries::new(
+            download
+                .iter()
+                .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
+            &RGBColor(95, 145, 62),
+        ))
+        .unwrap()
+        .label("Download")
+        .legend(move |(x, y)| {
+            Rectangle::new(
+                [(x, y - 5), (x + 18, y + 3)],
+                RGBColor(95, 145, 62).filled(),
+            )
+        });
+
+    chart
+        .configure_series_labels()
+        .background_style(&WHITE.mix(0.8))
+        .label_font(font)
+        .border_style(&BLACK)
+        .draw()
         .unwrap();
 
     // To avoid the IO failure being ignored silently, we manually call the present function

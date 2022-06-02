@@ -49,6 +49,7 @@ pub enum ClientMessage {
         stream: TestStream,
         bandwidth_interval: u64,
     },
+    LoadFromServer,
     GetMeasurements,
 }
 

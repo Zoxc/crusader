@@ -7,12 +7,13 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use std::{collections::HashMap, sync::Arc, time::Instant};
+use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncRead, ReadBuf};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::yield_now;
 use tokio::{join, time};
-use tokio_util::codec::{Decoder, Framed};
+use tokio_util::codec::{Decoder, FramedRead, FramedWrite};
 
 use crate::protocol::{self, codec, receive, send, ClientMessage, ServerMessage};
 
@@ -85,19 +86,22 @@ struct Client {
 }
 
 struct State {
+    dummy_data: Vec<u8>,
     clients: Mutex<HashMap<u64, Arc<Client>>>,
 }
 
 async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Error>> {
     let addr = stream.peer_addr()?;
 
-    let mut stream = Framed::new(stream, codec());
+    let (rx, tx) = stream.into_split();
+    let mut stream_rx = FramedRead::new(rx, codec());
+    let mut stream_tx = FramedWrite::new(tx, codec());
 
     let hello = protocol::Hello::new();
 
-    let client_hello: protocol::Hello = receive(&mut stream).await?;
+    let client_hello: protocol::Hello = receive(&mut stream_rx).await?;
 
-    send(&mut stream, &hello).await?;
+    send(&mut stream_tx, &hello).await?;
 
     if hello != client_hello {
         println!(
@@ -111,7 +115,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
     let mut receiver = None;
 
     loop {
-        let request: ClientMessage = receive(&mut stream).await?;
+        let request: ClientMessage = receive(&mut stream_rx).await?;
         match request {
             ClientMessage::NewClient => {
                 println!("Serving {}, version {}", addr, hello.version);
@@ -126,7 +130,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 });
                 let id = Arc::as_ptr(&client) as u64;
                 state.clients.lock().insert(id, client);
-                send(&mut stream, &ServerMessage::NewClient(id)).await?;
+                send(&mut stream_tx, &ServerMessage::NewClient(id)).await?;
             }
             ClientMessage::Associate(id) => {
                 client = Some(
@@ -140,7 +144,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             }
             ClientMessage::GetMeasurements => loop {
                 let message = {
-                    let request = receive::<_, ClientMessage, _>(&mut stream).fuse();
+                    let request = receive::<_, ClientMessage, _>(&mut stream_rx).fuse();
                     pin_mut!(request);
 
                     let message = receiver
@@ -159,18 +163,61 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                                 }
                             }
                         },
-                        message = message =>  message,
+                        message = message => message,
                     }
                 };
 
                 if let Some(message) = message {
-                    send(&mut stream, &message).await?;
+                    send(&mut stream_tx, &message).await?;
                 } else {
-                    send(&mut stream, &ServerMessage::MeasurementsDone).await?;
+                    send(&mut stream_tx, &ServerMessage::MeasurementsDone).await?;
                     println!("Serving complete for {}", addr);
                     return Ok(());
                 }
             },
+            ClientMessage::LoadFromServer => {
+                let raw = stream_tx.get_mut();
+
+                let done = Arc::new(AtomicBool::new(false));
+                let done_ = done.clone();
+
+                let complete = async move {
+                    let request = receive::<_, ClientMessage, _>(&mut stream_rx)
+                        .await
+                        .map_err(|err| err.to_string())?;
+
+                    match request {
+                        ClientMessage::Done => (),
+                        _ => Err("Closed early")?,
+                    }
+
+                    done.store(true, Ordering::Release);
+
+                    Ok::<(), String>(())
+                };
+
+                let write = async move {
+                    loop {
+                        raw.write(state.dummy_data.as_ref())
+                            .await
+                            .map_err(|err| err.to_string())?;
+
+                        if done_.load(Ordering::Acquire) {
+                            break;
+                        }
+
+                        yield_now().await;
+                    }
+                    Ok::<(), String>(())
+                };
+
+                let (a, b) = join!(complete, write);
+
+                a?;
+                b?;
+
+                return Ok(());
+            }
             ClientMessage::LoadFromClient {
                 stream: test_stream,
                 bandwidth_interval,
@@ -178,7 +225,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 let client = client.ok_or("No associated client")?;
 
                 let mut raw =
-                    Framed::with_capacity(stream.into_inner(), CountingCodec, 1024 * 1024);
+                    FramedRead::with_capacity(stream_rx.into_inner(), CountingCodec, 512 * 1024);
 
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes_ = bytes.clone();
@@ -191,7 +238,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         interval.tick().await;
 
                         let current_time = Instant::now();
-                        let current_bytes = bytes_.load(Ordering::Relaxed);
+                        let current_bytes = bytes_.load(Ordering::Acquire);
 
                         if done_.load(Ordering::Acquire) {
                             break;
@@ -211,7 +258,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 while let Some(size) = raw.next().await {
                     let size = size?;
-                    bytes.fetch_add(size as u64, Ordering::Relaxed);
+                    bytes.fetch_add(size as u64, Ordering::Release);
                     yield_now().await;
                 }
 
@@ -269,6 +316,7 @@ async fn pong(addr: SocketAddr) {
 
 async fn serve_async() {
     let state = Arc::new(State {
+        dummy_data: crate::test2::data(),
         clients: Mutex::new(HashMap::new()),
     });
 
