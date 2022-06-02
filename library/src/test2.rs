@@ -1,7 +1,6 @@
 use bytes::{Bytes, BytesMut};
 use futures::future::FutureExt;
-use futures::StreamExt;
-use futures::{pin_mut, select, stream, Sink, Stream};
+use futures::{pin_mut, select, Sink, Stream};
 use rand::prelude::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -15,18 +14,18 @@ use std::{
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::watch;
-use tokio::task::yield_now;
+use tokio::task::{yield_now, JoinHandle};
 use tokio::{
     net::{self},
     time,
 };
-use tokio_util::codec::{Framed, FramedRead, FramedWrite};
+use tokio_util::codec::{Framed, FramedRead, FramedWrite, LengthDelimitedCodec};
 
 use crate::protocol::{
     codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
 };
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 enum TestState {
     Setup,
     Grace1,
@@ -112,64 +111,19 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     let ping_interval = Duration::from_millis(10);
     let estimated_duration = load_duration * 1 + grace * 2;
 
-    let loaders: Vec<_> = stream::iter(0..loading_streams)
-        .then(|stream_id| {
-            let data = data.clone();
-            async move {
-                let stream = TcpStream::connect(server)
-                    .await
-                    .expect("unable to bind TCP socket");
-                let mut stream = Framed::new(stream, codec());
-                hello(&mut stream).await.unwrap();
-                send(&mut stream, &ClientMessage::Associate(id))
-                    .await
-                    .unwrap();
-                send(
-                    &mut stream,
-                    &ClientMessage::LoadFromClient {
-                        stream: TestStream {
-                            group: 0,
-                            id: stream_id,
-                        },
-                        bandwidth_interval: bandwidth_interval.as_micros() as u64,
-                    },
-                )
-                .await
-                .unwrap();
-                (data, stream)
-            }
-        })
-        .collect()
-        .await;
-
     let (state_tx, state_rx) = watch::channel(TestState::Setup);
 
-    let loaders: Vec<_> = loaders
-        .into_iter()
-        .map(|(data, stream)| {
-            let mut state_rx = state_rx.clone();
-            tokio::spawn(async move {
-                let mut raw = stream.into_inner();
-
-                wait_for_state(&mut state_rx, TestState::LoadFromClient).await;
-                println!("Loading");
-                let load_start = Instant::now();
-
-                loop {
-                    raw.write(data.as_ref()).await.unwrap();
-
-                    if *state_rx.borrow() != TestState::LoadFromClient {
-                        break;
-                    }
-
-                    yield_now().await;
-                }
-                println!("Loading done after {:?}", load_start.elapsed());
-
-                time::sleep(grace).await;
-            })
-        })
-        .collect();
+    upload_loaders(
+        id,
+        server,
+        0,
+        loading_streams,
+        grace,
+        data.clone(),
+        bandwidth_interval,
+        state_rx.clone(),
+        TestState::LoadFromClient,
+    );
 
     send(&mut control, &ClientMessage::GetMeasurements).await?;
 
@@ -240,12 +194,12 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     let duration = start.elapsed();
     // End
 
-    println!("Test duration {:?}", duration);
-
     ping_send.await?;
     let pings = ping_recv.await?;
 
     send(&mut tx, &ClientMessage::Done).await?;
+
+    println!("Test duration {:?}", duration);
 
     let bandwidth = bandwidth.await?;
 
@@ -356,6 +310,80 @@ fn interpolate(input: Vec<(u64, f64)>, interval: u64) -> Vec<(u64, f64)> {
     }
 
     data
+}
+
+fn setup_loaders(
+    id: u64,
+    server: SocketAddr,
+    count: u32,
+) -> Vec<JoinHandle<Framed<TcpStream, LengthDelimitedCodec>>> {
+    (0..count)
+        .map(|_| {
+            tokio::spawn(async move {
+                let stream = TcpStream::connect(server)
+                    .await
+                    .expect("unable to bind TCP socket");
+                let mut stream = Framed::new(stream, codec());
+                hello(&mut stream).await.unwrap();
+                send(&mut stream, &ClientMessage::Associate(id))
+                    .await
+                    .unwrap();
+
+                stream
+            })
+        })
+        .collect()
+}
+
+fn upload_loaders(
+    id: u64,
+    server: SocketAddr,
+    group: u32,
+    count: u32,
+    grace: Duration,
+    data: Arc<Vec<u8>>,
+    bandwidth_interval: Duration,
+    state_rx: watch::Receiver<TestState>,
+    state: TestState,
+) {
+    let loaders = setup_loaders(id, server, count);
+
+    for (i, loader) in loaders.into_iter().enumerate() {
+        let mut state_rx = state_rx.clone();
+        let data = data.clone();
+        tokio::spawn(async move {
+            let mut stream = loader.await.unwrap();
+
+            send(
+                &mut stream,
+                &ClientMessage::LoadFromClient {
+                    stream: TestStream {
+                        group,
+                        id: i as u32,
+                    },
+                    bandwidth_interval: bandwidth_interval.as_micros() as u64,
+                },
+            )
+            .await
+            .unwrap();
+
+            let mut raw = stream.into_inner();
+
+            wait_for_state(&mut state_rx, state).await;
+
+            loop {
+                raw.write(data.as_ref()).await.unwrap();
+
+                if *state_rx.borrow() != state {
+                    break;
+                }
+
+                yield_now().await;
+            }
+
+            time::sleep(grace).await;
+        });
+    }
 }
 
 async fn wait_for_state(state_rx: &mut watch::Receiver<TestState>, state: TestState) {

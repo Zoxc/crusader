@@ -167,6 +167,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     send(&mut stream, &message).await?;
                 } else {
                     send(&mut stream, &ServerMessage::MeasurementsDone).await?;
+                    println!("Serving complete for {}", addr);
                     return Ok(());
                 }
             },
@@ -208,8 +209,6 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     }
                 });
 
-                println!("Loading started for {}", addr);
-
                 while let Some(size) = raw.next().await {
                     let size = size?;
                     bytes.fetch_add(size as u64, Ordering::Relaxed);
@@ -217,8 +216,6 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 }
 
                 done.store(true, Ordering::Release);
-
-                println!("Loading complete for {}", addr);
 
                 return Ok(());
             }
