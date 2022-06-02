@@ -82,7 +82,6 @@ impl Encoder<BytesMut> for CountingCodec {
 struct Client {
     created: Instant,
     message: UnboundedSender<ServerMessage>,
-    bandwidth_interval: Duration,
 }
 
 struct State {
@@ -114,7 +113,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
     loop {
         let request: ClientMessage = receive(&mut stream).await?;
         match request {
-            ClientMessage::NewClient { bandwidth_interval } => {
+            ClientMessage::NewClient => {
                 println!("Serving {}, version {}", addr, hello.version);
 
                 let (tx, rx) = unbounded_channel();
@@ -122,7 +121,6 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 receiver = Some(rx);
 
                 let client = Arc::new(Client {
-                    bandwidth_interval: Duration::from_micros(bandwidth_interval),
                     created: Instant::now(),
                     message: tx,
                 });
@@ -172,7 +170,10 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     return Ok(());
                 }
             },
-            ClientMessage::LoadFromClient(test_stream) => {
+            ClientMessage::LoadFromClient {
+                stream: test_stream,
+                bandwidth_interval,
+            } => {
                 let client = client.ok_or("No associated client")?;
 
                 let mut raw =
@@ -184,7 +185,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 let done_ = done.clone();
 
                 tokio::spawn(async move {
-                    let mut interval = time::interval(client.bandwidth_interval);
+                    let mut interval = time::interval(Duration::from_micros(bandwidth_interval));
                     loop {
                         interval.tick().await;
 

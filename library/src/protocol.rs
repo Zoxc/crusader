@@ -42,10 +42,13 @@ pub enum ServerMessage {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ClientMessage {
-    NewClient { bandwidth_interval: u64 },
+    NewClient,
     Associate(u64),
     Done,
-    LoadFromClient(TestStream),
+    LoadFromClient {
+        stream: TestStream,
+        bandwidth_interval: u64,
+    },
     GetMeasurements,
 }
 

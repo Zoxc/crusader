@@ -83,13 +83,7 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
     let bandwidth_interval = Duration::from_millis(10);
 
-    send(
-        &mut control,
-        &ClientMessage::NewClient {
-            bandwidth_interval: bandwidth_interval.as_micros() as u64,
-        },
-    )
-    .await?;
+    send(&mut control, &ClientMessage::NewClient).await?;
 
     let setup_start = Instant::now();
 
@@ -111,7 +105,7 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
     let data = Arc::new(data());
 
-    let loading_streams: u32 = 1;
+    let loading_streams: u32 = 16;
 
     let grace = Duration::from_secs(2);
     let load_duration = Duration::from_secs(9);
@@ -132,10 +126,13 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
                     .unwrap();
                 send(
                     &mut stream,
-                    &ClientMessage::LoadFromClient(TestStream {
-                        group: 0,
-                        id: stream_id,
-                    }),
+                    &ClientMessage::LoadFromClient {
+                        stream: TestStream {
+                            group: 0,
+                            id: stream_id,
+                        },
+                        bandwidth_interval: bandwidth_interval.as_micros() as u64,
+                    },
                 )
                 .await
                 .unwrap();
@@ -252,29 +249,113 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
     let bandwidth = bandwidth.await?;
 
-    let bandwidth: Vec<_> = bandwidth
-        .iter()
-        .filter(|e| e.0.id == 0)
-        .map(|e| (e.1, e.2))
-        .collect();
-
-    let bandwidth: Vec<_> = (0..bandwidth.len())
+    let stream_bandwidths: Vec<Vec<_>> = (0..loading_streams)
         .map(|i| {
-            let rate = if i > 0 {
-                let bytes = bandwidth[i].1 - bandwidth[i - 1].1;
-                let duration = Duration::from_micros(bandwidth[i].0 - bandwidth[i - 1].0);
-                let mbits = (bytes as f64 * 8.0) / (1000.0 * 1000.0);
-                mbits / duration.as_secs_f64()
-            } else {
-                0.0
-            };
-            (bandwidth[i].0, rate)
+            bandwidth
+                .iter()
+                .filter(|e| e.0.id == i)
+                .map(|e| (e.1, e.2))
+                .collect()
         })
         .collect();
 
-    graph(pings, bandwidth, duration.as_secs_f64());
+    let stream_bandwidths: Vec<Vec<_>> = stream_bandwidths
+        .into_iter()
+        .map(|stream| {
+            (0..stream.len())
+                .map(|i| {
+                    let rate = if i > 0 {
+                        let bytes = stream[i].1 - stream[i - 1].1;
+                        let duration = Duration::from_micros(stream[i].0 - stream[i - 1].0);
+                        let mbits = (bytes as f64 * 8.0) / (1000.0 * 1000.0);
+                        mbits / duration.as_secs_f64()
+                    } else {
+                        0.0
+                    };
+                    (stream[i].0, rate)
+                })
+                .collect()
+        })
+        .collect();
+
+    let interval = bandwidth_interval.as_micros() as u64;
+
+    let bandwidth: Vec<_> = stream_bandwidths
+        .into_iter()
+        .map(|stream| interpolate(stream, interval))
+        .collect();
+
+    let min = bandwidth
+        .iter()
+        .map(|stream| stream.first().map(|e| e.0).unwrap_or(0))
+        .min()
+        .unwrap_or(0);
+
+    let max = bandwidth
+        .iter()
+        .map(|stream| stream.last().map(|e| e.0).unwrap_or(0))
+        .max()
+        .unwrap_or(0);
+
+    println!("111 min {min}, max {max}");
+
+    let mut data = Vec::new();
+
+    for point in (min..=max).step_by(interval as usize) {
+        let value = bandwidth
+            .iter()
+            .map(
+                |stream| match stream.binary_search_by_key(&point, |e| e.0) {
+                    Ok(i) => stream[i].1,
+                    Err(_) => 0.0,
+                },
+            )
+            .sum();
+        data.push((point, value));
+    }
+
+    graph(
+        pings,
+        data,
+        start.duration_since(setup_start).as_secs_f64(),
+        duration.as_secs_f64(),
+    );
 
     Ok(())
+}
+
+fn interpolate(input: Vec<(u64, f64)>, interval: u64) -> Vec<(u64, f64)> {
+    if input.is_empty() {
+        return Vec::new();
+    }
+
+    let min = input.first().unwrap().0 / interval * interval;
+    let max = (input.first().unwrap().0 / interval + interval - 1) * interval;
+
+    println!("min {min}, max {max}");
+
+    let mut data = Vec::new();
+
+    for point in (min..=max).step_by(interval as usize) {
+        let i = input.partition_point(|e| e.0 < point);
+        let value = if i == input.len() {
+            input.last().unwrap().1
+        } else if input[i].0 == point || i == 0 {
+            input[i].1
+        } else {
+            let len = input[i].0 - input[i - 1].0;
+            if len == 0 {
+                input[i].1
+            } else {
+                let ratio = (point - input[i - 1].0) as f64 / len as f64;
+                let delta = input[i].1 - input[i - 1].1;
+                input[i - 1].1 + delta * ratio
+            }
+        };
+        data.push((point, value));
+    }
+
+    data
 }
 
 async fn wait_for_state(state_rx: &mut watch::Receiver<TestState>, state: TestState) {
@@ -364,12 +445,12 @@ async fn ping_recv(
     storage
 }
 
-fn graph(mut pings: Vec<(Ping, u64)>, bandwidth: Vec<(u64, f64)>, duration: f64) {
+fn graph(mut pings: Vec<(Ping, u64)>, bandwidth: Vec<(u64, f64)>, start: f64, duration: f64) {
     use plotters::prelude::*;
 
     //println!("band{:#?}", bandwidth);
 
-    let root = BitMapBackend::new("plot.png", (1024, 768)).into_drawing_area();
+    let root = BitMapBackend::new("plot.png", (1280, 720)).into_drawing_area();
 
     root.fill(&WHITE).unwrap();
 
@@ -416,7 +497,7 @@ fn graph(mut pings: Vec<(Ping, u64)>, bandwidth: Vec<(u64, f64)>, duration: f64)
         .draw_series(LineSeries::new(
             pings.iter().map(|(ping, latency)| {
                 (
-                    ping.timestamp as f64 / (1000.0 * 1000.0),
+                    Duration::from_micros(ping.timestamp).as_secs_f64() - start,
                     *latency as f64 / 1000.0,
                 )
             }),
@@ -428,7 +509,7 @@ fn graph(mut pings: Vec<(Ping, u64)>, bandwidth: Vec<(u64, f64)>, duration: f64)
         .draw_secondary_series(LineSeries::new(
             bandwidth
                 .iter()
-                .map(|(time, rate)| (*time as f64 / (1000.0 * 1000.0), *rate)),
+                .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
             &RED,
         ))
         .unwrap();
