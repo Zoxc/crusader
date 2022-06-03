@@ -12,7 +12,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncRead, ReadBuf};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
-use tokio::task::{yield_now, JoinHandle};
+use tokio::task::{self, yield_now, JoinHandle};
 use tokio::{join, time};
 use tokio_util::codec::{Decoder, FramedRead, FramedWrite};
 
@@ -241,10 +241,6 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         let current_time = Instant::now();
                         let current_bytes = bytes_.load(Ordering::Acquire);
 
-                        if done_.load(Ordering::Acquire) {
-                            break;
-                        }
-
                         client
                             .message
                             .send(ServerMessage::Measure {
@@ -254,6 +250,16 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                                 bytes: current_bytes,
                             })
                             .ok();
+
+                        if done_.load(Ordering::Acquire) {
+                            client
+                                .message
+                                .send(ServerMessage::MeasureStreamDone {
+                                    stream: test_stream,
+                                })
+                                .ok();
+                            break;
+                        }
                     }
                 });
 
@@ -301,16 +307,27 @@ async fn pong(addr: SocketAddr) -> Result<JoinHandle<()>, Box<dyn Error>> {
         let mut buf = [0; 256];
 
         loop {
-            let (len, src) = socket
-                .recv_from(&mut buf)
-                .await
-                .expect("unable to get udp ping");
+            let result = socket.recv_from(&mut buf).await;
 
-            let buf = &mut buf[..len];
-            socket
-                .send_to(buf, &src)
-                .await
-                .expect("unable to reply to udp ping");
+            match result {
+                Ok((len, src)) => {
+                    let buf = &mut buf[..len];
+                    socket
+                        .send_to(buf, &src)
+                        .await
+                        .map_err(|error| {
+                            task::spawn_blocking(move || {
+                                eprintln!("Unable to reply to UDP ping: {:?}", error);
+                            });
+                        })
+                        .ok();
+                }
+                Err(error) => {
+                    task::spawn_blocking(move || {
+                        eprintln!("Unable to get UDP ping: {:?}", error);
+                    });
+                }
+            }
         }
     }))
 }

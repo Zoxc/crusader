@@ -15,7 +15,7 @@ use std::{
 };
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, UdpSocket};
-use tokio::sync::watch;
+use tokio::sync::{watch, Semaphore};
 use tokio::task::{self, yield_now, JoinHandle};
 use tokio::{
     net::{self},
@@ -125,7 +125,6 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         server,
         0,
         loading_streams,
-        grace,
         data.clone(),
         bandwidth_interval,
         state_rx.clone(),
@@ -137,29 +136,26 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         server,
         1,
         loading_streams,
-        grace,
         data.clone(),
         bandwidth_interval,
         state_rx.clone(),
         TestState::LoadFromBoth,
     );
 
-    let download = download_loaders(
+    let (download_semaphore, download) = download_loaders(
         id,
         server,
         loading_streams,
-        grace,
         bandwidth_interval,
         setup_start,
         state_rx.clone(),
         TestState::LoadFromServer,
     );
 
-    let both_download = download_loaders(
+    let (both_download_semaphore, both_download) = download_loaders(
         id,
         server,
         loading_streams,
-        grace,
         bandwidth_interval,
         setup_start,
         state_rx.clone(),
@@ -172,12 +168,25 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     let mut rx = FramedRead::new(rx, codec());
     let mut tx = FramedWrite::new(tx, codec());
 
+    let upload_semaphore = Arc::new(Semaphore::new(0));
+    let upload_semaphore_ = upload_semaphore.clone();
+    let both_upload_semaphore = Arc::new(Semaphore::new(0));
+    let both_upload_semaphore_ = both_upload_semaphore.clone();
+
     let bandwidth = tokio::spawn(async move {
         let mut bandwidth = Vec::new();
 
         loop {
             let reply: ServerMessage = receive(&mut rx).await.unwrap();
             match reply {
+                ServerMessage::MeasureStreamDone { stream } => {
+                    if stream.group == 0 {
+                        &upload_semaphore_
+                    } else {
+                        &both_upload_semaphore_
+                    }
+                    .add_permits(1);
+                }
                 ServerMessage::Measure {
                     stream,
                     time,
@@ -223,6 +232,10 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     time::sleep(load_duration).await;
 
     state_tx.send(TestState::Grace2).unwrap();
+    let _ = download_semaphore
+        .acquire_many(loading_streams)
+        .await
+        .unwrap();
     time::sleep(grace).await;
 
     state_tx.send(TestState::LoadFromClient).unwrap();
@@ -230,6 +243,10 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     time::sleep(load_duration).await;
 
     state_tx.send(TestState::Grace3).unwrap();
+    let _ = upload_semaphore
+        .acquire_many(loading_streams)
+        .await
+        .unwrap();
     time::sleep(grace).await;
 
     state_tx.send(TestState::LoadFromBoth).unwrap();
@@ -237,6 +254,17 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     time::sleep(load_duration).await;
 
     state_tx.send(TestState::Grace4).unwrap();
+    task::spawn_blocking(|| println!("Testing both download and upload...1"));
+    let _ = both_download_semaphore
+        .acquire_many(loading_streams)
+        .await
+        .unwrap();
+    task::spawn_blocking(|| println!("Testing both download and upload...2"));
+    let _ = both_upload_semaphore
+        .acquire_many(loading_streams)
+        .await
+        .unwrap();
+    task::spawn_blocking(|| println!("Testing both download and upload...3"));
     time::sleep(grace).await;
 
     state_tx.send(TestState::End).unwrap();
@@ -301,53 +329,53 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         vec![both_download.clone(), both_upload.clone()],
         bandwidth_interval,
     );
+    /*
+       graph(
+           "raw-upload.png",
+           &pings,
+           get_upload(0).into_iter().next().unwrap(),
+           get_upload(1).into_iter().next().unwrap(),
+           both.clone(),
+           start.duration_since(setup_start).as_secs_f64(),
+           duration.as_secs_f64(),
+       );
+       println!("raw-upload-i");
+       graph(
+           "raw-upload-i.png",
+           &pings,
+           interpolate(
+               get_upload(0).into_iter().next().unwrap(),
+               bandwidth_interval.as_micros() as u64,
+           ),
+           interpolate(
+               get_upload(1).into_iter().next().unwrap(),
+               bandwidth_interval.as_micros() as u64,
+           ),
+           both.clone(),
+           start.duration_since(setup_start).as_secs_f64(),
+           duration.as_secs_f64(),
+       );
 
-    graph(
-        "raw-upload.png",
-        &pings,
-        get_upload(0).into_iter().next().unwrap(),
-        get_upload(1).into_iter().next().unwrap(),
-        both.clone(),
-        start.duration_since(setup_start).as_secs_f64(),
-        duration.as_secs_f64(),
-    );
-    println!("raw-upload-i");
-    graph(
-        "raw-upload-i.png",
-        &pings,
-        interpolate(
-            get_upload(0).into_iter().next().unwrap(),
-            bandwidth_interval.as_micros() as u64,
-        ),
-        interpolate(
-            get_upload(1).into_iter().next().unwrap(),
-            bandwidth_interval.as_micros() as u64,
-        ),
-        both.clone(),
-        start.duration_since(setup_start).as_secs_f64(),
-        duration.as_secs_f64(),
-    );
+       graph(
+           "upload.png",
+           &pings,
+           upload.clone(),
+           both_upload.clone(),
+           both.clone(),
+           start.duration_since(setup_start).as_secs_f64(),
+           duration.as_secs_f64(),
+       );
 
-    graph(
-        "upload.png",
-        &pings,
-        upload.clone(),
-        both_upload.clone(),
-        both.clone(),
-        start.duration_since(setup_start).as_secs_f64(),
-        duration.as_secs_f64(),
-    );
-
-    graph(
-        "both.png",
-        &pings,
-        both_upload,
-        both_download,
-        both.clone(),
-        start.duration_since(setup_start).as_secs_f64(),
-        duration.as_secs_f64(),
-    );
-
+       graph(
+           "both.png",
+           &pings,
+           both_upload,
+           both_download,
+           both.clone(),
+           start.duration_since(setup_start).as_secs_f64(),
+           duration.as_secs_f64(),
+       );
+    */
     graph(
         "plot.png",
         &pings,
@@ -423,12 +451,6 @@ fn interpolate(input: Vec<(u64, f64)>, interval: u64) -> Vec<(u64, f64)> {
     let min = input.first().unwrap().0 / interval * interval;
     let max = (input.last().unwrap().0 + interval - 1) / interval * interval;
 
-    println!(
-        "interpolate min {min} max {max}  first {} last {}",
-        input.first().unwrap().0,
-        input.last().unwrap().0
-    );
-
     let mut data = Vec::new();
 
     for point in (min..=max).step_by(interval as usize) {
@@ -481,7 +503,6 @@ fn upload_loaders(
     server: SocketAddr,
     group: u32,
     count: u32,
-    grace: Duration,
     data: Arc<Vec<u8>>,
     bandwidth_interval: Duration,
     state_rx: watch::Receiver<TestState>,
@@ -521,8 +542,6 @@ fn upload_loaders(
 
                 yield_now().await;
             }
-
-            time::sleep(grace).await;
         });
     }
 }
@@ -531,18 +550,19 @@ fn download_loaders(
     id: u64,
     server: SocketAddr,
     count: u32,
-    grace: Duration,
     bandwidth_interval: Duration,
     setup_start: Instant,
     state_rx: watch::Receiver<TestState>,
     state: TestState,
-) -> Vec<JoinHandle<Vec<(u64, u64)>>> {
+) -> (Arc<Semaphore>, Vec<JoinHandle<Vec<(u64, u64)>>>) {
+    let semaphore = Arc::new(Semaphore::new(0));
     let loaders = setup_loaders(id, server, count);
 
-    loaders
+    let loaders = loaders
         .into_iter()
         .map(|loader| {
             let mut state_rx = state_rx.clone();
+            let semaphore = semaphore.clone();
 
             tokio::spawn(async move {
                 let stream = loader.await.unwrap();
@@ -581,14 +601,14 @@ fn download_loaders(
                         let current_time = Instant::now();
                         let current_bytes = bytes_.load(Ordering::Acquire);
 
-                        if done_.load(Ordering::Acquire) {
-                            break;
-                        }
-
                         measures.push((
                             current_time.duration_since(setup_start).as_micros() as u64,
                             current_bytes,
                         ));
+
+                        if done_.load(Ordering::Acquire) {
+                            break;
+                        }
                     }
                     measures
                 });
@@ -599,14 +619,15 @@ fn download_loaders(
                     yield_now().await;
                 }
 
-                time::sleep(grace).await;
-
                 done.store(true, Ordering::Release);
+
+                semaphore.add_permits(1);
 
                 measures.await.unwrap()
             })
         })
-        .collect()
+        .collect();
+    (semaphore, loaders)
 }
 
 async fn wait_for_state(state_rx: &mut watch::Receiver<TestState>, state: TestState) {
@@ -633,7 +654,6 @@ async fn ping_send(
         interval.tick().await;
 
         if *state_rx.borrow() == TestState::End {
-            println!("Stopped pinging after {:?}", setup_start.elapsed());
             break;
         }
 
@@ -732,6 +752,7 @@ fn graph(
     };
 
     let max_bandwidth = f64::max(max(&download), max(&bandwidth));
+    let max_bandwidth = f64::max(max_bandwidth, max(&both));
 
     let max_bandwidth = max_bandwidth * 1.05;
     let max_latency = max_latency * 1.05;

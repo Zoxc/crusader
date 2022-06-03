@@ -37,6 +37,9 @@ pub enum ServerMessage {
         time: u64,
         bytes: u64,
     },
+    MeasureStreamDone {
+        stream: TestStream,
+    },
     MeasurementsDone,
 }
 
