@@ -114,7 +114,7 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     let loading_streams: u32 = 16;
 
     let grace = Duration::from_secs(1);
-    let load_duration = Duration::from_secs(2);
+    let load_duration = Duration::from_secs(5);
     let ping_interval = Duration::from_millis(10);
     let estimated_duration = load_duration * 1 + grace * 2;
 
@@ -279,7 +279,61 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
     let bandwidth = bandwidth.await?;
 
+    let download_bytes: Vec<_> = stream::iter(download)
+        .then(|data| async move { data.await.unwrap() })
+        .collect()
+        .await;
+
     println!("Writing graphs...");
+
+    let download: Vec<_> = download_bytes
+        .iter()
+        .map(|stream| to_rates(&stream))
+        .collect();
+
+    let download_bytes: Vec<_> = download_bytes
+        .iter()
+        .map(|stream| to_float(&stream))
+        .collect();
+
+    let download_bytes_0 = download_bytes[0].clone();
+
+    let download_bytes_i = interpolate(
+        download_bytes_0.clone(),
+        bandwidth_interval.as_micros() as u64,
+    );
+
+    let download_bytes_sum = sum(download_bytes, bandwidth_interval);
+
+    graph(
+        "bytes.png",
+        &Vec::new(),
+        download_bytes_0.clone(),
+        Vec::new(),
+        Vec::new(),
+        start.duration_since(setup_start).as_secs_f64(),
+        duration.as_secs_f64(),
+    );
+
+    graph(
+        "bytes-sum.png",
+        &Vec::new(),
+        download_bytes_sum.clone(),
+        Vec::new(),
+        Vec::new(),
+        start.duration_since(setup_start).as_secs_f64(),
+        duration.as_secs_f64(),
+    );
+
+    graph(
+        "bytes-i.png",
+        &pings,
+        download_bytes_i.clone(),
+        Vec::new(),
+        Vec::new(),
+        start.duration_since(setup_start).as_secs_f64(),
+        duration.as_secs_f64(),
+    );
 
     let get_stream = |group, id| {
         bandwidth
@@ -292,16 +346,14 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     let get_upload = |group| -> Vec<Vec<_>> {
         let streams: Vec<Vec<_>> = (0..loading_streams).map(|i| get_stream(group, i)).collect();
 
-        streams.into_iter().map(|stream| to_rates(stream)).collect()
+        streams
+            .into_iter()
+            .map(|stream| to_rates(&stream))
+            .collect()
     };
 
-    let download: Vec<_> = stream::iter(download)
-        .then(|data| async move { to_rates(data.await.unwrap()) })
-        .collect()
-        .await;
-
     let both_download: Vec<_> = stream::iter(both_download)
-        .then(|data| async move { to_rates(data.await.unwrap()) })
+        .then(|data| async move { to_rates(&data.await.unwrap()) })
         .collect()
         .await;
 
@@ -386,7 +438,11 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn to_rates(stream: Vec<(u64, u64)>) -> Vec<(u64, f64)> {
+fn to_float(stream: &[(u64, u64)]) -> Vec<(u64, f64)> {
+    stream.iter().map(|(t, v)| (*t, *v as f64)).collect()
+}
+
+fn to_rates(stream: &[(u64, u64)]) -> Vec<(u64, f64)> {
     (0..stream.len())
         .map(|i| {
             let rate = if i > 0 {
