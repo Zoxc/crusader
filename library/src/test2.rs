@@ -297,11 +297,17 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
     let download = sum(vec![download, both_download.clone()], bandwidth_interval);
 
+    let both = sum(
+        vec![both_download.clone(), both_upload.clone()],
+        bandwidth_interval,
+    );
+
     graph(
         "raw-upload.png",
         &pings,
         get_upload(0).into_iter().next().unwrap(),
         get_upload(1).into_iter().next().unwrap(),
+        both.clone(),
         start.duration_since(setup_start).as_secs_f64(),
         duration.as_secs_f64(),
     );
@@ -317,6 +323,7 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
             get_upload(1).into_iter().next().unwrap(),
             bandwidth_interval.as_micros() as u64,
         ),
+        both.clone(),
         start.duration_since(setup_start).as_secs_f64(),
         duration.as_secs_f64(),
     );
@@ -326,6 +333,7 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         &pings,
         upload.clone(),
         both_upload.clone(),
+        both.clone(),
         start.duration_since(setup_start).as_secs_f64(),
         duration.as_secs_f64(),
     );
@@ -335,6 +343,7 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         &pings,
         both_upload,
         both_download,
+        both.clone(),
         start.duration_since(setup_start).as_secs_f64(),
         duration.as_secs_f64(),
     );
@@ -344,6 +353,7 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         &pings,
         upload,
         download,
+        both,
         start.duration_since(setup_start).as_secs_f64(),
         duration.as_secs_f64(),
     );
@@ -688,9 +698,10 @@ async fn ping_recv(
 
 fn graph(
     path: &str,
-    mut pings: &Vec<(Ping, u64)>,
+    pings: &Vec<(Ping, u64)>,
     bandwidth: Vec<(u64, f64)>,
     download: Vec<(u64, f64)>,
+    both: Vec<(u64, f64)>,
     start: f64,
     duration: f64,
 ) {
@@ -698,9 +709,15 @@ fn graph(
 
     //println!("band{:#?}", bandwidth);
 
-    let root = BitMapBackend::new(path, (1280, 720)).into_drawing_area();
+    let root = BitMapBackend::new(path, (1280, 800)).into_drawing_area();
 
     root.fill(&WHITE).unwrap();
+
+    let root = root
+        .titled("Latency under load", (FontFamily::SansSerif, 26))
+        .unwrap();
+
+    let areas = root.split_evenly((2, 1));
 
     let max_latency = pings.iter().map(|d| d.1).max().unwrap_or(100) as f64 / 1000.0;
 
@@ -724,15 +741,13 @@ fn graph(
     // Scale to fit the legend
     let duration = duration * 1.08;
 
-    let mut chart = ChartBuilder::on(&root)
+    let mut chart = ChartBuilder::on(&areas[1])
         .margin(6)
-        .caption("Latency under load", (FontFamily::SansSerif, 20))
         .set_label_area_size(LabelAreaPosition::Left, 100)
         .set_label_area_size(LabelAreaPosition::Right, 100)
         .set_label_area_size(LabelAreaPosition::Bottom, 50)
         .build_cartesian_2d(0.0..duration, 0.0..max_latency)
-        .unwrap()
-        .set_secondary_coord(0.0..duration, 0.0..max_bandwidth);
+        .unwrap();
 
     chart
         .plotting_area()
@@ -751,45 +766,6 @@ fn graph(
         .x_desc("Elapsed time (seconds)")
         .draw()
         .unwrap();
-    chart
-        .configure_secondary_axes()
-        .label_style(font)
-        .y_labels(10)
-        .y_desc("Bandwidth (Mbps)")
-        .draw()
-        .unwrap();
-
-    chart
-        .draw_secondary_series(LineSeries::new(
-            download
-                .iter()
-                .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
-            &RGBColor(95, 145, 62),
-        ))
-        .unwrap()
-        .label("Download")
-        .legend(move |(x, y)| {
-            Rectangle::new(
-                [(x, y - 5), (x + 18, y + 3)],
-                RGBColor(95, 145, 62).filled(),
-            )
-        });
-
-    chart
-        .draw_secondary_series(LineSeries::new(
-            bandwidth
-                .iter()
-                .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
-            &RGBColor(37, 83, 169),
-        ))
-        .unwrap()
-        .label("Upload")
-        .legend(move |(x, y)| {
-            Rectangle::new(
-                [(x, y - 5), (x + 18, y + 3)],
-                RGBColor(37, 83, 169).filled(),
-            )
-        });
 
     chart
         .draw_series(LineSeries::new(
@@ -805,6 +781,78 @@ fn graph(
         .label("Latency")
         .legend(move |(x, y)| {
             Rectangle::new([(x, y - 5), (x + 18, y + 3)], RGBColor(50, 50, 50).filled())
+        });
+
+    let mut chart = ChartBuilder::on(&areas[0])
+        .margin(6)
+        .set_label_area_size(LabelAreaPosition::Left, 100)
+        .set_label_area_size(LabelAreaPosition::Right, 100)
+        .set_label_area_size(LabelAreaPosition::Bottom, 50)
+        .build_cartesian_2d(0.0..duration, 0.0..max_bandwidth)
+        .unwrap();
+
+    chart
+        .plotting_area()
+        .fill(&RGBColor(248, 248, 248))
+        .unwrap();
+
+    chart
+        .configure_mesh()
+        .disable_x_mesh()
+        .disable_y_mesh()
+        .x_labels(20)
+        .y_labels(10)
+        .x_label_style(font)
+        .y_label_style(font)
+        .y_desc("Bandwidth (Mbps)")
+        .draw()
+        .unwrap();
+
+    chart
+        .draw_series(LineSeries::new(
+            both.iter()
+                .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
+            &RGBColor(149, 96, 153),
+        ))
+        .unwrap()
+        .label("Both")
+        .legend(move |(x, y)| {
+            Rectangle::new(
+                [(x, y - 5), (x + 18, y + 3)],
+                RGBColor(149, 96, 153).filled(),
+            )
+        });
+
+    chart
+        .draw_series(LineSeries::new(
+            download
+                .iter()
+                .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
+            &RGBColor(95, 145, 62),
+        ))
+        .unwrap()
+        .label("Download")
+        .legend(move |(x, y)| {
+            Rectangle::new(
+                [(x, y - 5), (x + 18, y + 3)],
+                RGBColor(95, 145, 62).filled(),
+            )
+        });
+
+    chart
+        .draw_series(LineSeries::new(
+            bandwidth
+                .iter()
+                .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
+            &RGBColor(37, 83, 169),
+        ))
+        .unwrap()
+        .label("Upload")
+        .legend(move |(x, y)| {
+            Rectangle::new(
+                [(x, y - 5), (x + 18, y + 3)],
+                RGBColor(37, 83, 169).filled(),
+            )
         });
 
     chart
