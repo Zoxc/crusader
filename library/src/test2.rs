@@ -254,17 +254,14 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     time::sleep(load_duration).await;
 
     state_tx.send(TestState::Grace4).unwrap();
-    task::spawn_blocking(|| println!("Testing both download and upload...1"));
     let _ = both_download_semaphore
         .acquire_many(loading_streams)
         .await
         .unwrap();
-    task::spawn_blocking(|| println!("Testing both download and upload...2"));
     let _ = both_upload_semaphore
         .acquire_many(loading_streams)
         .await
         .unwrap();
-    task::spawn_blocking(|| println!("Testing both download and upload...3"));
     time::sleep(grace).await;
 
     state_tx.send(TestState::End).unwrap();
