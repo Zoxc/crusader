@@ -16,7 +16,7 @@ use std::{
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::watch;
-use tokio::task::{yield_now, JoinHandle};
+use tokio::task::{self, yield_now, JoinHandle};
 use tokio::{
     net::{self},
     time,
@@ -219,18 +219,21 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     time::sleep(grace).await;
 
     state_tx.send(TestState::LoadFromServer).unwrap();
+    task::spawn_blocking(|| println!("Testing download..."));
     time::sleep(load_duration).await;
 
     state_tx.send(TestState::Grace2).unwrap();
     time::sleep(grace).await;
 
     state_tx.send(TestState::LoadFromClient).unwrap();
+    task::spawn_blocking(|| println!("Testing upload..."));
     time::sleep(load_duration).await;
 
     state_tx.send(TestState::Grace3).unwrap();
     time::sleep(grace).await;
 
     state_tx.send(TestState::LoadFromBoth).unwrap();
+    task::spawn_blocking(|| println!("Testing both download and upload..."));
     time::sleep(load_duration).await;
 
     state_tx.send(TestState::Grace4).unwrap();
@@ -241,13 +244,17 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     let duration = start.elapsed();
 
     ping_send.await?;
-    let pings = ping_recv.await?;
+    let mut pings = ping_recv.await?;
+
+    pings.sort_by_key(|d| d.0.index);
 
     send(&mut tx, &ClientMessage::Done).await?;
 
     println!("Test duration {:?}", duration);
 
     let bandwidth = bandwidth.await?;
+
+    println!("Writing graphs...");
 
     let get_stream = |group, id| {
         bandwidth
@@ -273,20 +280,68 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         .collect()
         .await;
 
+    //let upload = get_upload(0).into_iter().next().unwrap();
+
     let upload = sum(get_upload(0), bandwidth_interval);
 
     let both_upload = sum(get_upload(1), bandwidth_interval);
 
-    let upload = sum(vec![upload, both_upload], bandwidth_interval);
+    let upload = sum(
+        vec![upload.clone(), both_upload.clone()],
+        bandwidth_interval,
+    );
 
     let download = sum(download, bandwidth_interval);
 
     let both_download = sum(both_download, bandwidth_interval);
 
-    let download = sum(vec![download, both_download], bandwidth_interval);
+    let download = sum(vec![download, both_download.clone()], bandwidth_interval);
 
     graph(
-        pings,
+        "raw-upload.png",
+        &pings,
+        get_upload(0).into_iter().next().unwrap(),
+        get_upload(1).into_iter().next().unwrap(),
+        start.duration_since(setup_start).as_secs_f64(),
+        duration.as_secs_f64(),
+    );
+    println!("raw-upload-i");
+    graph(
+        "raw-upload-i.png",
+        &pings,
+        interpolate(
+            get_upload(0).into_iter().next().unwrap(),
+            bandwidth_interval.as_micros() as u64,
+        ),
+        interpolate(
+            get_upload(1).into_iter().next().unwrap(),
+            bandwidth_interval.as_micros() as u64,
+        ),
+        start.duration_since(setup_start).as_secs_f64(),
+        duration.as_secs_f64(),
+    );
+
+    graph(
+        "upload.png",
+        &pings,
+        upload.clone(),
+        both_upload.clone(),
+        start.duration_since(setup_start).as_secs_f64(),
+        duration.as_secs_f64(),
+    );
+
+    graph(
+        "both.png",
+        &pings,
+        both_upload,
+        both_download,
+        start.duration_since(setup_start).as_secs_f64(),
+        duration.as_secs_f64(),
+    );
+
+    graph(
+        "plot.png",
+        &pings,
         upload,
         download,
         start.duration_since(setup_start).as_secs_f64(),
@@ -356,7 +411,13 @@ fn interpolate(input: Vec<(u64, f64)>, interval: u64) -> Vec<(u64, f64)> {
     }
 
     let min = input.first().unwrap().0 / interval * interval;
-    let max = (input.first().unwrap().0 / interval + interval - 1) * interval;
+    let max = (input.last().unwrap().0 + interval - 1) / interval * interval;
+
+    println!(
+        "interpolate min {min} max {max}  first {} last {}",
+        input.first().unwrap().0,
+        input.last().unwrap().0
+    );
 
     let mut data = Vec::new();
 
@@ -626,7 +687,8 @@ async fn ping_recv(
 }
 
 fn graph(
-    mut pings: Vec<(Ping, u64)>,
+    path: &str,
+    mut pings: &Vec<(Ping, u64)>,
     bandwidth: Vec<(u64, f64)>,
     download: Vec<(u64, f64)>,
     start: f64,
@@ -636,7 +698,7 @@ fn graph(
 
     //println!("band{:#?}", bandwidth);
 
-    let root = BitMapBackend::new("plot.png", (1280, 720)).into_drawing_area();
+    let root = BitMapBackend::new(path, (1280, 720)).into_drawing_area();
 
     root.fill(&WHITE).unwrap();
 
@@ -654,9 +716,13 @@ fn graph(
 
     let max_bandwidth = f64::max(max(&download), max(&bandwidth));
 
-    let max_latency = max_latency * 3.0;
+    let max_bandwidth = max_bandwidth * 1.05;
+    let max_latency = max_latency * 1.05;
 
     let font = (FontFamily::SansSerif, 18);
+
+    // Scale to fit the legend
+    let duration = duration * 1.08;
 
     let mut chart = ChartBuilder::on(&root)
         .margin(6)
@@ -692,8 +758,6 @@ fn graph(
         .y_desc("Bandwidth (Mbps)")
         .draw()
         .unwrap();
-
-    pings.sort_by_key(|d| d.0.index);
 
     chart
         .draw_secondary_series(LineSeries::new(

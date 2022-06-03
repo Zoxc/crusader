@@ -1,4 +1,5 @@
 use bytes::BytesMut;
+use futures::future::OptionFuture;
 use futures::{pin_mut, select, FutureExt};
 use parking_lot::Mutex;
 use std::error::Error;
@@ -11,7 +12,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncRead, ReadBuf};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
-use tokio::task::yield_now;
+use tokio::task::{yield_now, JoinHandle};
 use tokio::{join, time};
 use tokio_util::codec::{Decoder, FramedRead, FramedWrite};
 
@@ -293,10 +294,10 @@ async fn listen(state: Arc<State>, listener: TcpListener) {
     }
 }
 
-async fn pong(addr: SocketAddr) {
-    tokio::spawn(async move {
-        let socket = UdpSocket::bind(addr).await.unwrap();
+async fn pong(addr: SocketAddr) -> Result<JoinHandle<()>, Box<dyn Error>> {
+    let socket = UdpSocket::bind(addr).await?;
 
+    Ok(tokio::spawn(async move {
         let mut buf = [0; 256];
 
         loop {
@@ -311,7 +312,7 @@ async fn pong(addr: SocketAddr) {
                 .await
                 .expect("unable to reply to udp ping");
         }
-    });
+    }))
 }
 
 async fn serve_async() {
@@ -323,17 +324,28 @@ async fn serve_async() {
     let state2 = state.clone();
 
     let port = 30481;
-    let v4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))
-        .await
-        .unwrap();
     let v6 = TcpListener::bind((Ipv6Addr::UNSPECIFIED, port))
         .await
         .unwrap();
+    let v4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))
+        .await
+        .map_err(|err| eprintln!("Failed to bind IPv4 TCP: {}", err))
+        .ok();
 
-    let pong_v4 = pong(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
-    let pong_v6 = pong(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port));
+    let pong_v6 = pong(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))
+        .await
+        .unwrap();
+    let pong_v4 = OptionFuture::from(
+        pong(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))
+            .await
+            .map_err(|err| eprintln!("Failed to bind IPv4 UDP: {}", err))
+            .ok(),
+    );
 
-    join!(listen(state, v4), listen(state2, v6), pong_v4, pong_v6);
+    let v4 = OptionFuture::from(v4.map(|v4| listen(state, v4)));
+    let result = join!(v4, listen(state2, v6), pong_v4, pong_v6);
+    result.2.map(|result| result.unwrap());
+    result.3.unwrap();
 }
 
 pub fn serve() {
