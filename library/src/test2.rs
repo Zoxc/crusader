@@ -291,50 +291,50 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         .map(|stream| to_rates(&stream))
         .collect();
 
-    let download_bytes: Vec<_> = download_bytes
+    let _download_bytes: Vec<_> = download_bytes
         .iter()
         .map(|stream| to_float(&stream))
         .collect();
+    /*
+        let download_bytes_0 = download_bytes[0].clone();
 
-    let download_bytes_0 = download_bytes[0].clone();
+        let download_bytes_i = interpolate(
+            download_bytes_0.clone(),
+            bandwidth_interval.as_micros() as u64,
+        );
 
-    let download_bytes_i = interpolate(
-        download_bytes_0.clone(),
-        bandwidth_interval.as_micros() as u64,
-    );
+        let download_bytes_sum = sum(download_bytes, bandwidth_interval);
 
-    let download_bytes_sum = sum(download_bytes, bandwidth_interval);
+        graph(
+            "bytes.png",
+            &Vec::new(),
+            download_bytes_0.clone(),
+            Vec::new(),
+            Vec::new(),
+            start.duration_since(setup_start).as_secs_f64(),
+            duration.as_secs_f64(),
+        );
 
-    graph(
-        "bytes.png",
-        &Vec::new(),
-        download_bytes_0.clone(),
-        Vec::new(),
-        Vec::new(),
-        start.duration_since(setup_start).as_secs_f64(),
-        duration.as_secs_f64(),
-    );
+        graph(
+            "bytes-sum.png",
+            &Vec::new(),
+            download_bytes_sum.clone(),
+            Vec::new(),
+            Vec::new(),
+            start.duration_since(setup_start).as_secs_f64(),
+            duration.as_secs_f64(),
+        );
 
-    graph(
-        "bytes-sum.png",
-        &Vec::new(),
-        download_bytes_sum.clone(),
-        Vec::new(),
-        Vec::new(),
-        start.duration_since(setup_start).as_secs_f64(),
-        duration.as_secs_f64(),
-    );
-
-    graph(
-        "bytes-i.png",
-        &pings,
-        download_bytes_i.clone(),
-        Vec::new(),
-        Vec::new(),
-        start.duration_since(setup_start).as_secs_f64(),
-        duration.as_secs_f64(),
-    );
-
+        graph(
+            "bytes-i.png",
+            &pings,
+            download_bytes_i.clone(),
+            Vec::new(),
+            Vec::new(),
+            start.duration_since(setup_start).as_secs_f64(),
+            duration.as_secs_f64(),
+        );
+    */
     let get_stream = |group, id| {
         bandwidth
             .iter()
