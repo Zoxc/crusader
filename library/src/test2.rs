@@ -30,7 +30,7 @@ use crate::protocol::{
 };
 use crate::serve2::CountingCodec;
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, PartialOrd, Ord)]
 enum TestState {
     Setup,
     Grace1,
@@ -41,6 +41,7 @@ enum TestState {
     LoadFromBoth,
     Grace4,
     End,
+    EndPingRecv,
 }
 
 pub(crate) fn data() -> Vec<u8> {
@@ -127,7 +128,7 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
 
     let grace = Duration::from_secs(1);
     let load_duration = Duration::from_secs(5);
-    let ping_interval = Duration::from_millis(10);
+    let ping_interval = Duration::from_millis(1);
 
     let loads = config.both as u32 + config.download as u32 + config.upload as u32;
 
@@ -290,6 +291,10 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
 
     state_tx.send(TestState::End).unwrap();
 
+    // Wait for pings to return
+    time::sleep(Duration::from_millis(500)).await;
+    state_tx.send(TestState::EndPingRecv).unwrap();
+
     let duration = start.elapsed();
 
     let pings_sent = ping_send.await?;
@@ -306,15 +311,15 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
 
     println!("Writing graphs...");
 
-    pings.sort_by_key(|d| d.0.index);
+    pings.sort_by_key(|d| d.0);
     let pings: Vec<_> = pings_sent
         .into_iter()
         .enumerate()
         .map(|(i, sent)| {
             let latency = pings
-                .binary_search_by_key(&(i as u32), |e| e.0.index)
+                .binary_search_by_key(&(i as u32), |e| e.0)
                 .ok()
-                .map(|ping| pings[ping].1);
+                .map(|ping| pings[ping].1 - sent);
             (i, sent, latency)
         })
         .collect();
@@ -724,7 +729,7 @@ async fn ping_send(
     loop {
         interval.tick().await;
 
-        if *state_rx.borrow() == TestState::End {
+        if *state_rx.borrow() >= TestState::End {
             break;
         }
 
@@ -732,10 +737,7 @@ async fn ping_send(
 
         let current = setup_start.elapsed();
 
-        let ping = Ping {
-            index,
-            timestamp: current.as_micros() as u64,
-        };
+        let ping = Ping { index };
 
         let mut cursor = Cursor::new(&mut buf[..]);
         bincode::serialize_into(&mut cursor, &ping).unwrap();
@@ -755,14 +757,14 @@ async fn ping_recv(
     socket: Arc<UdpSocket>,
     interval: Duration,
     estimated_duration: Duration,
-) -> Vec<(Ping, u64)> {
+) -> Vec<(u32, Duration)> {
     let mut storage = Vec::with_capacity(
         ((estimated_duration.as_secs_f64() + 2.0) * (1000.0 / interval.as_millis() as f64) * 1.5)
             as usize,
     );
     let mut buf = [0; 64];
 
-    let end = wait_for_state(&mut state_rx, TestState::End).fuse();
+    let end = wait_for_state(&mut state_rx, TestState::EndPingRecv).fuse();
     pin_mut!(end);
 
     loop {
@@ -781,11 +783,7 @@ async fn ping_recv(
         let buf = &mut buf[..len];
         let ping: Ping = bincode::deserialize(buf).unwrap();
 
-        let latency = (current.as_micros() as u64).saturating_sub(ping.timestamp);
-
-        //println!("Ping {}", latency as f64 / 1000.0);
-
-        storage.push((ping, latency));
+        storage.push((ping.index, current));
     }
 
     storage
@@ -794,7 +792,7 @@ async fn ping_recv(
 fn graph(
     config: &Config,
     path: &str,
-    pings: &[(usize, Duration, Option<u64>)],
+    pings: &[(usize, Duration, Option<Duration>)],
     bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
     start: f64,
     duration: f64,
@@ -816,11 +814,19 @@ fn graph(
         .titled("Latency under load", (FontFamily::SansSerif, 26))
         .unwrap();
 
+    let (root, loss) = root.split_vertically(root.relative_to_height(1.0) - 60.0);
+
     let charts = if config.plot_transferred { 3 } else { 2 };
 
     let areas = root.split_evenly((charts, 1));
 
-    let max_latency = pings.iter().filter_map(|d| d.2).max().unwrap_or(100) as f64 / 1000.0;
+    let max_latency = pings
+        .iter()
+        .filter_map(|d| d.2)
+        .max()
+        .unwrap_or(Duration::from_millis(100))
+        .as_secs_f64() as f64
+        * 1000.0;
 
     let max_bytes = float_max(
         bandwidth
@@ -843,33 +849,32 @@ fn graph(
     // Scale to fit the legend
     let duration = duration * 1.08;
 
-    let mut chart = ChartBuilder::on(&areas[1])
-        .margin(6)
-        .set_label_area_size(LabelAreaPosition::Left, 100)
-        .set_label_area_size(LabelAreaPosition::Right, 100)
-        .set_label_area_size(LabelAreaPosition::Bottom, 50)
-        .build_cartesian_2d(0.0..duration, 0.0..max_latency)
-        .unwrap();
-
-    chart
-        .plotting_area()
-        .fill(&RGBColor(248, 248, 248))
-        .unwrap();
-
-    chart
-        .configure_mesh()
-        .disable_x_mesh()
-        .disable_y_mesh()
-        .x_labels(20)
-        .y_labels(10)
-        .x_label_style(font)
-        .y_label_style(font)
-        .y_desc("Latency (ms)")
-        .x_desc("Elapsed time (seconds)")
-        .draw()
-        .unwrap();
-
     {
+        let mut chart = ChartBuilder::on(&areas[1])
+            .margin(6)
+            .set_label_area_size(LabelAreaPosition::Left, 100)
+            .set_label_area_size(LabelAreaPosition::Right, 100)
+            .set_label_area_size(LabelAreaPosition::Bottom, 20)
+            .build_cartesian_2d(0.0..duration, 0.0..max_latency)
+            .unwrap();
+
+        chart
+            .plotting_area()
+            .fill(&RGBColor(248, 248, 248))
+            .unwrap();
+
+        chart
+            .configure_mesh()
+            .disable_x_mesh()
+            .disable_y_mesh()
+            .x_labels(20)
+            .y_labels(10)
+            .x_label_style(font)
+            .y_label_style(font)
+            .y_desc("Latency (ms)")
+            .draw()
+            .unwrap();
+
         let color = RGBColor(50, 50, 50);
         let mut data = Vec::new();
 
@@ -889,11 +894,11 @@ fn graph(
             }
         };
 
-        for (_, ping_start, latency) in pings {
+        for &(_, ping_start, latency) in pings {
             match latency {
                 Some(latency) => {
                     let x = ping_start.as_secs_f64() - start;
-                    let y = *latency as f64 / 1000.0;
+                    let y = latency.as_secs_f64() * 1000.0;
 
                     data.push((x, y));
                 }
@@ -904,13 +909,57 @@ fn graph(
         }
 
         flush(&mut data);
+
+        let mut chart = ChartBuilder::on(&loss)
+            .margin(6)
+            .set_label_area_size(LabelAreaPosition::Left, 100)
+            .set_label_area_size(LabelAreaPosition::Right, 100)
+            .set_label_area_size(LabelAreaPosition::Bottom, 30)
+            .build_cartesian_2d(0.0..duration, 0.0..1.0)
+            .unwrap();
+
+        chart
+            .plotting_area()
+            .fill(&RGBColor(248, 248, 248))
+            .unwrap();
+
+        chart
+            .configure_mesh()
+            .disable_x_mesh()
+            .disable_y_mesh()
+            .x_labels(0)
+            .y_labels(0)
+            .x_label_style(font)
+            .y_label_style(font)
+            .y_desc("Packet loss")
+            .x_desc("Elapsed time (seconds)")
+            .draw()
+            .unwrap();
+
+        for (_, ping_start, latency) in pings {
+            let x = ping_start.as_secs_f64() - start;
+            if latency.is_none() {
+                chart
+                    .plotting_area()
+                    .draw(&PathElement::new(
+                        vec![(x, 0.0), (x, 1.0)],
+                        RGBColor(193, 85, 85),
+                    ))
+                    .unwrap();
+            }
+        }
+
+        chart
+            .plotting_area()
+            .draw(&PathElement::new(vec![(0.0, 1.0), (duration, 1.0)], BLACK))
+            .unwrap();
     }
 
     let mut chart = ChartBuilder::on(&areas[0])
         .margin(6)
         .set_label_area_size(LabelAreaPosition::Left, 100)
         .set_label_area_size(LabelAreaPosition::Right, 100)
-        .set_label_area_size(LabelAreaPosition::Bottom, 50)
+        .set_label_area_size(LabelAreaPosition::Bottom, 20)
         .build_cartesian_2d(0.0..duration, 0.0..max_bandwidth)
         .unwrap();
 

@@ -59,7 +59,6 @@ pub enum ClientMessage {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Ping {
     pub index: u32,
-    pub timestamp: u64,
 }
 
 pub fn codec() -> LengthDelimitedCodec {
