@@ -6,6 +6,7 @@ use plotters::style::RGBColor;
 use rand::prelude::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{
     error::Error,
@@ -232,6 +233,7 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
         setup_start,
         udp_socket2.clone(),
         ping_interval,
+        estimated_duration,
     ));
 
     let ping_recv = tokio::spawn(ping_recv(
@@ -290,14 +292,12 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
 
     let duration = start.elapsed();
 
-    ping_send.await?;
-    let mut pings = ping_recv.await?;
-
-    pings.sort_by_key(|d| d.0.index);
-
+    let pings_sent = ping_send.await?;
     send(&mut tx, &ClientMessage::Done).await?;
 
     println!("Test duration {:?}", duration);
+
+    let mut pings = ping_recv.await?;
 
     let bandwidth = bandwidth.await?;
 
@@ -305,6 +305,19 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
     let both_download_bytes = wait_on_download_loaders(both_download).await;
 
     println!("Writing graphs...");
+
+    pings.sort_by_key(|d| d.0.index);
+    let pings: Vec<_> = pings_sent
+        .into_iter()
+        .enumerate()
+        .map(|(i, sent)| {
+            let latency = pings
+                .binary_search_by_key(&(i as u32), |e| e.0.index)
+                .ok()
+                .map(|ping| pings[ping].1);
+            (i, sent, latency)
+        })
+        .collect();
 
     let process_bytes = |bytes: Vec<Vec<(u64, u64)>>| -> Vec<(u64, f64)> {
         let bytes: Vec<_> = bytes.iter().map(|stream| to_float(&stream)).collect();
@@ -698,9 +711,13 @@ async fn ping_send(
     setup_start: Instant,
     socket: Arc<UdpSocket>,
     interval: Duration,
-) {
+    estimated_duration: Duration,
+) -> Vec<Duration> {
+    let mut storage = Vec::with_capacity(
+        ((estimated_duration.as_secs_f64() + 2.0) * (1000.0 / interval.as_millis() as f64) * 1.5)
+            as usize,
+    );
     let mut buf = [0; 64];
-    let mut index: u32 = 0;
 
     let mut interval = time::interval(interval);
 
@@ -710,6 +727,8 @@ async fn ping_send(
         if *state_rx.borrow() == TestState::End {
             break;
         }
+
+        let index = storage.len().try_into().unwrap();
 
         let current = setup_start.elapsed();
 
@@ -724,8 +743,10 @@ async fn ping_send(
 
         socket.send(buf).await.expect("unable to udp ping");
 
-        index += 1;
+        storage.push(current);
     }
+
+    storage
 }
 
 async fn ping_recv(
@@ -773,7 +794,7 @@ async fn ping_recv(
 fn graph(
     config: &Config,
     path: &str,
-    pings: &Vec<(Ping, u64)>,
+    pings: &[(usize, Duration, Option<u64>)],
     bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
     start: f64,
     duration: f64,
@@ -799,7 +820,7 @@ fn graph(
 
     let areas = root.split_evenly((charts, 1));
 
-    let max_latency = pings.iter().map(|d| d.1).max().unwrap_or(100) as f64 / 1000.0;
+    let max_latency = pings.iter().filter_map(|d| d.2).max().unwrap_or(100) as f64 / 1000.0;
 
     let max_bytes = float_max(
         bandwidth
@@ -848,21 +869,42 @@ fn graph(
         .draw()
         .unwrap();
 
-    chart
-        .draw_series(LineSeries::new(
-            pings.iter().map(|(ping, latency)| {
-                (
-                    Duration::from_micros(ping.timestamp).as_secs_f64() - start,
-                    *latency as f64 / 1000.0,
-                )
-            }),
-            &RGBColor(50, 50, 50),
-        ))
-        .unwrap()
-        .label("Latency")
-        .legend(move |(x, y)| {
-            Rectangle::new([(x, y - 5), (x + 18, y + 3)], RGBColor(50, 50, 50).filled())
-        });
+    {
+        let color = RGBColor(50, 50, 50);
+        let mut data = Vec::new();
+
+        let flush = |data: &mut Vec<_>| {
+            let data = mem::take(data);
+
+            if data.len() == 1 {
+                chart
+                    .plotting_area()
+                    .draw(&Circle::new(data[0], 1, color.filled()))
+                    .unwrap();
+            } else {
+                chart
+                    .plotting_area()
+                    .draw(&PathElement::new(data, color))
+                    .unwrap();
+            }
+        };
+
+        for (_, ping_start, latency) in pings {
+            match latency {
+                Some(latency) => {
+                    let x = ping_start.as_secs_f64() - start;
+                    let y = *latency as f64 / 1000.0;
+
+                    data.push((x, y));
+                }
+                None => {
+                    flush(&mut data);
+                }
+            }
+        }
+
+        flush(&mut data);
+    }
 
     let mut chart = ChartBuilder::on(&areas[0])
         .margin(6)
