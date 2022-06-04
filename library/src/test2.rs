@@ -284,57 +284,32 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
         .collect()
         .await;
 
+    let both_download_bytes: Vec<_> = stream::iter(both_download)
+        .then(|data| async move { data.await.unwrap() })
+        .collect()
+        .await;
+
     println!("Writing graphs...");
 
-    let download: Vec<_> = download_bytes
-        .iter()
-        .map(|stream| to_rates(&stream))
-        .collect();
-
-    let _download_bytes: Vec<_> = download_bytes
+    let download_bytes: Vec<_> = download_bytes
         .iter()
         .map(|stream| to_float(&stream))
         .collect();
-    /*
-        let download_bytes_0 = download_bytes[0].clone();
 
-        let download_bytes_i = interpolate(
-            download_bytes_0.clone(),
-            bandwidth_interval.as_micros() as u64,
-        );
+    let both_download_bytes: Vec<_> = both_download_bytes
+        .iter()
+        .map(|stream| to_float(&stream))
+        .collect();
 
-        let download_bytes_sum = sum(download_bytes, bandwidth_interval);
+    let download_bytes_sum = sum_bytes(download_bytes, bandwidth_interval);
 
-        graph(
-            "bytes.png",
-            &Vec::new(),
-            download_bytes_0.clone(),
-            Vec::new(),
-            Vec::new(),
-            start.duration_since(setup_start).as_secs_f64(),
-            duration.as_secs_f64(),
-        );
+    let both_download_bytes_sum = sum_bytes(both_download_bytes, bandwidth_interval);
 
-        graph(
-            "bytes-sum.png",
-            &Vec::new(),
-            download_bytes_sum.clone(),
-            Vec::new(),
-            Vec::new(),
-            start.duration_since(setup_start).as_secs_f64(),
-            duration.as_secs_f64(),
-        );
+    let combined_download_bytes = sum_bytes(
+        vec![download_bytes_sum.clone(), both_download_bytes_sum.clone()],
+        bandwidth_interval,
+    );
 
-        graph(
-            "bytes-i.png",
-            &pings,
-            download_bytes_i.clone(),
-            Vec::new(),
-            Vec::new(),
-            start.duration_since(setup_start).as_secs_f64(),
-            duration.as_secs_f64(),
-        );
-    */
     let get_stream = |group, id| {
         bandwidth
             .iter()
@@ -343,94 +318,41 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
             .collect()
     };
 
-    let get_upload = |group| -> Vec<Vec<_>> {
+    let get_upload_bytes = |group| -> Vec<Vec<_>> {
         let streams: Vec<Vec<_>> = (0..loading_streams).map(|i| get_stream(group, i)).collect();
 
         streams
             .into_iter()
-            .map(|stream| to_rates(&stream))
+            .map(|stream| to_float(&stream))
             .collect()
     };
 
-    let both_download: Vec<_> = stream::iter(both_download)
-        .then(|data| async move { to_rates(&data.await.unwrap()) })
-        .collect()
-        .await;
+    let upload_bytes_sum = sum_bytes(get_upload_bytes(0), bandwidth_interval);
 
-    //let upload = get_upload(0).into_iter().next().unwrap();
+    let both_upload_bytes_sum = sum_bytes(get_upload_bytes(1), bandwidth_interval);
 
-    let upload = sum(get_upload(0), bandwidth_interval);
-
-    let both_upload = sum(get_upload(1), bandwidth_interval);
-
-    let upload = sum(
-        vec![upload.clone(), both_upload.clone()],
+    let combined_upload_bytes = sum_bytes(
+        vec![upload_bytes_sum.clone(), both_upload_bytes_sum.clone()],
         bandwidth_interval,
     );
 
-    let download = sum(download, bandwidth_interval);
-
-    let both_download = sum(both_download, bandwidth_interval);
-
-    let download = sum(vec![download, both_download.clone()], bandwidth_interval);
-
-    let both = sum(
-        vec![both_download.clone(), both_upload.clone()],
+    let both_bytes = sum_bytes(
+        vec![
+            both_download_bytes_sum.clone(),
+            both_upload_bytes_sum.clone(),
+        ],
         bandwidth_interval,
     );
-    /*
-       graph(
-           "raw-upload.png",
-           &pings,
-           get_upload(0).into_iter().next().unwrap(),
-           get_upload(1).into_iter().next().unwrap(),
-           both.clone(),
-           start.duration_since(setup_start).as_secs_f64(),
-           duration.as_secs_f64(),
-       );
-       println!("raw-upload-i");
-       graph(
-           "raw-upload-i.png",
-           &pings,
-           interpolate(
-               get_upload(0).into_iter().next().unwrap(),
-               bandwidth_interval.as_micros() as u64,
-           ),
-           interpolate(
-               get_upload(1).into_iter().next().unwrap(),
-               bandwidth_interval.as_micros() as u64,
-           ),
-           both.clone(),
-           start.duration_since(setup_start).as_secs_f64(),
-           duration.as_secs_f64(),
-       );
 
-       graph(
-           "upload.png",
-           &pings,
-           upload.clone(),
-           both_upload.clone(),
-           both.clone(),
-           start.duration_since(setup_start).as_secs_f64(),
-           duration.as_secs_f64(),
-       );
-
-       graph(
-           "both.png",
-           &pings,
-           both_upload,
-           both_download,
-           both.clone(),
-           start.duration_since(setup_start).as_secs_f64(),
-           duration.as_secs_f64(),
-       );
-    */
     graph(
         "plot.png",
         &pings,
-        upload,
-        download,
-        both,
+        to_rates(&combined_upload_bytes),
+        to_rates(&combined_download_bytes),
+        to_rates(&both_bytes),
+        &[&download_bytes_sum, &both_download_bytes_sum],
+        &[&upload_bytes_sum, &both_upload_bytes_sum],
+        &[&both_bytes],
         start.duration_since(setup_start).as_secs_f64(),
         duration.as_secs_f64(),
     );
@@ -438,11 +360,21 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn float_max(iter: impl Iterator<Item = f64>) -> f64 {
+    let mut max = iter.fold(0. / 0., f64::max);
+
+    if max.is_nan() {
+        max = 100.0;
+    }
+
+    max
+}
+
 fn to_float(stream: &[(u64, u64)]) -> Vec<(u64, f64)> {
     stream.iter().map(|(t, v)| (*t, *v as f64)).collect()
 }
 
-fn to_rates(stream: &[(u64, u64)]) -> Vec<(u64, f64)> {
+fn to_rates(stream: &[(u64, f64)]) -> Vec<(u64, f64)> {
     (0..stream.len())
         .map(|i| {
             let rate = if i > 0 {
@@ -458,7 +390,7 @@ fn to_rates(stream: &[(u64, u64)]) -> Vec<(u64, f64)> {
         .collect()
 }
 
-fn sum(input: Vec<Vec<(u64, f64)>>, interval: Duration) -> Vec<(u64, f64)> {
+fn sum_bytes(input: Vec<Vec<(u64, f64)>>, interval: Duration) -> Vec<(u64, f64)> {
     let interval = interval.as_micros() as u64;
 
     let bandwidth: Vec<_> = input
@@ -486,7 +418,9 @@ fn sum(input: Vec<Vec<(u64, f64)>>, interval: Duration) -> Vec<(u64, f64)> {
             .map(
                 |stream| match stream.binary_search_by_key(&point, |e| e.0) {
                     Ok(i) => stream[i].1,
-                    Err(_) => 0.0,
+                    Err(0) => 0.0,
+                    Err(i) if i == stream.len() => stream.last().unwrap().1,
+                    _ => panic!("unexpected index"),
                 },
             )
             .sum();
@@ -772,17 +706,18 @@ async fn ping_recv(
 fn graph(
     path: &str,
     pings: &Vec<(Ping, u64)>,
-    bandwidth: Vec<(u64, f64)>,
+    upload: Vec<(u64, f64)>,
     download: Vec<(u64, f64)>,
     both: Vec<(u64, f64)>,
+    bytes_down: &[&Vec<(u64, f64)>],
+    bytes_up: &[&Vec<(u64, f64)>],
+    bytes_both: &[&Vec<(u64, f64)>],
     start: f64,
     duration: f64,
 ) {
     use plotters::prelude::*;
 
-    //println!("band{:#?}", bandwidth);
-
-    let root = BitMapBackend::new(path, (1280, 800)).into_drawing_area();
+    let root = BitMapBackend::new(path, (1800, 1000)).into_drawing_area();
 
     root.fill(&WHITE).unwrap();
 
@@ -790,23 +725,28 @@ fn graph(
         .titled("Latency under load", (FontFamily::SansSerif, 26))
         .unwrap();
 
-    let areas = root.split_evenly((2, 1));
+    let areas = root.split_evenly((3, 1));
 
     let max_latency = pings.iter().map(|d| d.1).max().unwrap_or(100) as f64 / 1000.0;
 
-    let max = |input: &Vec<(u64, f64)>| {
-        let mut max = input.iter().map(|d| d.1).fold(0. / 0., f64::max);
+    let max_bytes = float_max(
+        [bytes_down, bytes_up, bytes_both]
+            .iter()
+            .flat_map(|list| list.iter())
+            .flat_map(|list| list.iter())
+            .map(|e| e.1),
+    );
 
-        if max.is_nan() {
-            max = 100.0;
-        }
+    let max_bytes = max_bytes / (1000.0 * 1000.0 * 1000.0);
 
-        max
-    };
+    let max_bandwidth = float_max(
+        [&download, &upload, &both]
+            .iter()
+            .flat_map(|list| list.iter())
+            .map(|e| e.1),
+    );
 
-    let max_bandwidth = f64::max(max(&download), max(&bandwidth));
-    let max_bandwidth = f64::max(max_bandwidth, max(&both));
-
+    let max_bytes = max_bytes * 1.05;
     let max_bandwidth = max_bandwidth * 1.05;
     let max_latency = max_latency * 1.05;
 
@@ -915,7 +855,7 @@ fn graph(
 
     chart
         .draw_series(LineSeries::new(
-            bandwidth
+            upload
                 .iter()
                 .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
             &RGBColor(37, 83, 169),
@@ -928,6 +868,67 @@ fn graph(
                 RGBColor(37, 83, 169).filled(),
             )
         });
+
+    chart
+        .configure_series_labels()
+        .background_style(&WHITE.mix(0.8))
+        .label_font(font)
+        .border_style(&BLACK)
+        .draw()
+        .unwrap();
+
+    let mut chart = ChartBuilder::on(&areas[2])
+        .margin(6)
+        .set_label_area_size(LabelAreaPosition::Left, 100)
+        .set_label_area_size(LabelAreaPosition::Right, 100)
+        .set_label_area_size(LabelAreaPosition::Bottom, 50)
+        .build_cartesian_2d(0.0..duration, 0.0..max_bytes)
+        .unwrap();
+
+    chart
+        .plotting_area()
+        .fill(&RGBColor(248, 248, 248))
+        .unwrap();
+
+    chart
+        .configure_mesh()
+        .disable_x_mesh()
+        .disable_y_mesh()
+        .x_labels(20)
+        .y_labels(10)
+        .x_label_style(font)
+        .y_label_style(font)
+        .y_desc("Bytes transferred")
+        .draw()
+        .unwrap();
+
+    let data = [
+        ("Download", RGBColor(95, 145, 62), bytes_down),
+        ("Upload", RGBColor(37, 83, 169), bytes_up),
+        ("Both", RGBColor(149, 96, 153), bytes_both),
+    ];
+
+    for (name, color, bytes) in data {
+        for (i, bytes) in bytes.iter().enumerate() {
+            let series = chart
+                .draw_series(LineSeries::new(
+                    bytes.iter().map(|(time, bytes)| {
+                        (
+                            Duration::from_micros(*time).as_secs_f64() - start,
+                            *bytes / (1000.0 * 1000.0 * 1000.0),
+                        )
+                    }),
+                    &color,
+                ))
+                .unwrap();
+
+            if i == 0 {
+                series.label(name).legend(move |(x, y)| {
+                    Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled())
+                });
+            }
+        }
+    }
 
     chart
         .configure_series_labels()
