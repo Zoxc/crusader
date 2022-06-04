@@ -2,6 +2,7 @@ use bytes::{Bytes, BytesMut};
 use futures::future::FutureExt;
 use futures::{pin_mut, select, Sink, Stream};
 use futures::{stream, StreamExt};
+use plotters::style::RGBColor;
 use rand::prelude::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -74,7 +75,14 @@ where
     Ok(())
 }
 
-async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
+pub struct Config {
+    pub download: bool,
+    pub upload: bool,
+    pub both: bool,
+    pub bandwidth_interval: u64,
+}
+
+async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> {
     let port = 30481;
 
     let control = net::TcpStream::connect((server, port)).await?;
@@ -87,7 +95,7 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
     hello(&mut control).await?;
 
-    let bandwidth_interval = Duration::from_millis(10);
+    let bandwidth_interval = Duration::from_millis(config.bandwidth_interval);
 
     send(&mut control, &ClientMessage::NewClient).await?;
 
@@ -116,51 +124,62 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     let grace = Duration::from_secs(1);
     let load_duration = Duration::from_secs(5);
     let ping_interval = Duration::from_millis(10);
-    let estimated_duration = load_duration * 1 + grace * 2;
+
+    let loads = config.both as u32 + config.download as u32 + config.upload as u32;
+
+    let estimated_duration = load_duration * loads + grace * 2;
 
     let (state_tx, state_rx) = watch::channel(TestState::Setup);
 
-    upload_loaders(
-        id,
-        server,
-        0,
-        loading_streams,
-        data.clone(),
-        bandwidth_interval,
-        state_rx.clone(),
-        TestState::LoadFromClient,
-    );
+    if config.upload {
+        upload_loaders(
+            id,
+            server,
+            0,
+            loading_streams,
+            data.clone(),
+            bandwidth_interval,
+            state_rx.clone(),
+            TestState::LoadFromClient,
+        );
+    }
 
-    upload_loaders(
-        id,
-        server,
-        1,
-        loading_streams,
-        data.clone(),
-        bandwidth_interval,
-        state_rx.clone(),
-        TestState::LoadFromBoth,
-    );
+    if config.both {
+        upload_loaders(
+            id,
+            server,
+            1,
+            loading_streams,
+            data.clone(),
+            bandwidth_interval,
+            state_rx.clone(),
+            TestState::LoadFromBoth,
+        );
+    }
 
-    let (download_semaphore, download) = download_loaders(
-        id,
-        server,
-        loading_streams,
-        bandwidth_interval,
-        setup_start,
-        state_rx.clone(),
-        TestState::LoadFromServer,
-    );
+    let download = config.download.then(|| {
+        download_loaders(
+            id,
+            server,
+            loading_streams,
+            bandwidth_interval,
+            setup_start,
+            state_rx.clone(),
+            TestState::LoadFromServer,
+        )
+    });
 
-    let (both_download_semaphore, both_download) = download_loaders(
-        id,
-        server,
-        loading_streams,
-        bandwidth_interval,
-        setup_start,
-        state_rx.clone(),
-        TestState::LoadFromBoth,
-    );
+    let both_download = config.both.then(|| {
+        download_loaders(
+            id,
+            server,
+            loading_streams,
+            bandwidth_interval,
+            setup_start,
+            state_rx.clone(),
+            TestState::LoadFromBoth,
+        )
+    });
 
     send(&mut control, &ClientMessage::GetMeasurements).await?;
 
@@ -227,42 +246,42 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
     state_tx.send(TestState::Grace1).unwrap();
     time::sleep(grace).await;
 
-    state_tx.send(TestState::LoadFromServer).unwrap();
-    task::spawn_blocking(|| println!("Testing download..."));
-    time::sleep(load_duration).await;
+    if let Some((semaphore, _)) = download.as_ref() {
+        state_tx.send(TestState::LoadFromServer).unwrap();
+        task::spawn_blocking(|| println!("Testing download..."));
+        time::sleep(load_duration).await;
 
-    state_tx.send(TestState::Grace2).unwrap();
-    let _ = download_semaphore
-        .acquire_many(loading_streams)
-        .await
-        .unwrap();
-    time::sleep(grace).await;
+        state_tx.send(TestState::Grace2).unwrap();
+        let _ = semaphore.acquire_many(loading_streams).await.unwrap();
+        time::sleep(grace).await;
+    }
 
-    state_tx.send(TestState::LoadFromClient).unwrap();
-    task::spawn_blocking(|| println!("Testing upload..."));
-    time::sleep(load_duration).await;
+    if config.upload {
+        state_tx.send(TestState::LoadFromClient).unwrap();
+        task::spawn_blocking(|| println!("Testing upload..."));
+        time::sleep(load_duration).await;
 
-    state_tx.send(TestState::Grace3).unwrap();
-    let _ = upload_semaphore
-        .acquire_many(loading_streams)
-        .await
-        .unwrap();
-    time::sleep(grace).await;
+        state_tx.send(TestState::Grace3).unwrap();
+        let _ = upload_semaphore
+            .acquire_many(loading_streams)
+            .await
+            .unwrap();
+        time::sleep(grace).await;
+    }
 
-    state_tx.send(TestState::LoadFromBoth).unwrap();
-    task::spawn_blocking(|| println!("Testing both download and upload..."));
-    time::sleep(load_duration).await;
+    if let Some((semaphore, _)) = both_download.as_ref() {
+        state_tx.send(TestState::LoadFromBoth).unwrap();
+        task::spawn_blocking(|| println!("Testing both download and upload..."));
+        time::sleep(load_duration).await;
 
-    state_tx.send(TestState::Grace4).unwrap();
-    let _ = both_download_semaphore
-        .acquire_many(loading_streams)
-        .await
-        .unwrap();
-    let _ = both_upload_semaphore
-        .acquire_many(loading_streams)
-        .await
-        .unwrap();
-    time::sleep(grace).await;
+        state_tx.send(TestState::Grace4).unwrap();
+        let _ = semaphore.acquire_many(loading_streams).await.unwrap();
+        let _ = both_upload_semaphore
+            .acquire_many(loading_streams)
+            .await
+            .unwrap();
+        time::sleep(grace).await;
+    }
 
     state_tx.send(TestState::End).unwrap();
 
@@ -279,36 +298,28 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
 
     let bandwidth = bandwidth.await?;
 
-    let download_bytes: Vec<_> = stream::iter(download)
-        .then(|data| async move { data.await.unwrap() })
-        .collect()
-        .await;
-
-    let both_download_bytes: Vec<_> = stream::iter(both_download)
-        .then(|data| async move { data.await.unwrap() })
-        .collect()
-        .await;
+    let download_bytes = wait_on_download_loaders(download).await;
+    let both_download_bytes = wait_on_download_loaders(both_download).await;
 
     println!("Writing graphs...");
 
-    let download_bytes: Vec<_> = download_bytes
-        .iter()
-        .map(|stream| to_float(&stream))
-        .collect();
+    let process_bytes = |bytes: Vec<Vec<(u64, u64)>>| -> Vec<(u64, f64)> {
+        let bytes: Vec<_> = bytes.iter().map(|stream| to_float(&stream)).collect();
+        let bytes: Vec<_> = bytes.iter().map(|stream| stream.as_slice()).collect();
+        sum_bytes(&bytes, bandwidth_interval)
+    };
 
-    let both_download_bytes: Vec<_> = both_download_bytes
-        .iter()
-        .map(|stream| to_float(&stream))
-        .collect();
+    let download_bytes_sum = download_bytes.map(process_bytes);
+    let both_download_bytes_sum = both_download_bytes.map(process_bytes);
 
-    let download_bytes_sum = sum_bytes(download_bytes, bandwidth_interval);
-
-    let both_download_bytes_sum = sum_bytes(both_download_bytes, bandwidth_interval);
-
-    let combined_download_bytes = sum_bytes(
-        vec![download_bytes_sum.clone(), both_download_bytes_sum.clone()],
-        bandwidth_interval,
-    );
+    let combined_download_bytes: Vec<_> = [
+        download_bytes_sum.as_deref(),
+        both_download_bytes_sum.as_deref(),
+    ]
+    .into_iter()
+    .filter_map(|x| x)
+    .collect();
+    let combined_download_bytes = sum_bytes(&combined_download_bytes, bandwidth_interval);
 
     let get_stream = |group, id| {
         bandwidth
@@ -318,41 +329,78 @@ async fn test_async(server: &str) -> Result<(), Box<dyn Error>> {
             .collect()
     };
 
-    let get_upload_bytes = |group| -> Vec<Vec<_>> {
-        let streams: Vec<Vec<_>> = (0..loading_streams).map(|i| get_stream(group, i)).collect();
+    let get_upload_bytes =
+        |group| -> Vec<Vec<_>> { (0..loading_streams).map(|i| get_stream(group, i)).collect() };
 
-        streams
+    let upload_bytes_sum = config.upload.then(|| process_bytes(get_upload_bytes(0)));
+
+    let both_upload_bytes_sum = config.both.then(|| process_bytes(get_upload_bytes(1)));
+
+    let combined_upload_bytes: Vec<_> = [
+        upload_bytes_sum.as_deref(),
+        both_upload_bytes_sum.as_deref(),
+    ]
+    .into_iter()
+    .filter_map(|x| x)
+    .collect();
+    let combined_upload_bytes = sum_bytes(&combined_upload_bytes, bandwidth_interval);
+
+    let both_bytes = config.both.then(|| {
+        sum_bytes(
+            &[
+                both_download_bytes_sum.as_deref().unwrap(),
+                both_upload_bytes_sum.as_deref().unwrap(),
+            ],
+            bandwidth_interval,
+        )
+    });
+    let both_bytes = both_bytes.as_deref();
+
+    let mut bandwidth = Vec::new();
+
+    both_bytes.map(|both_bytes| {
+        bandwidth.push((
+            "Both",
+            RGBColor(149, 96, 153),
+            to_rates(both_bytes),
+            vec![both_bytes],
+        ));
+    });
+
+    if config.upload || config.both {
+        bandwidth.push((
+            "Upload",
+            RGBColor(37, 83, 169),
+            to_rates(&combined_upload_bytes),
+            [
+                upload_bytes_sum.as_deref(),
+                both_upload_bytes_sum.as_deref(),
+            ]
             .into_iter()
-            .map(|stream| to_float(&stream))
-            .collect()
-    };
+            .filter_map(|x| x)
+            .collect::<Vec<_>>(),
+        ));
+    }
 
-    let upload_bytes_sum = sum_bytes(get_upload_bytes(0), bandwidth_interval);
-
-    let both_upload_bytes_sum = sum_bytes(get_upload_bytes(1), bandwidth_interval);
-
-    let combined_upload_bytes = sum_bytes(
-        vec![upload_bytes_sum.clone(), both_upload_bytes_sum.clone()],
-        bandwidth_interval,
-    );
-
-    let both_bytes = sum_bytes(
-        vec![
-            both_download_bytes_sum.clone(),
-            both_upload_bytes_sum.clone(),
-        ],
-        bandwidth_interval,
-    );
+    if config.download || config.both {
+        bandwidth.push((
+            "Download",
+            RGBColor(95, 145, 62),
+            to_rates(&combined_download_bytes),
+            [
+                download_bytes_sum.as_deref(),
+                both_download_bytes_sum.as_deref(),
+            ]
+            .into_iter()
+            .filter_map(|x| x)
+            .collect::<Vec<_>>(),
+        ));
+    }
 
     graph(
         "plot.png",
         &pings,
-        to_rates(&combined_upload_bytes),
-        to_rates(&combined_download_bytes),
-        to_rates(&both_bytes),
-        &[&download_bytes_sum, &both_download_bytes_sum],
-        &[&upload_bytes_sum, &both_upload_bytes_sum],
-        &[&both_bytes],
+        &bandwidth,
         start.duration_since(setup_start).as_secs_f64(),
         duration.as_secs_f64(),
     );
@@ -390,11 +438,11 @@ fn to_rates(stream: &[(u64, f64)]) -> Vec<(u64, f64)> {
         .collect()
 }
 
-fn sum_bytes(input: Vec<Vec<(u64, f64)>>, interval: Duration) -> Vec<(u64, f64)> {
+fn sum_bytes(input: &[&[(u64, f64)]], interval: Duration) -> Vec<(u64, f64)> {
     let interval = interval.as_micros() as u64;
 
     let bandwidth: Vec<_> = input
-        .into_iter()
+        .iter()
         .map(|stream| interpolate(stream, interval))
         .collect();
 
@@ -430,7 +478,7 @@ fn sum_bytes(input: Vec<Vec<(u64, f64)>>, interval: Duration) -> Vec<(u64, f64)>
     data
 }
 
-fn interpolate(input: Vec<(u64, f64)>, interval: u64) -> Vec<(u64, f64)> {
+fn interpolate(input: &[(u64, f64)], interval: u64) -> Vec<(u64, f64)> {
     if input.is_empty() {
         return Vec::new();
     }
@@ -530,6 +578,21 @@ fn upload_loaders(
                 yield_now().await;
             }
         });
+    }
+}
+
+async fn wait_on_download_loaders(
+    download: Option<(Arc<Semaphore>, Vec<JoinHandle<Vec<(u64, u64)>>>)>,
+) -> Option<Vec<Vec<(u64, u64)>>> {
+    match download {
+        Some((_, result)) => {
+            let bytes: Vec<_> = stream::iter(result)
+                .then(|data| async move { data.await.unwrap() })
+                .collect()
+                .await;
+            Some(bytes)
+        }
+        None => None,
     }
 }
 
@@ -706,12 +769,7 @@ async fn ping_recv(
 fn graph(
     path: &str,
     pings: &Vec<(Ping, u64)>,
-    upload: Vec<(u64, f64)>,
-    download: Vec<(u64, f64)>,
-    both: Vec<(u64, f64)>,
-    bytes_down: &[&Vec<(u64, f64)>],
-    bytes_up: &[&Vec<(u64, f64)>],
-    bytes_both: &[&Vec<(u64, f64)>],
+    bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
     start: f64,
     duration: f64,
 ) {
@@ -730,21 +788,16 @@ fn graph(
     let max_latency = pings.iter().map(|d| d.1).max().unwrap_or(100) as f64 / 1000.0;
 
     let max_bytes = float_max(
-        [bytes_down, bytes_up, bytes_both]
+        bandwidth
             .iter()
-            .flat_map(|list| list.iter())
+            .flat_map(|list| list.3.iter())
             .flat_map(|list| list.iter())
             .map(|e| e.1),
     );
 
-    let max_bytes = max_bytes / (1000.0 * 1000.0 * 1000.0);
+    let max_bytes = max_bytes / (1024.0 * 1024.0 * 1024.0);
 
-    let max_bandwidth = float_max(
-        [&download, &upload, &both]
-            .iter()
-            .flat_map(|list| list.iter())
-            .map(|e| e.1),
-    );
+    let max_bandwidth = float_max(bandwidth.iter().flat_map(|list| list.2.iter()).map(|e| e.1));
 
     let max_bytes = max_bytes * 1.05;
     let max_bandwidth = max_bandwidth * 1.05;
@@ -822,52 +875,18 @@ fn graph(
         .draw()
         .unwrap();
 
-    chart
-        .draw_series(LineSeries::new(
-            both.iter()
-                .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
-            &RGBColor(149, 96, 153),
-        ))
-        .unwrap()
-        .label("Both")
-        .legend(move |(x, y)| {
-            Rectangle::new(
-                [(x, y - 5), (x + 18, y + 3)],
-                RGBColor(149, 96, 153).filled(),
-            )
-        });
-
-    chart
-        .draw_series(LineSeries::new(
-            download
-                .iter()
-                .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
-            &RGBColor(95, 145, 62),
-        ))
-        .unwrap()
-        .label("Download")
-        .legend(move |(x, y)| {
-            Rectangle::new(
-                [(x, y - 5), (x + 18, y + 3)],
-                RGBColor(95, 145, 62).filled(),
-            )
-        });
-
-    chart
-        .draw_series(LineSeries::new(
-            upload
-                .iter()
-                .map(|(time, rate)| (Duration::from_micros(*time).as_secs_f64() - start, *rate)),
-            &RGBColor(37, 83, 169),
-        ))
-        .unwrap()
-        .label("Upload")
-        .legend(move |(x, y)| {
-            Rectangle::new(
-                [(x, y - 5), (x + 18, y + 3)],
-                RGBColor(37, 83, 169).filled(),
-            )
-        });
+    for (name, color, rates, _) in bandwidth {
+        chart
+            .draw_series(LineSeries::new(
+                rates.iter().map(|(time, rate)| {
+                    (Duration::from_micros(*time).as_secs_f64() - start, *rate)
+                }),
+                color,
+            ))
+            .unwrap()
+            .label(*name)
+            .legend(move |(x, y)| Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled()));
+    }
 
     chart
         .configure_series_labels()
@@ -898,24 +917,18 @@ fn graph(
         .y_labels(10)
         .x_label_style(font)
         .y_label_style(font)
-        .y_desc("Bytes transferred")
+        .y_desc("Data transferred (GiB)")
         .draw()
         .unwrap();
 
-    let data = [
-        ("Download", RGBColor(95, 145, 62), bytes_down),
-        ("Upload", RGBColor(37, 83, 169), bytes_up),
-        ("Both", RGBColor(149, 96, 153), bytes_both),
-    ];
-
-    for (name, color, bytes) in data {
+    for (name, color, _, bytes) in bandwidth {
         for (i, bytes) in bytes.iter().enumerate() {
             let series = chart
                 .draw_series(LineSeries::new(
                     bytes.iter().map(|(time, bytes)| {
                         (
                             Duration::from_micros(*time).as_secs_f64() - start,
-                            *bytes / (1000.0 * 1000.0 * 1000.0),
+                            *bytes / (1024.0 * 1024.0 * 1024.0),
                         )
                     }),
                     &color,
@@ -923,7 +936,7 @@ fn graph(
                 .unwrap();
 
             if i == 0 {
-                series.label(name).legend(move |(x, y)| {
+                series.label(*name).legend(move |(x, y)| {
                     Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled())
                 });
             }
@@ -942,7 +955,7 @@ fn graph(
     root.present().expect("Unable to write result to file, please make sure 'plotters-doc-data' dir exists under current dir");
 }
 
-pub fn test(host: &str) {
+pub fn test(config: Config, host: &str) {
     let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(test_async(host)).unwrap();
+    rt.block_on(test_async(config, host)).unwrap();
 }
