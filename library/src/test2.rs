@@ -80,6 +80,9 @@ pub struct Config {
     pub upload: bool,
     pub both: bool,
     pub bandwidth_interval: u64,
+    pub plot_transferred: bool,
+    pub plot_width: Option<u64>,
+    pub plot_height: Option<u64>,
 }
 
 async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> {
@@ -398,6 +401,7 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
     }
 
     graph(
+        &config,
         "plot.png",
         &pings,
         &bandwidth,
@@ -767,6 +771,7 @@ async fn ping_recv(
 }
 
 fn graph(
+    config: &Config,
     path: &str,
     pings: &Vec<(Ping, u64)>,
     bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
@@ -775,7 +780,14 @@ fn graph(
 ) {
     use plotters::prelude::*;
 
-    let root = BitMapBackend::new(path, (1800, 1000)).into_drawing_area();
+    let root = BitMapBackend::new(
+        path,
+        (
+            config.plot_width.unwrap_or(1280) as u32,
+            config.plot_height.unwrap_or(720) as u32,
+        ),
+    )
+    .into_drawing_area();
 
     root.fill(&WHITE).unwrap();
 
@@ -783,7 +795,9 @@ fn graph(
         .titled("Latency under load", (FontFamily::SansSerif, 26))
         .unwrap();
 
-    let areas = root.split_evenly((3, 1));
+    let charts = if config.plot_transferred { 3 } else { 2 };
+
+    let areas = root.split_evenly((charts, 1));
 
     let max_latency = pings.iter().map(|d| d.1).max().unwrap_or(100) as f64 / 1000.0;
 
@@ -896,60 +910,62 @@ fn graph(
         .draw()
         .unwrap();
 
-    let mut chart = ChartBuilder::on(&areas[2])
-        .margin(6)
-        .set_label_area_size(LabelAreaPosition::Left, 100)
-        .set_label_area_size(LabelAreaPosition::Right, 100)
-        .set_label_area_size(LabelAreaPosition::Bottom, 50)
-        .build_cartesian_2d(0.0..duration, 0.0..max_bytes)
-        .unwrap();
+    if config.plot_transferred {
+        let mut chart = ChartBuilder::on(&areas[2])
+            .margin(6)
+            .set_label_area_size(LabelAreaPosition::Left, 100)
+            .set_label_area_size(LabelAreaPosition::Right, 100)
+            .set_label_area_size(LabelAreaPosition::Bottom, 50)
+            .build_cartesian_2d(0.0..duration, 0.0..max_bytes)
+            .unwrap();
 
-    chart
-        .plotting_area()
-        .fill(&RGBColor(248, 248, 248))
-        .unwrap();
+        chart
+            .plotting_area()
+            .fill(&RGBColor(248, 248, 248))
+            .unwrap();
 
-    chart
-        .configure_mesh()
-        .disable_x_mesh()
-        .disable_y_mesh()
-        .x_labels(20)
-        .y_labels(10)
-        .x_label_style(font)
-        .y_label_style(font)
-        .y_desc("Data transferred (GiB)")
-        .draw()
-        .unwrap();
+        chart
+            .configure_mesh()
+            .disable_x_mesh()
+            .disable_y_mesh()
+            .x_labels(20)
+            .y_labels(10)
+            .x_label_style(font)
+            .y_label_style(font)
+            .y_desc("Data transferred (GiB)")
+            .draw()
+            .unwrap();
 
-    for (name, color, _, bytes) in bandwidth {
-        for (i, bytes) in bytes.iter().enumerate() {
-            let series = chart
-                .draw_series(LineSeries::new(
-                    bytes.iter().map(|(time, bytes)| {
-                        (
-                            Duration::from_micros(*time).as_secs_f64() - start,
-                            *bytes / (1024.0 * 1024.0 * 1024.0),
-                        )
-                    }),
-                    &color,
-                ))
-                .unwrap();
+        for (name, color, _, bytes) in bandwidth {
+            for (i, bytes) in bytes.iter().enumerate() {
+                let series = chart
+                    .draw_series(LineSeries::new(
+                        bytes.iter().map(|(time, bytes)| {
+                            (
+                                Duration::from_micros(*time).as_secs_f64() - start,
+                                *bytes / (1024.0 * 1024.0 * 1024.0),
+                            )
+                        }),
+                        &color,
+                    ))
+                    .unwrap();
 
-            if i == 0 {
-                series.label(*name).legend(move |(x, y)| {
-                    Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled())
-                });
+                if i == 0 {
+                    series.label(*name).legend(move |(x, y)| {
+                        Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled())
+                    });
+                }
             }
         }
-    }
 
-    chart
-        .configure_series_labels()
-        .background_style(&WHITE.mix(0.8))
-        .label_font(font)
-        .border_style(&BLACK)
-        .draw()
-        .unwrap();
+        chart
+            .configure_series_labels()
+            .background_style(&WHITE.mix(0.8))
+            .label_font(font)
+            .border_style(&BLACK)
+            .draw()
+            .unwrap();
+    }
 
     // To avoid the IO failure being ignored silently, we manually call the present function
     root.present().expect("Unable to write result to file, please make sure 'plotters-doc-data' dir exists under current dir");

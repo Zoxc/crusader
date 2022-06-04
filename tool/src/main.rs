@@ -20,6 +20,12 @@ enum Commands {
         both: bool,
         #[clap(long)]
         bandwidth_sample_rate: Option<u64>,
+        #[clap(long)]
+        plot_transferred: bool,
+        #[clap(long)]
+        plot_width: Option<u64>,
+        #[clap(long)]
+        plot_height: Option<u64>,
     },
 }
 
@@ -33,12 +39,18 @@ fn main() {
             upload,
             both,
             bandwidth_sample_rate,
+            plot_transferred,
+            plot_width,
+            plot_height,
         } => {
             let mut config = Config {
                 download: true,
                 upload: true,
                 both: true,
                 bandwidth_interval: bandwidth_sample_rate.unwrap_or(20),
+                plot_transferred,
+                plot_width,
+                plot_height,
             };
 
             if download || upload || both {
