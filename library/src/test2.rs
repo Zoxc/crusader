@@ -7,6 +7,7 @@ use rand::prelude::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 use std::mem;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{
     error::Error,
@@ -81,6 +82,11 @@ pub struct Config {
     pub download: bool,
     pub upload: bool,
     pub both: bool,
+    pub port: u16,
+    pub load_duration: u64,
+    pub grace_duration: u64,
+    pub streams: u64,
+    pub ping_interval: u64,
     pub bandwidth_interval: u64,
     pub plot_transferred: bool,
     pub plot_width: Option<u64>,
@@ -88,9 +94,7 @@ pub struct Config {
 }
 
 async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> {
-    let port = 30481;
-
-    let control = net::TcpStream::connect((server, port)).await?;
+    let control = net::TcpStream::connect((server, config.port)).await?;
 
     let server = control.peer_addr()?;
 
@@ -124,11 +128,11 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
 
     let data = Arc::new(data());
 
-    let loading_streams: u32 = 16;
+    let loading_streams: u32 = config.streams.try_into().unwrap();
 
-    let grace = Duration::from_secs(1);
-    let load_duration = Duration::from_secs(5);
-    let ping_interval = Duration::from_millis(1);
+    let grace = Duration::from_secs(config.grace_duration);
+    let load_duration = Duration::from_secs(config.load_duration);
+    let ping_interval = Duration::from_millis(config.ping_interval);
 
     let loads = config.both as u32 + config.download as u32 + config.upload as u32;
 
@@ -300,8 +304,6 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
     let pings_sent = ping_send.await?;
     send(&mut tx, &ClientMessage::Done).await?;
 
-    println!("Test duration {:?}", duration);
-
     let mut pings = ping_recv.await?;
 
     let bandwidth = bandwidth.await?;
@@ -420,7 +422,7 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
 
     graph(
         &config,
-        "plot.png",
+        "plot",
         &pings,
         &bandwidth,
         start.duration_since(setup_start).as_secs_f64(),
@@ -789,9 +791,27 @@ async fn ping_recv(
     storage
 }
 
+fn unique(name: &str) -> String {
+    let time = chrono::Local::now().format(" %Y.%m.%d %H-%M-%S");
+    let stem = format!("{}{}", name, time);
+    let mut i: usize = 0;
+    loop {
+        let file = if i != 0 {
+            format!("{} {}", stem, i)
+        } else {
+            stem.to_string()
+        };
+        let file = format!("{}.png", file);
+        if !Path::new(&file).exists() {
+            return file;
+        }
+        i += 1;
+    }
+}
+
 fn graph(
     config: &Config,
-    path: &str,
+    name: &str,
     pings: &[(usize, Duration, Option<Duration>)],
     bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
     start: f64,
@@ -799,8 +819,10 @@ fn graph(
 ) {
     use plotters::prelude::*;
 
+    let file = unique(name);
+
     let root = BitMapBackend::new(
-        path,
+        &file,
         (
             config.plot_width.unwrap_or(1280) as u32,
             config.plot_height.unwrap_or(720) as u32,
@@ -1058,8 +1080,7 @@ fn graph(
             .unwrap();
     }
 
-    // To avoid the IO failure being ignored silently, we manually call the present function
-    root.present().expect("Unable to write result to file, please make sure 'plotters-doc-data' dir exists under current dir");
+    root.present().expect("Unable to write plot to file");
 }
 
 pub fn test(config: Config, host: &str) {

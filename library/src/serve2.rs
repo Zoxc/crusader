@@ -332,7 +332,7 @@ async fn pong(addr: SocketAddr) -> Result<JoinHandle<()>, Box<dyn Error>> {
     }))
 }
 
-async fn serve_async() {
+async fn serve_async(port: u16) {
     let state = Arc::new(State {
         dummy_data: crate::test2::data(),
         clients: Mutex::new(HashMap::new()),
@@ -340,7 +340,6 @@ async fn serve_async() {
 
     let state2 = state.clone();
 
-    let port = 30481;
     let v6 = TcpListener::bind((Ipv6Addr::UNSPECIFIED, port))
         .await
         .unwrap();
@@ -365,7 +364,7 @@ async fn serve_async() {
     result.3.unwrap();
 }
 
-pub fn serve() {
+pub fn serve(port: u16) {
     let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(serve_async());
+    rt.block_on(serve_async(port));
 }
