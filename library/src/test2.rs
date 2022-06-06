@@ -80,7 +80,19 @@ where
     Ok(())
 }
 
-pub struct TestResults {}
+pub struct TestResult {
+    pub config: Config,
+    pub start: Duration,
+    pub duration: Duration,
+    pub download_bytes: Option<Vec<(u64, f64)>>,
+    pub upload_bytes: Option<Vec<(u64, f64)>>,
+    pub combined_download_bytes: Vec<(u64, f64)>,
+    pub combined_upload_bytes: Vec<(u64, f64)>,
+    pub both_download_bytes: Option<Vec<(u64, f64)>>,
+    pub both_upload_bytes: Option<Vec<(u64, f64)>>,
+    pub both_bytes: Option<Vec<(u64, f64)>>,
+    pub pings: Vec<(usize, Duration, Option<Duration>)>,
+}
 
 pub struct Config {
     pub download: bool,
@@ -97,7 +109,7 @@ pub struct Config {
     pub plot_height: Option<u64>,
 }
 
-async fn test_async(config: Config, server: &str, msg: Msg) -> Result<(), Box<dyn Error>> {
+async fn test_async(config: Config, server: &str, msg: Msg) -> Result<TestResult, Box<dyn Error>> {
     let control = net::TcpStream::connect((server, config.port)).await?;
 
     let server = control.peer_addr()?;
@@ -315,8 +327,6 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<(), Box<dy
     let download_bytes = wait_on_download_loaders(download).await;
     let both_download_bytes = wait_on_download_loaders(both_download).await;
 
-    println!("Writing graphs...");
-
     pings.sort_by_key(|d| d.0);
     let pings: Vec<_> = pings_sent
         .into_iter()
@@ -381,27 +391,44 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<(), Box<dy
             bandwidth_interval,
         )
     });
-    let both_bytes = both_bytes.as_deref();
 
+    let result = TestResult {
+        config,
+        start: start.duration_since(setup_start),
+        pings,
+        duration,
+        both_bytes,
+        both_download_bytes: both_download_bytes_sum,
+        both_upload_bytes: both_upload_bytes_sum,
+        download_bytes: download_bytes_sum,
+        upload_bytes: upload_bytes_sum,
+        combined_download_bytes,
+        combined_upload_bytes,
+    };
+
+    Ok(result)
+}
+
+pub fn save_graph(result: &TestResult, name: &str) -> String {
     let mut bandwidth = Vec::new();
 
-    both_bytes.map(|both_bytes| {
+    result.both_bytes.as_ref().map(|both_bytes| {
         bandwidth.push((
             "Both",
             RGBColor(149, 96, 153),
-            to_rates(both_bytes),
-            vec![both_bytes],
+            to_rates(&both_bytes),
+            vec![both_bytes.as_slice()],
         ));
     });
 
-    if config.upload || config.both {
+    if result.config.upload || result.config.both {
         bandwidth.push((
             "Upload",
             RGBColor(37, 83, 169),
-            to_rates(&combined_upload_bytes),
+            to_rates(&result.combined_upload_bytes),
             [
-                upload_bytes_sum.as_deref(),
-                both_upload_bytes_sum.as_deref(),
+                result.upload_bytes.as_deref(),
+                result.both_upload_bytes.as_deref(),
             ]
             .into_iter()
             .filter_map(|x| x)
@@ -409,14 +436,14 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<(), Box<dy
         ));
     }
 
-    if config.download || config.both {
+    if result.config.download || result.config.both {
         bandwidth.push((
             "Download",
             RGBColor(95, 145, 62),
-            to_rates(&combined_download_bytes),
+            to_rates(&result.combined_download_bytes),
             [
-                download_bytes_sum.as_deref(),
-                both_download_bytes_sum.as_deref(),
+                result.download_bytes.as_deref(),
+                result.both_download_bytes.as_deref(),
             ]
             .into_iter()
             .filter_map(|x| x)
@@ -425,15 +452,13 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<(), Box<dy
     }
 
     graph(
-        &config,
-        "plot",
-        &pings,
+        &result.config,
+        name,
+        &result.pings,
         &bandwidth,
-        start.duration_since(setup_start).as_secs_f64(),
-        duration.as_secs_f64(),
-    );
-
-    Ok(())
+        result.start.as_secs_f64(),
+        result.duration.as_secs_f64(),
+    )
 }
 
 fn float_max(iter: impl Iterator<Item = f64>) -> f64 {
@@ -450,7 +475,7 @@ fn to_float(stream: &[(u64, u64)]) -> Vec<(u64, f64)> {
     stream.iter().map(|(t, v)| (*t, *v as f64)).collect()
 }
 
-fn to_rates(stream: &[(u64, f64)]) -> Vec<(u64, f64)> {
+pub fn to_rates(stream: &[(u64, f64)]) -> Vec<(u64, f64)> {
     (0..stream.len())
         .map(|i| {
             let rate = if i > 0 {
@@ -820,10 +845,11 @@ fn graph(
     bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
     start: f64,
     duration: f64,
-) {
+) -> String {
     use plotters::prelude::*;
 
     let file = unique(name);
+    let result = file.clone();
 
     let root = BitMapBackend::new(
         &file,
@@ -1085,19 +1111,24 @@ fn graph(
     }
 
     root.present().expect("Unable to write plot to file");
+
+    result
 }
 
 pub fn test(config: Config, host: &str) {
     let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(test_async(config, host, Arc::new(|msg| println!("{msg}"))))
+    let result = rt
+        .block_on(test_async(config, host, Arc::new(|msg| println!("{msg}"))))
         .unwrap();
+    println!("Writing graphs...");
+    save_graph(&result, "plot");
 }
 
 pub fn test_callback(
     config: Config,
     host: &str,
     msg: Arc<dyn Fn(&str) + Send + Sync>,
-    done: Box<dyn FnOnce(Result<(), String>) + Send>,
+    done: Box<dyn FnOnce(Result<TestResult, String>) + Send>,
 ) {
     let host = host.to_string();
     thread::spawn(move || {

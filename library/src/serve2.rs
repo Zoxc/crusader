@@ -13,7 +13,7 @@ use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::task::{self, yield_now, JoinHandle};
-use tokio::{join, time};
+use tokio::{join, signal, time};
 use tokio_util::codec::{Decoder, FramedRead, FramedWrite};
 
 use crate::protocol::{self, codec, receive, send, ClientMessage, ServerMessage};
@@ -394,12 +394,17 @@ pub fn serve_until(
 
 pub fn serve(port: u16) {
     let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(serve_async(
-        port,
-        Box::new(|msg: &str| {
-            let msg = msg.to_owned();
-            task::spawn_blocking(move || println!("{msg}"));
-        }),
-    ))
-    .unwrap();
+    rt.block_on(async move {
+        serve_async(
+            port,
+            Box::new(|msg: &str| {
+                let msg = msg.to_owned();
+                task::spawn_blocking(move || println!("{msg}"));
+            }),
+        )
+        .await
+        .unwrap();
+        signal::ctrl_c().await.unwrap();
+        println!("Server aborting...");
+    });
 }
