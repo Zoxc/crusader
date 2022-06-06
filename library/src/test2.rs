@@ -6,7 +6,6 @@ use plotters::style::RGBColor;
 use rand::prelude::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use std::mem;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{
@@ -16,10 +15,11 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use std::{mem, thread};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::{watch, Semaphore};
-use tokio::task::{self, yield_now, JoinHandle};
+use tokio::task::{yield_now, JoinHandle};
 use tokio::{
     net::{self},
     time,
@@ -30,6 +30,8 @@ use crate::protocol::{
     codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
 };
 use crate::serve2::CountingCodec;
+
+type Msg = Arc<dyn Fn(&str) + Send + Sync>;
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy, PartialOrd, Ord)]
 enum TestState {
@@ -78,6 +80,8 @@ where
     Ok(())
 }
 
+pub struct TestResults {}
+
 pub struct Config {
     pub download: bool,
     pub upload: bool,
@@ -93,12 +97,12 @@ pub struct Config {
     pub plot_height: Option<u64>,
 }
 
-async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> {
+async fn test_async(config: Config, server: &str, msg: Msg) -> Result<(), Box<dyn Error>> {
     let control = net::TcpStream::connect((server, config.port)).await?;
 
     let server = control.peer_addr()?;
 
-    println!("Connected to server {}", server);
+    msg(&format!("Connected to server {}", server));
 
     let mut control = Framed::new(control, codec());
 
@@ -113,7 +117,7 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
     let reply: ServerMessage = receive(&mut control).await?;
     let id = match reply {
         ServerMessage::NewClient(id) => id,
-        _ => panic!("Unexpected message {:?}", reply),
+        _ => return Err(format!("Unexpected message {:?}", reply).into()),
     };
 
     let local_udp = if server.is_ipv6() {
@@ -258,7 +262,7 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
 
     if let Some((semaphore, _)) = download.as_ref() {
         state_tx.send(TestState::LoadFromServer).unwrap();
-        task::spawn_blocking(|| println!("Testing download..."));
+        msg(&format!("Testing download..."));
         time::sleep(load_duration).await;
 
         state_tx.send(TestState::Grace2).unwrap();
@@ -268,7 +272,7 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
 
     if config.upload {
         state_tx.send(TestState::LoadFromClient).unwrap();
-        task::spawn_blocking(|| println!("Testing upload..."));
+        msg(&format!("Testing upload..."));
         time::sleep(load_duration).await;
 
         state_tx.send(TestState::Grace3).unwrap();
@@ -281,7 +285,7 @@ async fn test_async(config: Config, server: &str) -> Result<(), Box<dyn Error>> 
 
     if let Some((semaphore, _)) = both_download.as_ref() {
         state_tx.send(TestState::LoadFromBoth).unwrap();
-        task::spawn_blocking(|| println!("Testing both download and upload..."));
+        msg(&format!("Testing both download and upload..."));
         time::sleep(load_duration).await;
 
         state_tx.send(TestState::Grace4).unwrap();
@@ -1085,5 +1089,23 @@ fn graph(
 
 pub fn test(config: Config, host: &str) {
     let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(test_async(config, host)).unwrap();
+    rt.block_on(test_async(config, host, Arc::new(|msg| println!("{msg}"))))
+        .unwrap();
+}
+
+pub fn test_callback(
+    config: Config,
+    host: &str,
+    msg: Arc<dyn Fn(&str) + Send + Sync>,
+    done: Box<dyn FnOnce(Result<(), String>) + Send>,
+) {
+    let host = host.to_string();
+    thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        done(rt.block_on(async move {
+            test_async(config, &host, msg)
+                .await
+                .map_err(|error| error.to_string())
+        }));
+    });
 }
