@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use library::protocol;
 use library::test2::Config;
 
 #[derive(Parser)]
@@ -10,7 +11,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Serve {
-        #[clap(long, default_value_t = 30481)]
+        #[clap(long, default_value_t = protocol::PORT)]
         port: u16,
     },
     Test {
@@ -21,7 +22,7 @@ enum Commands {
         upload: bool,
         #[clap(long)]
         both: bool,
-        #[clap(long, default_value_t = 30481)]
+        #[clap(long, default_value_t = protocol::PORT)]
         port: u16,
         #[clap(long, default_value_t = 16)]
         streams: u64,

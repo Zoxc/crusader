@@ -1,5 +1,4 @@
 use bytes::BytesMut;
-use futures::future::OptionFuture;
 use futures::{pin_mut, select, FutureExt};
 use parking_lot::Mutex;
 use std::error::Error;
@@ -12,6 +11,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncRead, ReadBuf};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::oneshot;
 use tokio::task::{self, yield_now, JoinHandle};
 use tokio::{join, time};
 use tokio_util::codec::{Decoder, FramedRead, FramedWrite};
@@ -20,8 +20,8 @@ use crate::protocol::{self, codec, receive, send, ClientMessage, ServerMessage};
 
 use futures::stream::StreamExt;
 use std::future::Future;
-use std::io;
 use std::task::{Context, Poll};
+use std::{io, thread};
 
 struct ExtractPollRead<'a, F: AsyncRead + ?Sized> {
     reader: &'a mut F,
@@ -89,6 +89,7 @@ struct Client {
 struct State {
     dummy_data: Vec<u8>,
     clients: Mutex<HashMap<u64, Arc<Client>>>,
+    msg: Box<dyn Fn(&str) + Send + Sync>,
 }
 
 async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Error>> {
@@ -105,10 +106,10 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
     send(&mut stream_tx, &hello).await?;
 
     if hello != client_hello {
-        println!(
+        (state.msg)(&format!(
             "Client {} had invalid hello {:?}, expected {:?}",
             addr, client_hello, hello
-        );
+        ));
         return Ok(());
     }
 
@@ -119,7 +120,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
         let request: ClientMessage = receive(&mut stream_rx).await?;
         match request {
             ClientMessage::NewClient => {
-                println!("Serving {}, version {}", addr, hello.version);
+                (state.msg)(&format!("Serving {}, version {}", addr, hello.version));
 
                 let (tx, rx) = unbounded_channel();
 
@@ -172,7 +173,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     send(&mut stream_tx, &message).await?;
                 } else {
                     send(&mut stream_tx, &ServerMessage::MeasurementsDone).await?;
-                    println!("Serving complete for {}", addr);
+                    (state.msg)(&format!("Serving complete for {}", addr));
                     return Ok(());
                 }
             },
@@ -274,7 +275,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 return Ok(());
             }
             ClientMessage::Done => {
-                println!("Serving complete for {}", addr);
+                (state.msg)(&format!("Serving complete for {}", addr));
 
                 return Ok(());
             }
@@ -288,19 +289,19 @@ async fn listen(state: Arc<State>, listener: TcpListener) {
             Ok((socket, addr)) => {
                 let state = state.clone();
                 tokio::spawn(async move {
-                    client(state, socket).await.map_err(|error| {
-                        println!("Error from client {}: {}", addr, error);
+                    client(state.clone(), socket).await.map_err(|error| {
+                        (state.msg)(&format!("Error from client {}: {}", addr, error));
                     })
                 });
             }
             Err(error) => {
-                println!("Error accepting client: {}", error);
+                (state.msg)(&format!("Error accepting client: {}", error));
             }
         }
     }
 }
 
-async fn pong(addr: SocketAddr) -> Result<JoinHandle<()>, Box<dyn Error>> {
+async fn pong(state: Arc<State>, addr: SocketAddr) -> Result<JoinHandle<()>, Box<dyn Error>> {
     let socket = UdpSocket::bind(addr).await?;
 
     Ok(tokio::spawn(async move {
@@ -316,55 +317,89 @@ async fn pong(addr: SocketAddr) -> Result<JoinHandle<()>, Box<dyn Error>> {
                         .send_to(buf, &src)
                         .await
                         .map_err(|error| {
-                            task::spawn_blocking(move || {
-                                eprintln!("Unable to reply to UDP ping: {:?}", error);
-                            });
+                            (state.msg)(&format!("Unable to reply to UDP ping: {:?}", error));
                         })
                         .ok();
                 }
                 Err(error) => {
-                    task::spawn_blocking(move || {
-                        eprintln!("Unable to get UDP ping: {:?}", error);
-                    });
+                    (state.msg)(&format!("Unable to get UDP ping: {:?}", error));
                 }
             }
         }
     }))
 }
 
-async fn serve_async(port: u16) {
+async fn serve_async(
+    port: u16,
+    msg: Box<dyn Fn(&str) + Send + Sync>,
+) -> Result<(), Box<dyn Error>> {
     let state = Arc::new(State {
         dummy_data: crate::test2::data(),
         clients: Mutex::new(HashMap::new()),
+        msg,
     });
 
-    let state2 = state.clone();
-
-    let v6 = TcpListener::bind((Ipv6Addr::UNSPECIFIED, port))
-        .await
-        .unwrap();
+    let v6 = TcpListener::bind((Ipv6Addr::UNSPECIFIED, port)).await?;
     let v4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))
         .await
-        .map_err(|err| eprintln!("Failed to bind IPv4 TCP: {}", err))
+        .map_err(|err| (state.msg)(&format!("Failed to bind IPv4 TCP: {}", err)))
         .ok();
 
-    let pong_v6 = pong(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))
-        .await
-        .unwrap();
-    let pong_v4 = OptionFuture::from(
-        pong(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))
-            .await
-            .map_err(|err| eprintln!("Failed to bind IPv4 UDP: {}", err))
-            .ok(),
-    );
+    pong(
+        state.clone(),
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port),
+    )
+    .await?;
+    pong(
+        state.clone(),
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port),
+    )
+    .await
+    .map_err(|err| (state.msg)(&format!("Failed to bind IPv4 UDP: {}", err)))
+    .ok();
 
-    let v4 = OptionFuture::from(v4.map(|v4| listen(state, v4)));
-    let result = join!(v4, listen(state2, v6), pong_v4, pong_v6);
-    result.2.map(|result| result.unwrap());
-    result.3.unwrap();
+    task::spawn(listen(state.clone(), v6));
+    v4.map(|v4| task::spawn(listen(state.clone(), v4)));
+
+    (state.msg)("Server running...");
+
+    Ok(())
+}
+
+pub fn serve_until(
+    port: u16,
+    msg: Box<dyn Fn(&str) + Send + Sync>,
+    started: Box<dyn FnOnce(Result<(), String>) + Send>,
+    done: Box<dyn FnOnce() + Send>,
+) -> oneshot::Sender<()> {
+    let (tx, rx) = oneshot::channel();
+
+    thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            match serve_async(port, msg).await {
+                Ok(()) => {
+                    started(Ok(()));
+                    rx.await.unwrap();
+                }
+                Err(error) => started(Err(error.to_string())),
+            }
+        });
+
+        done();
+    });
+
+    tx
 }
 
 pub fn serve(port: u16) {
     let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(serve_async(port));
+    rt.block_on(serve_async(
+        port,
+        Box::new(|msg: &str| {
+            let msg = msg.to_owned();
+            task::spawn_blocking(move || println!("{msg}"));
+        }),
+    ))
+    .unwrap();
 }
