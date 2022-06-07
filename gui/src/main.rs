@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{mem, sync::Arc, time::Duration};
+use std::{fs, mem, sync::Arc, time::Duration};
 
 use eframe::{
     egui::{
@@ -15,6 +15,7 @@ use library::{
     protocol, serve2,
     test2::{self, float_max, to_rates, Config},
 };
+use serde::{Deserialize, Serialize};
 use tokio::sync::{
     mpsc::{self, error::TryRecvError},
     oneshot,
@@ -22,23 +23,22 @@ use tokio::sync::{
 
 fn main() {
     let options = eframe::NativeOptions::default();
+    let settings = std::env::current_exe()
+        .ok()
+        .and_then(|exe| fs::read_to_string(exe.with_extension("toml")).ok())
+        .and_then(|data| toml::de::from_str(&data).ok())
+        .unwrap_or_default();
     eframe::run_native(
-        "Speed and latency tester",
+        "Bandwidth and latency tester",
         options,
         Box::new(|_cc| {
             Box::new(Tester {
                 tab: Tab::Client,
+                settings,
                 client_state: ClientState::Stopped,
                 client: None,
                 result: None,
                 msgs: Vec::new(),
-                server_addr: "localhost".to_owned(),
-                download: true,
-                upload: true,
-                both: true,
-                streams: 16,
-                load_duration: 5,
-                grace_duration: 1,
                 server_state: ServerState::Stopped(None),
                 server: None,
                 result_saved: None,
@@ -81,15 +81,34 @@ enum Tab {
     Result,
 }
 
-struct Tester {
-    tab: Tab,
-    server_addr: String,
+#[derive(Serialize, Deserialize)]
+struct Settings {
+    server: String,
     download: bool,
     upload: bool,
     both: bool,
     streams: u64,
     load_duration: u64,
     grace_duration: u64,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            server: "localhost".to_owned(),
+            download: true,
+            upload: true,
+            both: true,
+            streams: 16,
+            load_duration: 5,
+            grace_duration: 1,
+        }
+    }
+}
+
+struct Tester {
+    tab: Tab,
+    settings: Settings,
     server_state: ServerState,
     server: Option<Server>,
     client_state: ClientState,
@@ -128,6 +147,12 @@ impl Drop for Tester {
                 done.blocking_recv().ok();
             });
         });
+        toml::ser::to_string_pretty(&self.settings)
+            .map(|data| {
+                std::env::current_exe()
+                    .map(|exe| fs::write(exe.with_extension("toml"), data.as_bytes()))
+            })
+            .ok();
     }
 }
 
@@ -137,7 +162,7 @@ impl Tester {
         ui.add_enabled_ui(active, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Server address:");
-                ui.add(TextEdit::singleline(&mut self.server_addr));
+                ui.add(TextEdit::singleline(&mut self.settings.server));
 
                 if ui.button("Start test").clicked() {
                     self.client_state = ClientState::Running;
@@ -145,12 +170,12 @@ impl Tester {
 
                     let config = Config {
                         port: protocol::PORT,
-                        streams: 16,
-                        grace_duration: self.grace_duration,
-                        load_duration: self.load_duration,
-                        download: self.download,
-                        upload: self.upload,
-                        both: self.both,
+                        streams: self.settings.streams,
+                        grace_duration: self.settings.grace_duration,
+                        load_duration: self.settings.load_duration,
+                        download: self.settings.download,
+                        upload: self.settings.upload,
+                        both: self.settings.both,
                         ping_interval: 5,
                         bandwidth_interval: 20,
                         plot_transferred: false,
@@ -166,7 +191,7 @@ impl Tester {
 
                     test2::test_callback(
                         config,
-                        &self.server_addr,
+                        &self.settings.server,
                         Arc::new(move |msg| {
                             tx.send(msg.to_string()).unwrap();
                             ctx.request_repaint();
@@ -245,28 +270,28 @@ impl Tester {
 
         ui.add_enabled_ui(active, |ui| {
             Grid::new("settings").show(ui, |ui| {
-                ui.checkbox(&mut self.download, "Download");
+                ui.checkbox(&mut self.settings.download, "Download");
                 ui.label("Streams: ");
                 ui.add(
-                    egui::DragValue::new(&mut self.streams)
+                    egui::DragValue::new(&mut self.settings.streams)
                         .clamp_range(1..=1000)
                         .speed(0.05),
                 );
                 ui.end_row();
 
-                ui.checkbox(&mut self.upload, "Upload");
+                ui.checkbox(&mut self.settings.upload, "Upload");
                 ui.label("Load duration: ");
                 ui.add(
-                    egui::DragValue::new(&mut self.load_duration)
+                    egui::DragValue::new(&mut self.settings.load_duration)
                         .clamp_range(1..=1000)
                         .speed(0.5),
                 );
                 ui.end_row();
 
-                ui.checkbox(&mut self.both, "Both");
+                ui.checkbox(&mut self.settings.both, "Both");
                 ui.label("Grace duration: ");
                 ui.add(
-                    egui::DragValue::new(&mut self.grace_duration)
+                    egui::DragValue::new(&mut self.settings.grace_duration)
                         .clamp_range(1..=1000)
                         .speed(0.5),
                 );
