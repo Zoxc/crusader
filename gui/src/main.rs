@@ -26,7 +26,71 @@ fn main() {
     let settings = std::env::current_exe()
         .ok()
         .and_then(|exe| fs::read_to_string(exe.with_extension("toml")).ok())
-        .and_then(|data| toml::de::from_str(&data).ok())
+        .and_then(|data| toml::from_str(&data).ok())
+        .and_then(|toml: toml::Value| {
+            toml.get("client")
+                .and_then(|table| table.as_table())
+                .map(|table| {
+                    let mut settings = Settings::default();
+
+                    table
+                        .get("server")
+                        .and_then(|value| value.as_str())
+                        .map(|value| settings.server = value.to_string());
+
+                    table
+                        .get("download")
+                        .and_then(|value| value.as_bool())
+                        .map(|value| settings.download = value);
+
+                    table
+                        .get("upload")
+                        .and_then(|value| value.as_bool())
+                        .map(|value| settings.upload = value);
+
+                    table
+                        .get("both")
+                        .and_then(|value| value.as_bool())
+                        .map(|value| settings.both = value);
+
+                    table
+                        .get("streams")
+                        .and_then(|value| {
+                            value.as_integer().and_then(|value| value.try_into().ok())
+                        })
+                        .map(|value| settings.streams = value);
+
+                    table
+                        .get("load_duration")
+                        .and_then(|value| {
+                            value.as_integer().and_then(|value| value.try_into().ok())
+                        })
+                        .map(|value| settings.load_duration = value);
+
+                    table
+                        .get("grace_duration")
+                        .and_then(|value| {
+                            value.as_integer().and_then(|value| value.try_into().ok())
+                        })
+                        .map(|value| settings.grace_duration = value);
+
+                    table
+                        .get("latency_sample_rate")
+                        .and_then(|value| {
+                            value.as_integer().and_then(|value| value.try_into().ok())
+                        })
+                        .map(|value| settings.latency_sample_rate = value);
+
+                    table
+                        .get("bandwidth_sample_rate")
+                        .and_then(|value| {
+                            value.as_integer().and_then(|value| value.try_into().ok())
+                        })
+                        .map(|value| settings.bandwidth_sample_rate = value);
+
+                    settings
+                })
+        })
         .unwrap_or_default();
     eframe::run_native(
         "Bandwidth and latency tester",
@@ -65,12 +129,14 @@ enum ServerState {
 
 struct Client {
     rx: mpsc::UnboundedReceiver<String>,
-    done: oneshot::Receiver<Result<TestResult, String>>,
+    done: Option<oneshot::Receiver<Option<Result<TestResult, String>>>>,
+    abort: Option<oneshot::Sender<()>>,
 }
 
 #[derive(PartialEq, Eq)]
 enum ClientState {
     Stopped,
+    Stopping,
     Running,
 }
 
@@ -82,6 +148,11 @@ enum Tab {
 }
 
 #[derive(Serialize, Deserialize)]
+struct TomlSettings {
+    client: Option<Settings>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct Settings {
     server: String,
     download: bool,
@@ -90,6 +161,8 @@ struct Settings {
     streams: u64,
     load_duration: u64,
     grace_duration: u64,
+    latency_sample_rate: u64,
+    bandwidth_sample_rate: u64,
 }
 
 impl Default for Settings {
@@ -102,6 +175,8 @@ impl Default for Settings {
             streams: 16,
             load_duration: 5,
             grace_duration: 1,
+            latency_sample_rate: 5,
+            bandwidth_sample_rate: 20,
         }
     }
 }
@@ -139,6 +214,17 @@ pub fn handle_bytes(data: &[(u64, f64)], start: f64) -> Vec<(f64, f64)> {
 
 impl Drop for Tester {
     fn drop(&mut self) {
+        // Stop client
+        self.client.as_mut().map(|client| {
+            mem::take(&mut client.abort).map(|abort| {
+                abort.send(()).unwrap();
+            });
+            mem::take(&mut client.done).map(|done| {
+                done.blocking_recv().ok();
+            });
+        });
+
+        // Stop server
         self.server.as_mut().map(|server| {
             mem::take(&mut server.stop).map(|stop| {
                 stop.send(()).unwrap();
@@ -147,123 +233,145 @@ impl Drop for Tester {
                 done.blocking_recv().ok();
             });
         });
-        toml::ser::to_string_pretty(&self.settings)
-            .map(|data| {
-                std::env::current_exe()
-                    .map(|exe| fs::write(exe.with_extension("toml"), data.as_bytes()))
-            })
-            .ok();
+
+        // Store settings
+        toml::ser::to_string_pretty(&TomlSettings {
+            client: Some(self.settings.clone()),
+        })
+        .map(|data| {
+            std::env::current_exe()
+                .map(|exe| fs::write(exe.with_extension("toml"), data.as_bytes()))
+        })
+        .ok();
     }
 }
 
 impl Tester {
+    fn start_client(&mut self, ctx: &egui::Context) {
+        self.client_state = ClientState::Running;
+        self.msgs.clear();
+
+        let config = Config {
+            port: protocol::PORT,
+            streams: self.settings.streams,
+            grace_duration: self.settings.grace_duration,
+            load_duration: self.settings.load_duration,
+            download: self.settings.download,
+            upload: self.settings.upload,
+            both: self.settings.both,
+            ping_interval: self.settings.latency_sample_rate,
+            bandwidth_interval: self.settings.bandwidth_sample_rate,
+            plot_transferred: false,
+            plot_width: None,
+            plot_height: None,
+        };
+
+        let (signal_done, done) = oneshot::channel();
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        let ctx = ctx.clone();
+        let ctx_ = ctx.clone();
+
+        let abort = test2::test_callback(
+            config,
+            &self.settings.server,
+            Arc::new(move |msg| {
+                tx.send(msg.to_string()).unwrap();
+                ctx.request_repaint();
+            }),
+            Box::new(move |result| {
+                signal_done
+                    .send(result.map(|result| {
+                        result.map(|result| {
+                            let start = result.start.as_secs_f64();
+                            let download = handle_bytes(&result.combined_download_bytes, start);
+                            let upload = handle_bytes(&result.combined_upload_bytes, start);
+                            let both =
+                                handle_bytes(result.both_bytes.as_deref().unwrap_or(&[]), start);
+                            let latency: Vec<_> = result
+                                .pings
+                                .iter()
+                                .filter(|v| v.1 >= result.start)
+                                .filter_map(|(_, sent, latency)| {
+                                    latency.map(|latency| {
+                                        (sent.as_secs_f64() - start, latency.as_secs_f64() * 1000.0)
+                                    })
+                                })
+                                .collect();
+                            let loss = result
+                                .pings
+                                .iter()
+                                .filter(|v| v.1 >= result.start)
+                                .filter_map(|(_, sent, latency)| {
+                                    if latency.is_none() {
+                                        Some(sent.as_secs_f64() - start)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            let download_max = float_max(download.iter().map(|v| v.1));
+                            let upload_max = float_max(upload.iter().map(|v| v.1));
+                            let both_max = float_max(both.iter().map(|v| v.1));
+                            let bandwidth_max =
+                                float_max([download_max, upload_max, both_max].into_iter());
+                            let latency_max = float_max(latency.iter().map(|v| v.1));
+                            TestResult {
+                                result,
+                                download,
+                                upload,
+                                both,
+                                latency,
+                                loss,
+                                bandwidth_max,
+                                latency_max,
+                            }
+                        })
+                    }))
+                    .map_err(|_| ())
+                    .unwrap();
+                ctx_.request_repaint();
+            }),
+        );
+
+        self.client = Some(Client {
+            done: Some(done),
+            rx,
+            abort: Some(abort),
+        });
+        self.client_state = ClientState::Running;
+        self.result = None;
+        self.result_saved = None;
+    }
+
     fn client(&mut self, ctx: &egui::Context, ui: &mut Ui) {
         let active = self.client_state == ClientState::Stopped;
-        ui.add_enabled_ui(active, |ui| {
-            ui.horizontal(|ui| {
+
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(active, |ui| {
                 ui.label("Server address:");
                 ui.add(TextEdit::singleline(&mut self.settings.server));
-
-                if ui.button("Start test").clicked() {
-                    self.client_state = ClientState::Running;
-                    self.msgs.clear();
-
-                    let config = Config {
-                        port: protocol::PORT,
-                        streams: self.settings.streams,
-                        grace_duration: self.settings.grace_duration,
-                        load_duration: self.settings.load_duration,
-                        download: self.settings.download,
-                        upload: self.settings.upload,
-                        both: self.settings.both,
-                        ping_interval: 5,
-                        bandwidth_interval: 20,
-                        plot_transferred: false,
-                        plot_width: None,
-                        plot_height: None,
-                    };
-
-                    let (signal_done, done) = oneshot::channel();
-                    let (tx, rx) = mpsc::unbounded_channel();
-
-                    let ctx = ctx.clone();
-                    let ctx_ = ctx.clone();
-
-                    test2::test_callback(
-                        config,
-                        &self.settings.server,
-                        Arc::new(move |msg| {
-                            tx.send(msg.to_string()).unwrap();
-                            ctx.request_repaint();
-                        }),
-                        Box::new(move |result| {
-                            signal_done
-                                .send(result.map(|result| {
-                                    let start = result.start.as_secs_f64();
-                                    let download =
-                                        handle_bytes(&result.combined_download_bytes, start);
-                                    let upload = handle_bytes(&result.combined_upload_bytes, start);
-                                    let both = handle_bytes(
-                                        result.both_bytes.as_deref().unwrap_or(&[]),
-                                        start,
-                                    );
-                                    let latency: Vec<_> = result
-                                        .pings
-                                        .iter()
-                                        .filter(|v| v.1 >= result.start)
-                                        .filter_map(|(_, sent, latency)| {
-                                            latency.map(|latency| {
-                                                (
-                                                    sent.as_secs_f64() - start,
-                                                    latency.as_secs_f64() * 1000.0,
-                                                )
-                                            })
-                                        })
-                                        .collect();
-                                    let loss = result
-                                        .pings
-                                        .iter()
-                                        .filter(|v| v.1 >= result.start)
-                                        .filter_map(|(_, sent, latency)| {
-                                            if latency.is_none() {
-                                                Some(sent.as_secs_f64() - start)
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect();
-                                    let download_max = float_max(download.iter().map(|v| v.1));
-                                    let upload_max = float_max(upload.iter().map(|v| v.1));
-                                    let both_max = float_max(both.iter().map(|v| v.1));
-                                    let bandwidth_max =
-                                        float_max([download_max, upload_max, both_max].into_iter());
-                                    let latency_max = float_max(latency.iter().map(|v| v.1));
-                                    println!(
-                                    "bandwidth_max: {bandwidth_max}, latency_max: {latency_max}"
-                                );
-                                    TestResult {
-                                        result,
-                                        download,
-                                        upload,
-                                        both,
-                                        latency,
-                                        loss,
-                                        bandwidth_max,
-                                        latency_max,
-                                    }
-                                }))
-                                .map_err(|_| ())
-                                .unwrap();
-                            ctx_.request_repaint();
-                        }),
-                    );
-
-                    self.client = Some(Client { done, rx });
-                    self.client_state = ClientState::Running;
-                    self.result = None;
-                    self.result_saved = None;
-                }
             });
+
+            match self.client_state {
+                ClientState::Running => {
+                    if ui.button("Stop test").clicked() {
+                        let client = self.client.as_mut().unwrap();
+                        mem::take(&mut client.abort).unwrap().send(()).unwrap();
+                        self.client_state = ClientState::Stopping;
+                    }
+                }
+                ClientState::Stopping => {
+                    ui.add_enabled_ui(false, |ui| {
+                        let _ = ui.button("Stopping test..");
+                    });
+                }
+                ClientState::Stopped => {
+                    if ui.button("Start test").clicked() {
+                        self.start_client(ctx)
+                    }
+                }
+            }
         });
 
         ui.separator();
@@ -271,55 +379,82 @@ impl Tester {
         ui.add_enabled_ui(active, |ui| {
             Grid::new("settings").show(ui, |ui| {
                 ui.checkbox(&mut self.settings.download, "Download");
+                ui.allocate_space(vec2(1.0, 1.0));
                 ui.label("Streams: ");
                 ui.add(
                     egui::DragValue::new(&mut self.settings.streams)
                         .clamp_range(1..=1000)
                         .speed(0.05),
                 );
+                ui.label("");
+                ui.allocate_space(vec2(1.0, 1.0));
+                ui.label("Latency sample rate");
+                ui.add(
+                    egui::DragValue::new(&mut self.settings.latency_sample_rate)
+                        .clamp_range(1..=1000)
+                        .speed(0.05),
+                );
+                ui.label("milliseconds");
                 ui.end_row();
 
                 ui.checkbox(&mut self.settings.upload, "Upload");
+                ui.label("");
                 ui.label("Load duration: ");
                 ui.add(
                     egui::DragValue::new(&mut self.settings.load_duration)
                         .clamp_range(1..=1000)
-                        .speed(0.5),
+                        .speed(0.05),
                 );
+                ui.label("seconds");
+                ui.label("");
+                ui.label("Bandwidth sample rate");
+                ui.add(
+                    egui::DragValue::new(&mut self.settings.bandwidth_sample_rate)
+                        .clamp_range(1..=1000)
+                        .speed(0.05),
+                );
+                ui.label("milliseconds");
                 ui.end_row();
 
                 ui.checkbox(&mut self.settings.both, "Both");
+                ui.label("");
                 ui.label("Grace duration: ");
                 ui.add(
                     egui::DragValue::new(&mut self.settings.grace_duration)
                         .clamp_range(1..=1000)
-                        .speed(0.5),
+                        .speed(0.05),
                 );
+                ui.label("seconds");
                 ui.end_row();
             });
         });
 
-        if self.client_state == ClientState::Running {
+        if self.client_state == ClientState::Running || self.client_state == ClientState::Stopping {
             let client = self.client.as_mut().unwrap();
-            if let Ok(result) = client.done.try_recv() {
+
+            while let Ok(msg) = client.rx.try_recv() {
+                println!("[Client] {msg}");
+                self.msgs.push(msg);
+            }
+
+            if let Ok(result) = client.done.as_mut().unwrap().try_recv() {
                 match result {
-                    Ok(result) => {
+                    Some(Ok(result)) => {
                         self.msgs.push("Test complete.".to_owned());
                         self.result = Some(result);
                         if self.tab == Tab::Client {
                             self.tab = Tab::Result;
                         }
                     }
-                    Err(error) => {
+                    Some(Err(error)) => {
                         self.msgs.push(format!("Error: {error}"));
                     }
+                    None => {
+                        self.msgs.push("Aborted...".to_owned());
+                    }
                 }
+                self.client = None;
                 self.client_state = ClientState::Stopped;
-            }
-
-            while let Ok(msg) = client.rx.try_recv() {
-                println!("[Client] {msg}");
-                self.msgs.push(msg);
             }
         }
 
@@ -559,6 +694,13 @@ impl Tester {
 
 impl eframe::App for Tester {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let mut style = ctx.style().clone();
+        let style_ = Arc::make_mut(&mut style);
+        style_.spacing.button_padding = vec2(6.0, 0.0);
+        style_.spacing.interact_size.y = 30.0;
+        style_.spacing.item_spacing = vec2(5.0, 5.0);
+        ctx.set_style(style);
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.selectable_value(&mut self.tab, Tab::Client, "Client");

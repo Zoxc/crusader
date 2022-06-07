@@ -2,9 +2,9 @@
 
 ## Setup
 
-Run `cargo build --release` to build the executable which is placed in `target/release`.
+Run `cargo build --release` to build the executables which are placed in `target/release`.
 
-## Usage
+## Command line usage
 
 To host a server run:
 ```sh
@@ -18,3 +18,10 @@ To do a test run:
 tool test <server-host>
 ```
 This produces an graph output file named `plot.png`.
+
+
+## Graphical interface
+
+There is also a binary with a graphical interface allowing you to use a client, a server and interact with results.
+
+<img src="media/gui.png">

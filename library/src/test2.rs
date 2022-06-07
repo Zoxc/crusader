@@ -18,8 +18,8 @@ use std::{
 use std::{mem, thread};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, UdpSocket};
-use tokio::sync::{watch, Semaphore};
-use tokio::task::{yield_now, JoinHandle};
+use tokio::sync::{oneshot, watch, Semaphore};
+use tokio::task::{self, yield_now, JoinHandle};
 use tokio::{
     net::{self},
     time,
@@ -1128,15 +1128,31 @@ pub fn test_callback(
     config: Config,
     host: &str,
     msg: Arc<dyn Fn(&str) + Send + Sync>,
-    done: Box<dyn FnOnce(Result<TestResult, String>) + Send>,
-) {
+    done: Box<dyn FnOnce(Option<Result<TestResult, String>>) + Send>,
+) -> oneshot::Sender<()> {
+    let (tx, rx) = oneshot::channel();
     let host = host.to_string();
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
+
         done(rt.block_on(async move {
-            test_async(config, &host, msg)
-                .await
-                .map_err(|error| error.to_string())
+            let mut result = task::spawn(async move {
+                test_async(config, &host, msg)
+                    .await
+                    .map_err(|error| error.to_string())
+            })
+            .fuse();
+
+            select! {
+                result = result => {
+                    Some(result.map_err(|error| error.to_string()).and_then(|result| result))
+                },
+                result = rx.fuse() => {
+                    result.unwrap();
+                    None
+                },
+            }
         }));
     });
+    tx
 }
