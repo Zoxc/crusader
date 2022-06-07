@@ -461,7 +461,7 @@ pub fn save_graph(result: &TestResult, name: &str) -> String {
     )
 }
 
-fn float_max(iter: impl Iterator<Item = f64>) -> f64 {
+pub fn float_max(iter: impl Iterator<Item = f64>) -> f64 {
     let mut max = iter.fold(0. / 0., f64::max);
 
     if max.is_nan() {

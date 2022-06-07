@@ -5,15 +5,15 @@ use std::{mem, sync::Arc, time::Duration};
 use eframe::{
     egui::{
         self,
-        plot::{HLine, Legend, Line, LinkedAxisGroup, Plot, Value, Values},
-        Layout, Ui,
+        plot::{Legend, Line, LinkedAxisGroup, Plot, VLine, Value, Values},
+        Grid, Layout, TextEdit, Ui,
     },
-    emath::{Align, Vec2},
+    emath::{vec2, Align, Vec2},
     epaint::Color32,
 };
 use library::{
     protocol, serve2,
-    test2::{self, to_rates, Config},
+    test2::{self, float_max, to_rates, Config},
 };
 use tokio::sync::{
     mpsc::{self, error::TryRecvError},
@@ -34,8 +34,11 @@ fn main() {
                 msgs: Vec::new(),
                 server_addr: "localhost".to_owned(),
                 download: true,
-                upload: false,
-                both: false,
+                upload: true,
+                both: true,
+                streams: 16,
+                load_duration: 5,
+                grace_duration: 1,
                 server_state: ServerState::Stopped(None),
                 server: None,
                 result_saved: None,
@@ -84,6 +87,9 @@ struct Tester {
     download: bool,
     upload: bool,
     both: bool,
+    streams: u64,
+    load_duration: u64,
+    grace_duration: u64,
     server_state: ServerState,
     server: Option<Server>,
     client_state: ClientState,
@@ -101,6 +107,8 @@ pub struct TestResult {
     both: Vec<(f64, f64)>,
     latency: Vec<(f64, f64)>,
     loss: Vec<f64>,
+    latency_max: f64,
+    bandwidth_max: f64,
 }
 
 pub fn handle_bytes(data: &[(u64, f64)], start: f64) -> Vec<(f64, f64)> {
@@ -126,10 +134,10 @@ impl Drop for Tester {
 impl Tester {
     fn client(&mut self, ctx: &egui::Context, ui: &mut Ui) {
         let active = self.client_state == ClientState::Stopped;
-        ui.horizontal_wrapped(|ui| {
-            ui.add_enabled_ui(active, |ui| {
+        ui.add_enabled_ui(active, |ui| {
+            ui.horizontal(|ui| {
                 ui.label("Server address:");
-                ui.text_edit_singleline(&mut self.server_addr);
+                ui.add(TextEdit::singleline(&mut self.server_addr));
 
                 if ui.button("Start test").clicked() {
                     self.client_state = ClientState::Running;
@@ -138,8 +146,8 @@ impl Tester {
                     let config = Config {
                         port: protocol::PORT,
                         streams: 16,
-                        grace_duration: 1,
-                        load_duration: 1,
+                        grace_duration: self.grace_duration,
+                        load_duration: self.load_duration,
                         download: self.download,
                         upload: self.upload,
                         both: self.both,
@@ -174,9 +182,10 @@ impl Tester {
                                         result.both_bytes.as_deref().unwrap_or(&[]),
                                         start,
                                     );
-                                    let latency = result
+                                    let latency: Vec<_> = result
                                         .pings
                                         .iter()
+                                        .filter(|v| v.1 >= result.start)
                                         .filter_map(|(_, sent, latency)| {
                                             latency.map(|latency| {
                                                 (
@@ -189,6 +198,7 @@ impl Tester {
                                     let loss = result
                                         .pings
                                         .iter()
+                                        .filter(|v| v.1 >= result.start)
                                         .filter_map(|(_, sent, latency)| {
                                             if latency.is_none() {
                                                 Some(sent.as_secs_f64() - start)
@@ -197,6 +207,15 @@ impl Tester {
                                             }
                                         })
                                         .collect();
+                                    let download_max = float_max(download.iter().map(|v| v.1));
+                                    let upload_max = float_max(upload.iter().map(|v| v.1));
+                                    let both_max = float_max(both.iter().map(|v| v.1));
+                                    let bandwidth_max =
+                                        float_max([download_max, upload_max, both_max].into_iter());
+                                    let latency_max = float_max(latency.iter().map(|v| v.1));
+                                    println!(
+                                    "bandwidth_max: {bandwidth_max}, latency_max: {latency_max}"
+                                );
                                     TestResult {
                                         result,
                                         download,
@@ -204,6 +223,8 @@ impl Tester {
                                         both,
                                         latency,
                                         loss,
+                                        bandwidth_max,
+                                        latency_max,
                                     }
                                 }))
                                 .map_err(|_| ())
@@ -218,16 +239,40 @@ impl Tester {
                     self.result_saved = None;
                 }
             });
+        });
 
-            ui.collapsing("Options", |ui| {
-                ui.add_enabled_ui(active, |ui| {
-                    ui.checkbox(&mut self.download, "Download");
-                    ui.checkbox(&mut self.upload, "Upload");
-                    ui.checkbox(&mut self.both, "Both");
-                });
+        ui.separator();
+
+        ui.add_enabled_ui(active, |ui| {
+            Grid::new("settings").show(ui, |ui| {
+                ui.checkbox(&mut self.download, "Download");
+                ui.label("Streams: ");
+                ui.add(
+                    egui::DragValue::new(&mut self.streams)
+                        .clamp_range(1..=1000)
+                        .speed(0.05),
+                );
+                ui.end_row();
+
+                ui.checkbox(&mut self.upload, "Upload");
+                ui.label("Load duration: ");
+                ui.add(
+                    egui::DragValue::new(&mut self.load_duration)
+                        .clamp_range(1..=1000)
+                        .speed(0.5),
+                );
+                ui.end_row();
+
+                ui.checkbox(&mut self.both, "Both");
+                ui.label("Grace duration: ");
+                ui.add(
+                    egui::DragValue::new(&mut self.grace_duration)
+                        .clamp_range(1..=1000)
+                        .speed(0.5),
+                );
+                ui.end_row();
             });
         });
-        ui.separator();
 
         if self.client_state == ClientState::Running {
             let client = self.client.as_mut().unwrap();
@@ -251,6 +296,10 @@ impl Tester {
                 println!("[Client] {msg}");
                 self.msgs.push(msg);
             }
+        }
+
+        if !self.msgs.is_empty() {
+            ui.separator();
         }
 
         ui.vertical(|ui| {
@@ -279,17 +328,26 @@ impl Tester {
         });
         ui.separator();
 
+        ui.allocate_space(vec2(1.0, 15.0));
+
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+            let duration = result.result.duration.as_secs_f64() * 1.1;
+
             // Packet loss
             let plot = Plot::new("loss")
                 .legend(Legend::default())
                 .show_axes([false, false])
                 .link_axis(self.axis.clone())
-                .height(20.0);
+                .include_x(0.0)
+                .include_x(duration)
+                .include_y(0.0)
+                .include_y(1.0)
+                .height(20.0)
+                .label_formatter(|_, value| format!("Time = {:.2} s", value.x));
 
             plot.show(ui, |plot_ui| {
                 for loss in &result.loss {
-                    plot_ui.hline(HLine::new(*loss).color(Color32::from_rgb(193, 85, 85)))
+                    plot_ui.vline(VLine::new(*loss).color(Color32::from_rgb(193, 85, 85)))
                 }
             });
             ui.label("Packet loss");
@@ -299,7 +357,14 @@ impl Tester {
             let plot = Plot::new("ping")
                 .legend(Legend::default())
                 .height(ui.available_height() / 2.0)
-                .link_axis(self.axis.clone());
+                .link_axis(self.axis.clone())
+                .include_x(0.0)
+                .include_x(duration)
+                .include_y(0.0)
+                .include_y(result.latency_max * 1.1)
+                .label_formatter(|_, value| {
+                    format!("Latency = {:.2} ms\nTime = {:.2} s", value.y, value.x)
+                });
 
             plot.show(ui, |plot_ui| {
                 let latency = result.latency.iter().map(|v| Value::new(v.0 as f64, v.1));
@@ -314,7 +379,14 @@ impl Tester {
             let plot = Plot::new("result")
                 .legend(Legend::default())
                 .link_axis(self.axis.clone())
-                .set_margin_fraction(Vec2 { x: 0.2, y: 0.0 });
+                .set_margin_fraction(Vec2 { x: 0.2, y: 0.0 })
+                .include_x(0.0)
+                .include_x(duration)
+                .include_y(0.0)
+                .include_y(result.bandwidth_max * 1.1)
+                .label_formatter(|_, value| {
+                    format!("Bandwidth = {:.2} Mbps\nTime = {:.2} s", value.y, value.x)
+                });
 
             plot.show(ui, |plot_ui| {
                 if result.result.config.download {
@@ -428,6 +500,7 @@ impl Tester {
                 if let Ok(result) = server.started.try_recv() {
                     if let Err(error) = result {
                         self.server_state = ServerState::Stopped(Some(error));
+                        self.server = None;
                     } else {
                         self.server_state = ServerState::Running;
                     }
