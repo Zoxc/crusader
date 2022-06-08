@@ -22,7 +22,11 @@ use tokio::sync::{
 };
 
 fn main() {
-    let options = eframe::NativeOptions::default();
+    let mut options = eframe::NativeOptions::default();
+
+    // VSync causes performance issues so turn it off.
+    options.vsync = false;
+
     let settings = std::env::current_exe()
         .ok()
         .and_then(|exe| fs::read_to_string(exe.with_extension("toml")).ok())
