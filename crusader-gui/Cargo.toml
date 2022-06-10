@@ -1,0 +1,15 @@
+[package]
+name = "crusader-gui"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+toml = "0.5.9"
+serde = { version = "1.0.137", features = ["derive"] }
+library = { path = "../library" }
+tokio = { version = "1.18.2", features = ["full"] }
+gui = { path = "../gui" }
+eframe = { path = "../../../egui/egui/eframe", default_features = false, features = ["wgpu", "default_fonts"] }
+#eframe = "0.18.0"

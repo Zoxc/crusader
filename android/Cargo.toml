@@ -1,0 +1,41 @@
+[package]
+name = "crusader_android"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+gui = { path = "../gui" }
+eframe = { path = "../../../egui/egui/eframe", default_features = false, features = ["wgpu", "default_fonts"] }
+#winit = { path = "../../../egui/winit" }
+#winit = "0.26.1"
+
+[target.'cfg(target_os = "android")'.dependencies]
+ndk-glue = "0.6"
+#ndk-glue = { path = "../../../android/android-ndk-rs/ndk-glue"} # Substitute this with the latest ndk-glue version you wish to use
+
+[package.metadata.android]
+# Specifies the package property of the manifest.
+#package = "com.foo.bar"
+
+# Specifies the array of targets to build for.
+#build_targets = [ "armv7-linux-androideabi", "aarch64-linux-android", "i686-linux-android", "x86_64-linux-android" ]
+#build_targets = [  "i686-linux-android" ]
+build_targets = [  "aarch64-linux-android" ]
+
+# Name for final APK file.
+# Defaults to package name.
+apk_name = "crusader"
+
+# See https://developer.android.com/guide/topics/manifest/uses-sdk-element
+[package.metadata.android.sdk]
+min_sdk_version = 30
+target_sdk_version = 30
+
+[package.metadata.android.application]
+label = "Crusader"
+
+[[package.metadata.android.uses_feature]]
+opengles_version = [3, 1]

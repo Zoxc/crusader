@@ -1,8 +1,14 @@
 [workspace]
-members = ["tool", "library", "gui"]
+members = ["tool", "library", "gui", "android", "cursader-gui"]
+resolver="2"
 
 [profile.dev]
 panic = "abort"
 
 [profile.release]
 panic = "abort"
+
+[patch.crates-io]
+arboard = { git = "https://github.com/Yeicor/arboard.git", rev = "574e30e32a2c122c14e29bbc963997cded582c63" }
+glutin = { git = "https://github.com/rust-windowing/glutin.git"}
+winit = { path = "../../egui/winit"}
