@@ -2,12 +2,12 @@ use bytes::{Bytes, BytesMut};
 use futures::future::FutureExt;
 use futures::{pin_mut, select, Sink, Stream};
 use futures::{stream, StreamExt};
-use plotters::style::RGBColor;
 use rand::prelude::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::thread;
 use std::{
     error::Error,
     io::Cursor,
@@ -15,7 +15,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use std::{mem, thread};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::{oneshot, watch, Semaphore};
@@ -409,7 +408,9 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<TestResult
     Ok(result)
 }
 
+#[cfg(feature = "graph")]
 pub fn save_graph(result: &TestResult, name: &str) -> String {
+    use plotters::style::RGBColor;
     let mut bandwidth = Vec::new();
 
     result.both_bytes.as_ref().map(|both_bytes| {
@@ -838,6 +839,7 @@ fn unique(name: &str) -> String {
     }
 }
 
+#[cfg(feature = "graph")]
 fn graph(
     config: &Config,
     name: &str,
@@ -1121,6 +1123,7 @@ pub fn test(config: Config, host: &str) {
         .block_on(test_async(config, host, Arc::new(|msg| println!("{msg}"))))
         .unwrap();
     println!("Writing graphs...");
+    #[cfg(feature = "graph")]
     save_graph(&result, "plot");
 }
 

@@ -490,11 +490,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "crusader-gui"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "gui",
+ "library",
+ "serde",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "crusader_android"
 version = "0.1.0"
 dependencies = [
  "eframe",
  "gui",
+ "jni",
+ "ndk-context",
  "ndk-glue",
 ]
 
@@ -633,6 +647,8 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
+ "egui_glow",
+ "glow",
  "glutin",
  "js-sys",
  "percent-encoding",
@@ -677,6 +693,19 @@ dependencies = [
  "tracing",
  "webbrowser",
  "winit",
+]
+
+[[package]]
+name = "egui_glow"
+version = "0.18.1"
+dependencies = [
+ "bytemuck",
+ "egui",
+ "glow",
+ "memoffset",
+ "tracing",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -1095,6 +1124,7 @@ dependencies = [
 name = "gui"
 version = "0.1.0"
 dependencies = [
+ "eframe",
  "library",
  "serde",
  "tokio",

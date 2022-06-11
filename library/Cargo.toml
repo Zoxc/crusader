@@ -10,10 +10,12 @@ chrono = "0.4.19"
 bincode = "1.3.3"
 serde = { version = "1.0.137", features = ["derive"] }
 rand = "0.8.5"
-plotters = "0.3.1"
+plotters = { version ="0.3.1", optional = true }
 parking_lot = "0.12.0"
 tokio = { version = "1.18.2", features = ["full"] }
 tokio-util = { version =  "0.7.2", features = ["codec"] }
 futures = "0.3.21"
 bytes = "1.1.0"
 
+[features]
+graph = ["plotters"]

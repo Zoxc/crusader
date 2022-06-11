@@ -1,6 +1,6 @@
 [workspace]
-members = ["tool", "library", "gui", "android", "cursader-gui"]
-resolver="2"
+members = ["tool", "library", "gui", "android", "crusader-gui"]
+resolver = "2"
 
 [profile.dev]
 panic = "abort"

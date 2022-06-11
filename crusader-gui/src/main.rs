@@ -1,24 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{fs, mem, sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use eframe::{
-    egui::{
-        self,
-        plot::{Legend, Line, LinkedAxisGroup, Plot, VLine, Value, Values},
-        Grid, Layout, TextEdit, Ui,
-    },
-    emath::{vec2, Align, Vec2},
-    epaint::Color32,
-};
-use library::{
-    protocol, serve2,
-    test2::{self, float_max, to_rates, Config},
-};
-use serde::{Deserialize, Serialize};
-use tokio::sync::{
-    mpsc::{self, error::TryRecvError},
-    oneshot,
+    egui::{self},
+    emath::vec2,
 };
 
 fn main() {
@@ -29,87 +15,29 @@ fn main() {
 
     let settings = std::env::current_exe()
         .ok()
-        .and_then(|exe| fs::read_to_string(exe.with_extension("toml")).ok())
-        .and_then(|data| toml::from_str(&data).ok())
-        .and_then(|toml: toml::Value| {
-            toml.get("client")
-                .and_then(|table| table.as_table())
-                .map(|table| {
-                    let mut settings = Settings::default();
-
-                    table
-                        .get("server")
-                        .and_then(|value| value.as_str())
-                        .map(|value| settings.server = value.to_string());
-
-                    table
-                        .get("download")
-                        .and_then(|value| value.as_bool())
-                        .map(|value| settings.download = value);
-
-                    table
-                        .get("upload")
-                        .and_then(|value| value.as_bool())
-                        .map(|value| settings.upload = value);
-
-                    table
-                        .get("both")
-                        .and_then(|value| value.as_bool())
-                        .map(|value| settings.both = value);
-
-                    table
-                        .get("streams")
-                        .and_then(|value| {
-                            value.as_integer().and_then(|value| value.try_into().ok())
-                        })
-                        .map(|value| settings.streams = value);
-
-                    table
-                        .get("load_duration")
-                        .and_then(|value| {
-                            value.as_integer().and_then(|value| value.try_into().ok())
-                        })
-                        .map(|value| settings.load_duration = value);
-
-                    table
-                        .get("grace_duration")
-                        .and_then(|value| {
-                            value.as_integer().and_then(|value| value.try_into().ok())
-                        })
-                        .map(|value| settings.grace_duration = value);
-
-                    table
-                        .get("latency_sample_rate")
-                        .and_then(|value| {
-                            value.as_integer().and_then(|value| value.try_into().ok())
-                        })
-                        .map(|value| settings.latency_sample_rate = value);
-
-                    table
-                        .get("bandwidth_sample_rate")
-                        .and_then(|value| {
-                            value.as_integer().and_then(|value| value.try_into().ok())
-                        })
-                        .map(|value| settings.bandwidth_sample_rate = value);
-
-                    settings
-                })
-        })
+        .map(|exe| gui::load_settings(&exe.with_extension("toml")))
         .unwrap_or_default();
+
     eframe::run_native(
         "Bandwidth and latency tester",
         options,
-        Box::new(|_cc| Box::new(Tester {})),
+        Box::new(|_cc| {
+            Box::new(App {
+                tester: gui::Tester::new(settings),
+            })
+        }),
     );
 }
 
-struct Tester {}
+struct App {
+    tester: gui::Tester,
+}
 
-impl Drop for Tester {
+impl Drop for App {
     fn drop(&mut self) {}
 }
 
-impl eframe::App for Tester {
+impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut style = ctx.style().clone();
         let style_ = Arc::make_mut(&mut style);
@@ -119,7 +47,7 @@ impl eframe::App for Tester {
         ctx.set_style(style);
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label("App!");
+            self.tester.show(ctx, ui);
         });
     }
 }
