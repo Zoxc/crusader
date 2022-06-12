@@ -3,14 +3,14 @@
 use std::{fs, mem, sync::Arc, time::Duration};
 
 use crusader_lib::{
-    protocol, serve2,
+    protocol, serve,
     test::{self, float_max, to_rates, Config},
 };
 use eframe::{
     egui::{
         self,
         plot::{Legend, Line, LinkedAxisGroup, Plot, VLine, Value, Values},
-        Grid, Layout, TextEdit, Ui,
+        Grid, Layout, ScrollArea, TextEdit, TextStyle, Ui,
     },
     emath::{vec2, Align, Vec2},
     epaint::Color32,
@@ -612,7 +612,7 @@ impl Tester {
                     let (signal_started, started) = oneshot::channel();
                     let (signal_done, done) = oneshot::channel();
 
-                    let stop = serve2::serve_until(
+                    let stop = serve::serve_until(
                         protocol::PORT,
                         Box::new(move |msg| {
                             tx.send(msg.to_string()).unwrap();

@@ -83,10 +83,10 @@ fn main() {
                 config.both = both;
             }
 
-            library::test::test(config, &server);
+            crusader_lib::test::test(config, &server);
         }
         Commands::Serve { port } => {
-            library::serve::serve(*port);
+            crusader_lib::serve::serve(*port);
         }
     }
 }
