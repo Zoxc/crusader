@@ -406,6 +406,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "crusader"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "library",
+]
+
+[[package]]
+name = "crusader-gui"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "library",
+ "serde",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "cty"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -912,17 +931,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3da5951a1569dbab865c6f2a863efafff193a93caf05538d193e9e3816d21696"
 dependencies = [
  "gl_generator",
-]
-
-[[package]]
-name = "gui"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "library",
- "serde",
- "tokio",
- "toml",
 ]
 
 [[package]]
@@ -1984,14 +1992,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d82e1a7758622a465f8cee077614c73484dac5b836c02ff6a40d5d1010324d7"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "tool"
-version = "0.1.0"
-dependencies = [
- "clap",
- "library",
 ]
 
 [[package]]
