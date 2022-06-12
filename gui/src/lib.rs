@@ -783,6 +783,8 @@ impl Tester {
         });
         ui.separator();
 
+        println!("events:{:?}", ctx.input().events);
+
         match self.tab {
             Tab::Client => self.client(ctx, ui),
             Tab::Server => self.server(ctx, ui),

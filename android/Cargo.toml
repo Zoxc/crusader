@@ -12,11 +12,8 @@ eframe = { path = "../../../egui/egui/eframe", default_features = false, feature
 ndk-glue = "0.6"
 ndk-context = "0.1.1"
 jni = "0.19.0"
-#ndk-glue = { path = "../../../android/android-ndk-rs/ndk-glue"} # Substitute this with the latest ndk-glue version you wish to use
 
 [package.metadata.android]
-# Specifies the package property of the manifest.
-#package = "com.foo.bar"
 
 # Specifies the array of targets to build for.
 #build_targets = [ "armv7-linux-androideabi", "aarch64-linux-android", "i686-linux-android", "x86_64-linux-android" ]

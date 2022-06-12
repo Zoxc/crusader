@@ -6,9 +6,8 @@ edition = "2021"
 [lib]
 
 [dependencies]
+library = { path = "../library" }
 toml = "0.5.9"
 serde = { version = "1.0.137", features = ["derive"] }
-library = { path = "../library" }
 tokio = { version = "1.18.2", features = ["full"] }
-eframe = { path = "../../../egui/egui/eframe", default_features = false, features = ["glow"] }
-#eframe = "0.18.0"
+eframe = "0.18.0"

@@ -1,4 +1,6 @@
-#[cfg_attr(target_os = "android", ndk_glue::main(backtrace = "on"))]
+#![cfg(target_os = "android")]
+
+#[ndk_glue::main(backtrace = "on")]
 pub fn main() {
     println!("-----------Start --------");
     println!("-----------Start --------");
@@ -12,12 +14,19 @@ pub fn main() {
         Box::new(|_cc| {
             Box::new(AndroidApp {
                 tester: gui::Tester::new(Default::default()),
+                test: "".to_owned(),
             })
         }),
     );
 }
 
-use std::sync::Arc;
+use std::{
+    error::Error,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+};
 
 use eframe::{
     egui::{self, Layout},
@@ -25,9 +34,11 @@ use eframe::{
     epaint::FontFamily,
     Renderer,
 };
+use jni::objects::{JObject, JValue};
 
 struct AndroidApp {
     tester: gui::Tester,
+    test: String,
 }
 
 impl eframe::App for AndroidApp {
@@ -63,14 +74,69 @@ impl eframe::App for AndroidApp {
                 ui.separator();
                 self.tester.show(ctx, ui);
 
-                ui.label(if ctx.wants_keyboard_input() {
-                    ndk_glue::native_activity().show_soft_input(false);
-                    "Keyboard"
-                } else {
-                    ndk_glue::native_activity().hide_soft_input(false);
-                    "No keyboard"
-                });
+                show_keyboard(ctx.wants_keyboard_input()).unwrap();
             });
         });
     }
+}
+
+fn show_keyboard(show: bool) -> Result<(), Box<dyn Error>> {
+    let context = ndk_context::android_context();
+
+    let vm = unsafe { jni::JavaVM::from_raw(context.vm().cast())? };
+
+    let activity: JObject = (context.context() as jni::sys::jobject).into();
+
+    let env = vm.attach_current_thread()?;
+
+    let input_method = env
+        .call_method(
+            activity,
+            "getSystemService",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            &[env.new_string("input_method")?.into()],
+        )?
+        .l()?;
+
+    let window = env
+        .call_method(activity, "getWindow", "()Landroid/view/Window;", &[])?
+        .l()?;
+
+    let view = env
+        .call_method(window, "getDecorView", "()Landroid/view/View;", &[])?
+        .l()?;
+    /*
+    let view = env
+        .call_method(view, "getRootView", "()Landroid/view/View;", &[])?
+        .l()?;
+
+
+       let view = env
+           .call_method(activity, "getCurrentFocus", "()Landroid/view/View;", &[])?
+           .l()?;
+    */
+    if show {
+        env.call_method(
+            input_method,
+            "showSoftInput",
+            "(Landroid/view/View;I)Z",
+            &[view.into(), JValue::Int(0)],
+        )
+        .unwrap();
+    } else {
+        let token = env
+            .call_method(view, "getWindowToken", "()Landroid/os/IBinder;", &[])
+            .unwrap()
+            .l()?;
+        assert!(!token.into_inner().is_null());
+        env.call_method(
+            input_method,
+            "hideSoftInput",
+            "(Landroid/os/IBinder;I)Z",
+            &[token.into(), JValue::Int(0)],
+        )
+        .unwrap();
+    }
+
+    Ok(())
 }
