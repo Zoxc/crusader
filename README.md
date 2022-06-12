@@ -1,4 +1,4 @@
-# Network bandwidth and latency tester
+# Crusader Network Tester
 
 ## Setup
 
@@ -8,14 +8,14 @@ Run `cargo build --release` to build the executables which are placed in `target
 
 To host a server run:
 ```sh
-tool serve
+crusader serve
 ```
 It uses TCP and UDP port 30481.
 
 
 To do a test run:
 ```sh
-tool test <server-host>
+crusader test <server-host>
 ```
 This produces an graph output file named `plot.png`.
 
