@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use crusader_lib::protocol;
-use crusader_lib::test2::Config;
+use crusader_lib::test::Config;
 
 #[derive(Parser)]
 struct Cli {
@@ -83,10 +83,10 @@ fn main() {
                 config.both = both;
             }
 
-            library::test2::test(config, &server);
+            library::test::test(config, &server);
         }
         Commands::Serve { port } => {
-            library::serve2::serve(*port);
+            library::serve::serve(*port);
         }
     }
 }

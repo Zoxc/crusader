@@ -29,7 +29,7 @@ use tokio_util::codec::{Framed, FramedRead, FramedWrite, LengthDelimitedCodec};
 use crate::protocol::{
     codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
 };
-use crate::serve2::CountingCodec;
+use crate::serve::CountingCodec;
 
 type Msg = Arc<dyn Fn(&str) + Send + Sync>;
 

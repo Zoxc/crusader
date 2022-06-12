@@ -4,7 +4,7 @@ use std::{fs, mem, sync::Arc, time::Duration};
 
 use crusader_lib::{
     protocol, serve2,
-    test2::{self, float_max, to_rates, Config},
+    test::{self, float_max, to_rates, Config},
 };
 use eframe::{
     egui::{
@@ -199,7 +199,7 @@ struct Tester {
 }
 
 pub struct TestResult {
-    result: test2::TestResult,
+    result: test::TestResult,
     download: Vec<(f64, f64)>,
     upload: Vec<(f64, f64)>,
     both: Vec<(f64, f64)>,
@@ -276,7 +276,7 @@ impl Tester {
         let ctx = ctx.clone();
         let ctx_ = ctx.clone();
 
-        let abort = test2::test_callback(
+        let abort = test::test_callback(
             config,
             &self.settings.server,
             Arc::new(move |msg| {
@@ -466,11 +466,19 @@ impl Tester {
             ui.separator();
         }
 
-        ui.vertical(|ui| {
-            for msg in &self.msgs {
-                ui.label(&*msg);
-            }
-        });
+        ScrollArea::vertical()
+            .stick_to_bottom()
+            .auto_shrink([false; 2])
+            .show_rows(
+                ui,
+                ui.text_style_height(&TextStyle::Body),
+                self.msgs.len(),
+                |ui, rows| {
+                    for row in rows {
+                        ui.label(&self.msgs[row]);
+                    }
+                },
+            );
     }
 
     fn result(&mut self, _ctx: &egui::Context, ui: &mut Ui) {
@@ -483,7 +491,7 @@ impl Tester {
         ui.horizontal_wrapped(|ui| {
             ui.add_enabled_ui(self.result_saved.is_none(), |ui| {
                 if ui.button("Save as image").clicked() {
-                    self.result_saved = Some(test2::save_graph(&result.result, "plot"));
+                    self.result_saved = Some(test::save_graph(&result.result, "plot"));
                 }
             });
             self.result_saved
@@ -647,11 +655,19 @@ impl Tester {
                     }
                 }
 
-                ui.vertical(|ui| {
-                    for msg in &server.msgs {
-                        ui.label(&*msg);
-                    }
-                });
+                ScrollArea::vertical()
+                    .stick_to_bottom()
+                    .auto_shrink([false; 2])
+                    .show_rows(
+                        ui,
+                        ui.text_style_height(&TextStyle::Body),
+                        server.msgs.len(),
+                        |ui, rows| {
+                            for row in rows {
+                                ui.label(&server.msgs[row]);
+                            }
+                        },
+                    );
 
                 if button.clicked() {
                     mem::take(&mut server.stop).unwrap().send(()).unwrap();

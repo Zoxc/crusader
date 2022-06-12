@@ -334,7 +334,7 @@ async fn serve_async(
     msg: Box<dyn Fn(&str) + Send + Sync>,
 ) -> Result<(), Box<dyn Error>> {
     let state = Arc::new(State {
-        dummy_data: crate::test2::data(),
+        dummy_data: crate::test::data(),
         clients: Mutex::new(HashMap::new()),
         msg,
     });
