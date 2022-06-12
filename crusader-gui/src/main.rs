@@ -2,6 +2,10 @@
 
 use std::{fs, mem, sync::Arc, time::Duration};
 
+use crusader_lib::{
+    protocol, serve2,
+    test2::{self, float_max, to_rates, Config},
+};
 use eframe::{
     egui::{
         self,
@@ -10,10 +14,6 @@ use eframe::{
     },
     emath::{vec2, Align, Vec2},
     epaint::Color32,
-};
-use library::{
-    protocol, serve2,
-    test2::{self, float_max, to_rates, Config},
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::{
@@ -97,7 +97,7 @@ fn main() {
         })
         .unwrap_or_default();
     eframe::run_native(
-        "Bandwidth and latency tester",
+        "Crusader Network Tester",
         options,
         Box::new(|_cc| {
             Box::new(Tester {

@@ -8,6 +8,6 @@ edition = "2021"
 [dependencies]
 toml = "0.5.9"
 serde = { version = "1.0.137", features = ["derive"] }
-library = { path = "../library" }
+crusader-lib = { path = "../crusader-lib" }
 tokio = { version = "1.18.2", features = ["full"] }
 eframe = "0.18.0"

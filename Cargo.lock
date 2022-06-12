@@ -410,18 +410,34 @@ name = "crusader"
 version = "0.1.0"
 dependencies = [
  "clap",
- "library",
+ "crusader-lib",
 ]
 
 [[package]]
 name = "crusader-gui"
 version = "0.1.0"
 dependencies = [
+ "crusader-lib",
  "eframe",
- "library",
  "serde",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "crusader-lib"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "bytes",
+ "chrono",
+ "futures",
+ "parking_lot 0.12.0",
+ "plotters",
+ "rand",
+ "serde",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -1070,22 +1086,6 @@ checksum = "efbc0f03f9a775e9f6aed295c6a1ba2253c5757a9e03d55c6caa46a681abcddd"
 dependencies = [
  "cfg-if 1.0.0",
  "winapi",
-]
-
-[[package]]
-name = "library"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "bytes",
- "chrono",
- "futures",
- "parking_lot 0.12.0",
- "plotters",
- "rand",
- "serde",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
-use library::protocol;
-use library::test2::Config;
+use crusader_lib::protocol;
+use crusader_lib::test2::Config;
 
 #[derive(Parser)]
 struct Cli {
