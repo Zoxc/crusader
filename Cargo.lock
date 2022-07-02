@@ -644,7 +644,7 @@ dependencies = [
 [[package]]
 name = "expat-sys"
 version = "2.1.6"
-source = "git+https://github.com/Zoxc/libexpat.git#c1c3b7c5028a7e891bb61342c7e27174975c613c"
+source = "git+https://github.com/Zoxc/libexpat.git#8250cbadc8e0270e3efa16fd3c06e7396cf53768"
 dependencies = [
  "cmake",
  "pkg-config",
@@ -725,7 +725,7 @@ dependencies = [
 [[package]]
 name = "freetype-sys"
 version = "0.13.1"
-source = "git+https://github.com/Zoxc/freetype-sys.git#e770add3fa1410b27be11a2308d0236e7c68b2d0"
+source = "git+https://github.com/Zoxc/freetype-sys.git#cde06e24663e900cff7f91e0d6a6b75ef0598283"
 dependencies = [
  "cmake",
  "libc",
