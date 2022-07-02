@@ -392,7 +392,7 @@ impl Tester {
                 );
                 ui.label("");
                 ui.allocate_space(vec2(1.0, 1.0));
-                ui.label("Latency sample rate");
+                ui.label("Latency sample rate:");
                 ui.add(
                     egui::DragValue::new(&mut self.settings.latency_sample_rate)
                         .clamp_range(1..=1000)
@@ -411,7 +411,7 @@ impl Tester {
                 );
                 ui.label("seconds");
                 ui.label("");
-                ui.label("Bandwidth sample rate");
+                ui.label("Bandwidth sample rate:");
                 ui.add(
                     egui::DragValue::new(&mut self.settings.bandwidth_sample_rate)
                         .clamp_range(1..=1000)
