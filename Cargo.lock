@@ -644,8 +644,7 @@ dependencies = [
 [[package]]
 name = "expat-sys"
 version = "2.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "658f19728920138342f68408b7cf7644d90d4784353d8ebc32e7e8663dbe45fa"
+source = "git+https://github.com/Zoxc/libexpat.git#c1c3b7c5028a7e891bb61342c7e27174975c613c"
 dependencies = [
  "cmake",
  "pkg-config",
@@ -726,8 +725,7 @@ dependencies = [
 [[package]]
 name = "freetype-sys"
 version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a37d4011c0cc628dfa766fcc195454f4b068d7afdc2adfd28861191d866e731a"
+source = "git+https://github.com/Zoxc/freetype-sys.git#e770add3fa1410b27be11a2308d0236e7c68b2d0"
 dependencies = [
  "cmake",
  "libc",
