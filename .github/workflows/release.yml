@@ -60,9 +60,12 @@ jobs:
           override: true
           target: ${{ matrix.build.target }}
 
-      - name: Install musl
+      - name: Install and use musl
         if: matrix.build.os == 'ubuntu-latest'
-        run: sudo apt-get install -y --no-install-recommends musl-tools
+        run: |
+          sudo apt-get install -y --no-install-recommends musl-tools
+          echo "CC=musl-gcc" >> $GITHUB_ENV
+          echo "AR=ar" >> $GITHUB_ENV
 
       - name: Build
         run: cargo build --target ${{ matrix.build.target }} --release

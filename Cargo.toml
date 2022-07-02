@@ -10,4 +10,3 @@ panic = "abort"
 [patch.crates-io]
 freetype-sys = { git = 'https://github.com/Zoxc/freetype-sys.git' }
 expat-sys = { git = 'https://github.com/Zoxc/libexpat.git' }
-servo-fontconfig-sys = { git = 'https://github.com/Zoxc/libfontconfig.git' }
