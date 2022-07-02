@@ -141,7 +141,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         .lock()
                         .get(&id)
                         .cloned()
-                        .ok_or_else(|| "Unable to assoicate client")?,
+                        .ok_or("Unable to assoicate client")?,
                 );
             }
             ClientMessage::GetMeasurements => loop {
@@ -200,7 +200,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 let write = async move {
                     loop {
-                        raw.write(state.dummy_data.as_ref())
+                        raw.write_all(state.dummy_data.as_ref())
                             .await
                             .map_err(|err| err.to_string())?;
 

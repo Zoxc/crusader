@@ -341,7 +341,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<TestResult
         .collect();
 
     let process_bytes = |bytes: Vec<Vec<(u64, u64)>>| -> Vec<(u64, f64)> {
-        let bytes: Vec<_> = bytes.iter().map(|stream| to_float(&stream)).collect();
+        let bytes: Vec<_> = bytes.iter().map(|stream| to_float(stream)).collect();
         let bytes: Vec<_> = bytes.iter().map(|stream| stream.as_slice()).collect();
         sum_bytes(&bytes, bandwidth_interval)
     };
@@ -354,7 +354,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<TestResult
         both_download_bytes_sum.as_deref(),
     ]
     .into_iter()
-    .filter_map(|x| x)
+    .flatten()
     .collect();
     let combined_download_bytes = sum_bytes(&combined_download_bytes, bandwidth_interval);
 
@@ -378,7 +378,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<TestResult
         both_upload_bytes_sum.as_deref(),
     ]
     .into_iter()
-    .filter_map(|x| x)
+    .flatten()
     .collect();
     let combined_upload_bytes = sum_bytes(&combined_upload_bytes, bandwidth_interval);
 
@@ -416,7 +416,7 @@ pub fn save_graph(result: &TestResult, name: &str) -> String {
         bandwidth.push((
             "Both",
             RGBColor(149, 96, 153),
-            to_rates(&both_bytes),
+            to_rates(both_bytes),
             vec![both_bytes.as_slice()],
         ));
     });
@@ -431,7 +431,7 @@ pub fn save_graph(result: &TestResult, name: &str) -> String {
                 result.both_upload_bytes.as_deref(),
             ]
             .into_iter()
-            .filter_map(|x| x)
+            .flatten()
             .collect::<Vec<_>>(),
         ));
     }
@@ -446,7 +446,7 @@ pub fn save_graph(result: &TestResult, name: &str) -> String {
                 result.both_download_bytes.as_deref(),
             ]
             .into_iter()
-            .filter_map(|x| x)
+            .flatten()
             .collect::<Vec<_>>(),
         ));
     }
@@ -462,7 +462,7 @@ pub fn save_graph(result: &TestResult, name: &str) -> String {
 }
 
 pub fn float_max(iter: impl Iterator<Item = f64>) -> f64 {
-    let mut max = iter.fold(0. / 0., f64::max);
+    let mut max = iter.fold(f64::NAN, f64::max);
 
     if max.is_nan() {
         max = 100.0;
@@ -622,7 +622,7 @@ fn upload_loaders(
             wait_for_state(&mut state_rx, state).await;
 
             loop {
-                raw.write(data.as_ref()).await.unwrap();
+                raw.write_all(data.as_ref()).await.unwrap();
 
                 if *state_rx.borrow() != state {
                     break;

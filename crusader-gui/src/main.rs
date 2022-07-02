@@ -1,3 +1,4 @@
+#![allow(clippy::field_reassign_with_default, clippy::option_map_unit_fn)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use std::{fs, mem, sync::Arc, time::Duration};
@@ -714,7 +715,7 @@ impl Tester {
 
 impl eframe::App for Tester {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let mut style = ctx.style().clone();
+        let mut style = ctx.style();
         let style_ = Arc::make_mut(&mut style);
         style_.spacing.button_padding = vec2(6.0, 0.0);
         style_.spacing.interact_size.y = 30.0;
