@@ -1777,8 +1777,7 @@ dependencies = [
 [[package]]
 name = "servo-fontconfig-sys"
 version = "5.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e36b879db9892dfa40f95da1c38a835d41634b825fbd8c4c418093d53c24b388"
+source = "git+https://github.com/Zoxc/libfontconfig.git#92b01f509cb2b08d090a93bbf9c3f5cd1aab52a9"
 dependencies = [
  "expat-sys",
  "freetype-sys",
