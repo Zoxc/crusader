@@ -1,0 +1,95 @@
+name: release
+on:
+  push:
+    tags:
+    - "v*"
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-C target-feature=+crt-static"
+
+jobs:
+  create-release:
+    name: create-release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.release.outputs.upload_url }}
+    steps:
+      - name: Get the release version from the tag
+        shell: bash
+        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+      - name: Create GitHub release
+        id: release
+        uses: actions/create-release@v1.1.4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          release_name: Automated build of ${{ env.TAG_NAME }}
+          prerelease: true
+
+  release-assets:
+    name: Release assets
+    needs: create-release
+    runs-on: ${{ matrix.build.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            exe_postfix:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            exe_postfix:
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            exe_postfix:
+          - os: windows-latest
+            target: i686-pc-windows-msvc
+            exe_postfix: .exe
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            exe_postfix: .exe
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          target: ${{ matrix.build.target }}
+
+      - name: Install musl
+        if: matrix.build.os == 'ubuntu-latest'
+        run: sudo apt-get install -y --no-install-recommends musl-tools musl-g++
+
+      - name: Build
+        run: cargo build --target ${{ matrix.build.target }} --release
+
+      - name: Strip release binary (linux and macos)
+        if: matrix.build.os == 'ubuntu-latest' || matrix.build.os == 'macos-latest'
+        run: |
+          strip "target/${{ matrix.build.target }}/release/crusader"
+          strip "target/${{ matrix.build.target }}/release/crusader-gui"
+
+      - name: Upload crusader binary
+        uses: actions/upload-release-asset@v1.0.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_name: crusader-${{ matrix.build.target }}${{ matrix.build.exe_postfix }}
+          asset_path: target/${{ matrix.build.target }}/release/crusader${{ matrix.build.exe_postfix }}
+          asset_content_type: application/octet-stream
+
+      - name: Upload crusader GUI binary
+        uses: actions/upload-release-asset@v1.0.2
+        if: matrix.build.os == 'windows-latest' || matrix.build.os == 'macos-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_name: crusader-gui-${{ matrix.build.target }}${{ matrix.build.exe_postfix }}
+          asset_path: target/${{ matrix.build.target }}/release/crusader-gui${{ matrix.build.exe_postfix }}
+          asset_content_type: application/octet-stream
