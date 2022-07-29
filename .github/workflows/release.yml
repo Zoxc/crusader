@@ -69,12 +69,13 @@ jobs:
 
       - name: Build
         run: cargo build --target ${{ matrix.build.target }} --release
+        working-directory: src
 
       - name: Strip release binary (linux and macos)
         if: matrix.build.os == 'ubuntu-latest' || matrix.build.os == 'macos-latest'
         run: |
-          strip "target/${{ matrix.build.target }}/release/crusader"
-          strip "target/${{ matrix.build.target }}/release/crusader-gui"
+          strip "src/target/${{ matrix.build.target }}/release/crusader"
+          strip "src/target/${{ matrix.build.target }}/release/crusader-gui"
 
       - name: Upload crusader binary
         uses: actions/upload-release-asset@v1.0.2
@@ -83,7 +84,7 @@ jobs:
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
           asset_name: crusader-${{ matrix.build.target }}${{ matrix.build.exe_postfix }}
-          asset_path: target/${{ matrix.build.target }}/release/crusader${{ matrix.build.exe_postfix }}
+          asset_path: src/target/${{ matrix.build.target }}/release/crusader${{ matrix.build.exe_postfix }}
           asset_content_type: application/octet-stream
 
       - name: Upload crusader GUI binary
@@ -94,5 +95,5 @@ jobs:
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
           asset_name: crusader-gui-${{ matrix.build.target }}${{ matrix.build.exe_postfix }}
-          asset_path: target/${{ matrix.build.target }}/release/crusader-gui${{ matrix.build.exe_postfix }}
+          asset_path: src/target/${{ matrix.build.target }}/release/crusader-gui${{ matrix.build.exe_postfix }}
           asset_content_type: application/octet-stream

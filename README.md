@@ -2,7 +2,7 @@
 
 ## Setup
 
-Run `cargo build --release` to build the executables which are placed in `target/release`.
+Run `cargo build --release` in the `src` folder to build the executables which are placed in `src/target/release`.
 
 ## Command line usage
 

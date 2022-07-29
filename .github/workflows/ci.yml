@@ -24,7 +24,12 @@ jobs:
 
     - name: Build
       run: cargo build
+      working-directory: src
+
     - name: Lint
       run: cargo clippy --all -- -D warnings
+      working-directory: src
+
     - name: Format
       run: cargo fmt --all -- --check
+      working-directory: src
