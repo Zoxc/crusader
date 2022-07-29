@@ -6,6 +6,7 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
+strip = "symbols"
 
 [patch.crates-io]
 freetype-sys = { git = 'https://github.com/Zoxc/freetype-sys.git' }

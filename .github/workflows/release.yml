@@ -37,20 +37,34 @@ jobs:
       matrix:
         build:
           - os: ubuntu-latest
+            target: arm-unknown-linux-gnueabihf
+            exe_postfix:
+            cargo: cross
+
+          - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             exe_postfix:
+            cargo: cargo
+
           - os: macos-latest
             target: aarch64-apple-darwin
             exe_postfix:
+            cargo: cargo
+
           - os: macos-latest
             target: x86_64-apple-darwin
             exe_postfix:
+            cargo: cargo
+
           - os: windows-latest
             target: i686-pc-windows-msvc
             exe_postfix: .exe
+            cargo: cargo
+
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             exe_postfix: .exe
+            cargo: cargo
     steps:
       - uses: actions/checkout@v2
 
@@ -60,40 +74,58 @@ jobs:
           override: true
           target: ${{ matrix.build.target }}
 
+      - name: Install cross
+        if: matrix.build.cargo == 'cross'
+        env:
+          RUSTFLAGS:
+        run: cargo install cross
+
       - name: Install and use musl
-        if: matrix.build.os == 'ubuntu-latest'
+        if: matrix.build.os == 'ubuntu-latest' && matrix.build.cargo != 'cross'
         run: |
           sudo apt-get install -y --no-install-recommends musl-tools
           echo "CC=musl-gcc" >> $GITHUB_ENV
           echo "AR=ar" >> $GITHUB_ENV
 
       - name: Build
-        run: cargo build --target ${{ matrix.build.target }} --release
+        run: ${{ matrix.build.cargo }} build --target ${{ matrix.build.target }} --release
         working-directory: src
 
-      - name: Strip release binary (linux and macos)
-        if: matrix.build.os == 'ubuntu-latest' || matrix.build.os == 'macos-latest'
+      - name: Build output
+        shell: bash
         run: |
-          strip "src/target/${{ matrix.build.target }}/release/crusader"
-          strip "src/target/${{ matrix.build.target }}/release/crusader-gui"
+          staging="crusader-${{ matrix.build.target }}"
+          mkdir -p "$staging"
+          cp src/target/${{ matrix.build.target }}/release/crusader${{ matrix.build.exe_postfix }} "$staging/"
 
-      - name: Upload crusader binary
-        uses: actions/upload-release-asset@v1.0.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_name: crusader-${{ matrix.build.target }}${{ matrix.build.exe_postfix }}
-          asset_path: src/target/${{ matrix.build.target }}/release/crusader${{ matrix.build.exe_postfix }}
-          asset_content_type: application/octet-stream
-
-      - name: Upload crusader GUI binary
-        uses: actions/upload-release-asset@v1.0.2
+      - name: Copy GUI binary
         if: matrix.build.os == 'windows-latest' || matrix.build.os == 'macos-latest'
+        shell: bash
+        run: |
+          cp src/target/${{ matrix.build.target }}/release/crusader-gui${{ matrix.build.exe_postfix }} "crusader-${{ matrix.build.target }}/"
+
+      - name: Archive output
+        if: matrix.build.os == 'windows-latest'
+        shell: bash
+        run: |
+          staging="crusader-${{ matrix.build.target }}"
+          7z a "$staging.zip" "$staging"
+          echo "ASSET=$staging.zip" >> $GITHUB_ENV
+
+      - name: Archive output
+        if: matrix.build.os != 'windows-latest'
+        shell: bash
+        run: |
+          staging="crusader-${{ matrix.build.target }}"
+          tar czf "$staging.tar.gz" "$staging"
+          echo "ASSET=$staging.tar.gz" >> $GITHUB_ENV
+
+      - name: Upload archive
+        uses: actions/upload-release-asset@v1.0.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_name: crusader-gui-${{ matrix.build.target }}${{ matrix.build.exe_postfix }}
-          asset_path: src/target/${{ matrix.build.target }}/release/crusader-gui${{ matrix.build.exe_postfix }}
+          asset_name: ${{ env.ASSET }}
+          asset_path: ${{ env.ASSET }}
           asset_content_type: application/octet-stream
