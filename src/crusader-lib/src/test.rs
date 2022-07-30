@@ -6,6 +6,9 @@ use plotters::style::RGBColor;
 use rand::prelude::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{
@@ -27,7 +30,7 @@ use tokio::{
 use tokio_util::codec::{Framed, FramedRead, FramedWrite, LengthDelimitedCodec};
 
 use crate::protocol::{
-    codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
+    self, codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
 };
 use crate::serve::CountingCodec;
 
@@ -80,6 +83,163 @@ where
     Ok(())
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct RawPoint {
+    pub time: Duration,
+    pub bytes: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RawStream {
+    pub data: Vec<RawPoint>,
+}
+
+impl RawStream {
+    fn to_vec(&self) -> Vec<(u64, u64)> {
+        self.data
+            .iter()
+            .map(|point| (point.time.as_micros() as u64, point.bytes))
+            .collect()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RawStreamGroup {
+    pub download: bool,
+    pub both: bool,
+    pub streams: Vec<RawStream>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RawPing {
+    pub index: usize,
+    pub sent: Duration,
+    pub latency: Option<Duration>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RawConfig {
+    pub load_duration: u64,
+    pub grace_duration: u64,
+    pub ping_interval: u64,
+    pub bandwidth_interval: u64,
+}
+
+#[derive(Serialize, Deserialize, Eq, PartialEq)]
+pub struct RawHeader {
+    pub magic: u64,
+    pub version: u64,
+}
+
+impl Default for RawHeader {
+    fn default() -> Self {
+        Self {
+            magic: protocol::MAGIC,
+            version: 0,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RawResult {
+    pub config: RawConfig,
+    pub start: Duration,
+    pub duration: Duration,
+    pub stream_groups: Vec<RawStreamGroup>,
+    pub pings: Vec<RawPing>,
+}
+
+impl RawResult {
+    pub fn load(path: &Path) -> Option<Self> {
+        let file = File::open(path).ok()?;
+        let header: RawHeader = bincode::deserialize_from(&file).ok()?;
+        if header != RawHeader::default() {
+            return None;
+        }
+        bincode::deserialize_from(&file).ok()
+    }
+
+    pub fn to_test_result(&self, config: Config) -> TestResult {
+        let bandwidth_interval = Duration::from_millis(self.config.bandwidth_interval);
+
+        let process_bytes = |bytes: Vec<Vec<(u64, u64)>>| -> Vec<(u64, f64)> {
+            let bytes: Vec<_> = bytes.iter().map(|stream| to_float(stream)).collect();
+            let bytes: Vec<_> = bytes.iter().map(|stream| stream.as_slice()).collect();
+            sum_bytes(&bytes, bandwidth_interval)
+        };
+
+        let groups: Vec<_> = self
+            .stream_groups
+            .iter()
+            .map(|group| {
+                let streams: Vec<_> = group.streams.iter().map(|stream| stream.to_vec()).collect();
+                let single = process_bytes(streams);
+                (group, single)
+            })
+            .collect();
+
+        let find = |download, both| {
+            groups
+                .iter()
+                .find(|group| group.0.download == download && group.0.both == both)
+                .map(|group| group.1.clone())
+        };
+
+        let download_bytes_sum = find(true, false);
+        let both_download_bytes_sum = find(true, true);
+
+        let combined_download_bytes: Vec<_> = [
+            download_bytes_sum.as_deref(),
+            both_download_bytes_sum.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let combined_download_bytes = sum_bytes(&combined_download_bytes, bandwidth_interval);
+
+        let upload_bytes_sum = find(false, false);
+
+        let both_upload_bytes_sum = find(false, true);
+
+        let combined_upload_bytes: Vec<_> = [
+            upload_bytes_sum.as_deref(),
+            both_upload_bytes_sum.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let combined_upload_bytes = sum_bytes(&combined_upload_bytes, bandwidth_interval);
+
+        let both_bytes = config.both.then(|| {
+            sum_bytes(
+                &[
+                    both_download_bytes_sum.as_deref().unwrap(),
+                    both_upload_bytes_sum.as_deref().unwrap(),
+                ],
+                bandwidth_interval,
+            )
+        });
+
+        TestResult {
+            config,
+            start: self.start,
+            duration: self.duration,
+            pings: self
+                .pings
+                .iter()
+                .map(|ping| (ping.index, ping.sent, ping.latency))
+                .collect(),
+            both_bytes,
+            both_download_bytes: both_download_bytes_sum,
+            both_upload_bytes: both_upload_bytes_sum,
+            download_bytes: download_bytes_sum,
+            upload_bytes: upload_bytes_sum,
+            combined_download_bytes,
+            combined_upload_bytes,
+        }
+    }
+}
+
 pub struct TestResult {
     pub config: Config,
     pub start: Duration,
@@ -109,7 +269,11 @@ pub struct Config {
     pub plot_height: Option<u64>,
 }
 
-async fn test_async(config: Config, server: &str, msg: Msg) -> Result<TestResult, Box<dyn Error>> {
+async fn test_async(
+    config: Config,
+    server: &str,
+    msg: Msg,
+) -> Result<(RawResult, TestResult), Box<dyn Error>> {
     let control = net::TcpStream::connect((server, config.port)).await?;
 
     let server = control.peer_addr()?;
@@ -331,34 +495,47 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<TestResult
     let pings: Vec<_> = pings_sent
         .into_iter()
         .enumerate()
-        .map(|(i, sent)| {
+        .map(|(index, sent)| {
             let latency = pings
-                .binary_search_by_key(&(i as u32), |e| e.0)
+                .binary_search_by_key(&(index as u32), |e| e.0)
                 .ok()
                 .map(|ping| pings[ping].1 - sent);
-            (i, sent, latency)
+            RawPing {
+                index,
+                sent,
+                latency,
+            }
         })
         .collect();
 
-    let process_bytes = |bytes: Vec<Vec<(u64, u64)>>| -> Vec<(u64, f64)> {
-        let bytes: Vec<_> = bytes.iter().map(|stream| to_float(stream)).collect();
-        let bytes: Vec<_> = bytes.iter().map(|stream| stream.as_slice()).collect();
-        sum_bytes(&bytes, bandwidth_interval)
+    let mut raw_streams = Vec::new();
+
+    let to_raw = |data: &[(u64, u64)]| -> RawStream {
+        RawStream {
+            data: data
+                .iter()
+                .map(|&(time, bytes)| RawPoint {
+                    time: Duration::from_micros(time),
+                    bytes,
+                })
+                .collect(),
+        }
     };
 
-    let download_bytes_sum = download_bytes.map(process_bytes);
-    let both_download_bytes_sum = both_download_bytes.map(process_bytes);
+    let mut add_down = |both, data: &Option<Vec<Vec<(u64, u64)>>>| {
+        data.as_ref().map(|download_bytes| {
+            raw_streams.push(RawStreamGroup {
+                download: true,
+                both,
+                streams: download_bytes.iter().map(|stream| to_raw(stream)).collect(),
+            });
+        });
+    };
 
-    let combined_download_bytes: Vec<_> = [
-        download_bytes_sum.as_deref(),
-        both_download_bytes_sum.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    let combined_download_bytes = sum_bytes(&combined_download_bytes, bandwidth_interval);
+    add_down(false, &download_bytes);
+    add_down(true, &both_download_bytes);
 
-    let get_stream = |group, id| {
+    let get_stream = |group, id| -> Vec<_> {
         bandwidth
             .iter()
             .filter(|e| e.0.group == group && e.0.id == id)
@@ -366,47 +543,60 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<TestResult
             .collect()
     };
 
-    let get_upload_bytes =
-        |group| -> Vec<Vec<_>> { (0..loading_streams).map(|i| get_stream(group, i)).collect() };
-
-    let upload_bytes_sum = config.upload.then(|| process_bytes(get_upload_bytes(0)));
-
-    let both_upload_bytes_sum = config.both.then(|| process_bytes(get_upload_bytes(1)));
-
-    let combined_upload_bytes: Vec<_> = [
-        upload_bytes_sum.as_deref(),
-        both_upload_bytes_sum.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    let combined_upload_bytes = sum_bytes(&combined_upload_bytes, bandwidth_interval);
-
-    let both_bytes = config.both.then(|| {
-        sum_bytes(
-            &[
-                both_download_bytes_sum.as_deref().unwrap(),
-                both_upload_bytes_sum.as_deref().unwrap(),
-            ],
-            bandwidth_interval,
-        )
-    });
-
-    let result = TestResult {
-        config,
-        start: start.duration_since(setup_start),
-        pings,
-        duration,
-        both_bytes,
-        both_download_bytes: both_download_bytes_sum,
-        both_upload_bytes: both_upload_bytes_sum,
-        download_bytes: download_bytes_sum,
-        upload_bytes: upload_bytes_sum,
-        combined_download_bytes,
-        combined_upload_bytes,
+    let get_raw_upload_bytes = |group| -> Vec<RawStream> {
+        (0..loading_streams)
+            .map(|i| to_raw(&get_stream(group, i)))
+            .collect()
     };
 
-    Ok(result)
+    config.upload.then(|| {
+        raw_streams.push(RawStreamGroup {
+            download: false,
+            both: false,
+            streams: get_raw_upload_bytes(0),
+        })
+    });
+
+    config.upload.then(|| {
+        raw_streams.push(RawStreamGroup {
+            download: false,
+            both: true,
+            streams: get_raw_upload_bytes(1),
+        })
+    });
+
+    let raw_config = RawConfig {
+        load_duration: config.load_duration,
+        grace_duration: config.grace_duration,
+        ping_interval: config.ping_interval,
+        bandwidth_interval: config.bandwidth_interval,
+    };
+
+    let start = start.duration_since(setup_start);
+
+    let raw_result = RawResult {
+        config: raw_config,
+        start,
+        duration,
+        stream_groups: raw_streams,
+        pings,
+    };
+
+    let result = raw_result.to_test_result(config);
+
+    Ok((raw_result, result))
+}
+
+pub fn save_raw(result: &RawResult, name: &str) -> String {
+    let name = unique(name, "crr");
+    let mut file = File::create(&name).unwrap();
+
+    bincode::serialize_into(&mut file, &RawHeader::default()).unwrap();
+    bincode::serialize_into(&mut file, result).unwrap();
+
+    file.flush().unwrap();
+
+    name
 }
 
 pub fn save_graph(result: &TestResult, name: &str) -> String {
@@ -421,7 +611,7 @@ pub fn save_graph(result: &TestResult, name: &str) -> String {
         ));
     });
 
-    if result.config.upload || result.config.both {
+    if result.upload_bytes.is_some() || result.both_upload_bytes.is_some() {
         bandwidth.push((
             "Upload",
             RGBColor(37, 83, 169),
@@ -436,7 +626,7 @@ pub fn save_graph(result: &TestResult, name: &str) -> String {
         ));
     }
 
-    if result.config.download || result.config.both {
+    if result.download_bytes.is_some() || result.both_download_bytes.is_some() {
         bandwidth.push((
             "Download",
             RGBColor(95, 145, 62),
@@ -820,7 +1010,7 @@ async fn ping_recv(
     storage
 }
 
-fn unique(name: &str) -> String {
+fn unique(name: &str, ext: &str) -> String {
     let time = chrono::Local::now().format(" %Y.%m.%d %H-%M-%S");
     let stem = format!("{}{}", name, time);
     let mut i: usize = 0;
@@ -830,7 +1020,7 @@ fn unique(name: &str) -> String {
         } else {
             stem.to_string()
         };
-        let file = format!("{}.png", file);
+        let file = format!("{}.{}", file, ext);
         if !Path::new(&file).exists() {
             return file;
         }
@@ -848,7 +1038,7 @@ fn graph(
 ) -> String {
     use plotters::prelude::*;
 
-    let file = unique(name);
+    let file = unique(name, "png");
     let result = file.clone();
 
     let root = BitMapBackend::new(
@@ -1121,14 +1311,15 @@ pub fn test(config: Config, host: &str) {
         .block_on(test_async(config, host, Arc::new(|msg| println!("{msg}"))))
         .unwrap();
     println!("Writing graphs...");
-    save_graph(&result, "plot");
+    save_raw(&result.0, "data");
+    save_graph(&result.1, "plot");
 }
 
 pub fn test_callback(
     config: Config,
     host: &str,
     msg: Arc<dyn Fn(&str) + Send + Sync>,
-    done: Box<dyn FnOnce(Option<Result<TestResult, String>>) + Send>,
+    done: Box<dyn FnOnce(Option<Result<(RawResult, TestResult), String>>) + Send>,
 ) -> oneshot::Sender<()> {
     let (tx, rx) = oneshot::channel();
     let host = host.to_string();

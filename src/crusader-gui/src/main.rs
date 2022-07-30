@@ -1,11 +1,15 @@
-#![allow(clippy::field_reassign_with_default, clippy::option_map_unit_fn)]
+#![allow(
+    clippy::field_reassign_with_default,
+    clippy::option_map_unit_fn,
+    clippy::type_complexity
+)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use std::{fs, mem, sync::Arc, time::Duration};
 
 use crusader_lib::{
     protocol, serve,
-    test::{self, float_max, to_rates, Config},
+    test::{self, float_max, to_rates, Config, RawResult},
 };
 use eframe::{
     egui::{
@@ -16,6 +20,7 @@ use eframe::{
     emath::{vec2, Align, Vec2},
     epaint::Color32,
 };
+use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{
     mpsc::{self, error::TryRecvError},
@@ -107,10 +112,12 @@ fn main() {
                 client_state: ClientState::Stopped,
                 client: None,
                 result: None,
+                result_saved: None,
+                raw_result: None,
+                raw_result_saved: None,
                 msgs: Vec::new(),
                 server_state: ServerState::Stopped(None),
                 server: None,
-                result_saved: None,
                 axis: LinkedAxisGroup::x(),
             })
         }),
@@ -134,7 +141,7 @@ enum ServerState {
 
 struct Client {
     rx: mpsc::UnboundedReceiver<String>,
-    done: Option<oneshot::Receiver<Option<Result<TestResult, String>>>>,
+    done: Option<oneshot::Receiver<Option<Result<(RawResult, TestResult), String>>>>,
     abort: Option<oneshot::Sender<()>>,
 }
 
@@ -195,6 +202,8 @@ struct Tester {
     client: Option<Client>,
     result: Option<TestResult>,
     result_saved: Option<String>,
+    raw_result: Option<RawResult>,
+    raw_result_saved: Option<String>,
     msgs: Vec<String>,
     axis: LinkedAxisGroup,
 }
@@ -208,6 +217,51 @@ pub struct TestResult {
     loss: Vec<f64>,
     latency_max: f64,
     bandwidth_max: f64,
+}
+
+impl TestResult {
+    fn new(result: test::TestResult) -> Self {
+        let start = result.start.as_secs_f64();
+        let download = handle_bytes(&result.combined_download_bytes, start);
+        let upload = handle_bytes(&result.combined_upload_bytes, start);
+        let both = handle_bytes(result.both_bytes.as_deref().unwrap_or(&[]), start);
+        let latency: Vec<_> = result
+            .pings
+            .iter()
+            .filter(|v| v.1 >= result.start)
+            .filter_map(|(_, sent, latency)| {
+                latency.map(|latency| (sent.as_secs_f64() - start, latency.as_secs_f64() * 1000.0))
+            })
+            .collect();
+        let loss = result
+            .pings
+            .iter()
+            .filter(|v| v.1 >= result.start)
+            .filter_map(|(_, sent, latency)| {
+                if latency.is_none() {
+                    Some(sent.as_secs_f64() - start)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let download_max = float_max(download.iter().map(|v| v.1));
+        let upload_max = float_max(upload.iter().map(|v| v.1));
+        let both_max = float_max(both.iter().map(|v| v.1));
+        let bandwidth_max = float_max([download_max, upload_max, both_max].into_iter());
+        let latency_max = float_max(latency.iter().map(|v| v.1));
+
+        TestResult {
+            result,
+            download,
+            upload,
+            both,
+            latency,
+            loss,
+            bandwidth_max,
+            latency_max,
+        }
+    }
 }
 
 pub fn handle_bytes(data: &[(u64, f64)], start: f64) -> Vec<(f64, f64)> {
@@ -252,11 +306,8 @@ impl Drop for Tester {
 }
 
 impl Tester {
-    fn start_client(&mut self, ctx: &egui::Context) {
-        self.client_state = ClientState::Running;
-        self.msgs.clear();
-
-        let config = Config {
+    fn config(&self) -> Config {
+        Config {
             port: protocol::PORT,
             streams: self.settings.streams,
             grace_duration: self.settings.grace_duration,
@@ -269,7 +320,12 @@ impl Tester {
             plot_transferred: false,
             plot_width: None,
             plot_height: None,
-        };
+        }
+    }
+
+    fn start_client(&mut self, ctx: &egui::Context) {
+        self.client_state = ClientState::Running;
+        self.msgs.clear();
 
         let (signal_done, done) = oneshot::channel();
         let (tx, rx) = mpsc::unbounded_channel();
@@ -277,67 +333,24 @@ impl Tester {
         let ctx = ctx.clone();
         let ctx_ = ctx.clone();
 
-        let abort = test::test_callback(
-            config,
-            &self.settings.server,
-            Arc::new(move |msg| {
-                tx.send(msg.to_string()).unwrap();
-                ctx.request_repaint();
-            }),
-            Box::new(move |result| {
-                signal_done
-                    .send(result.map(|result| {
-                        result.map(|result| {
-                            let start = result.start.as_secs_f64();
-                            let download = handle_bytes(&result.combined_download_bytes, start);
-                            let upload = handle_bytes(&result.combined_upload_bytes, start);
-                            let both =
-                                handle_bytes(result.both_bytes.as_deref().unwrap_or(&[]), start);
-                            let latency: Vec<_> = result
-                                .pings
-                                .iter()
-                                .filter(|v| v.1 >= result.start)
-                                .filter_map(|(_, sent, latency)| {
-                                    latency.map(|latency| {
-                                        (sent.as_secs_f64() - start, latency.as_secs_f64() * 1000.0)
-                                    })
-                                })
-                                .collect();
-                            let loss = result
-                                .pings
-                                .iter()
-                                .filter(|v| v.1 >= result.start)
-                                .filter_map(|(_, sent, latency)| {
-                                    if latency.is_none() {
-                                        Some(sent.as_secs_f64() - start)
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-                            let download_max = float_max(download.iter().map(|v| v.1));
-                            let upload_max = float_max(upload.iter().map(|v| v.1));
-                            let both_max = float_max(both.iter().map(|v| v.1));
-                            let bandwidth_max =
-                                float_max([download_max, upload_max, both_max].into_iter());
-                            let latency_max = float_max(latency.iter().map(|v| v.1));
-                            TestResult {
-                                result,
-                                download,
-                                upload,
-                                both,
-                                latency,
-                                loss,
-                                bandwidth_max,
-                                latency_max,
-                            }
-                        })
-                    }))
-                    .map_err(|_| ())
-                    .unwrap();
-                ctx_.request_repaint();
-            }),
-        );
+        let abort =
+            test::test_callback(
+                self.config(),
+                &self.settings.server,
+                Arc::new(move |msg| {
+                    tx.send(msg.to_string()).unwrap();
+                    ctx.request_repaint();
+                }),
+                Box::new(move |result| {
+                    signal_done
+                        .send(result.map(|result| {
+                            result.map(|result| (result.0, TestResult::new(result.1)))
+                        }))
+                        .map_err(|_| ())
+                        .unwrap();
+                    ctx_.request_repaint();
+                }),
+            );
 
         self.client = Some(Client {
             done: Some(done),
@@ -347,6 +360,30 @@ impl Tester {
         self.client_state = ClientState::Running;
         self.result = None;
         self.result_saved = None;
+        self.raw_result = None;
+        self.raw_result_saved = None;
+    }
+
+    fn load_result(&mut self) {
+        FileDialog::new()
+            .add_filter("Crusader Raw Result", &["crr"])
+            .pick_file()
+            .map(|file| {
+                RawResult::load(&file).map(|raw| {
+                    let result = raw.to_test_result(self.config());
+
+                    self.result = Some(TestResult::new(result));
+                    self.result_saved = None;
+                    self.raw_result = Some(raw);
+                    self.raw_result_saved = Some(
+                        file.file_name()
+                            .unwrap_or_default()
+                            .to_str()
+                            .unwrap_or_default()
+                            .to_string(),
+                    );
+                })
+            });
     }
 
     fn client(&mut self, ctx: &egui::Context, ui: &mut Ui) {
@@ -446,7 +483,8 @@ impl Tester {
                 match result {
                     Some(Ok(result)) => {
                         self.msgs.push("Test complete.".to_owned());
-                        self.result = Some(result);
+                        self.result = Some(result.1);
+                        self.raw_result = Some(result.0);
                         if self.tab == Tab::Client {
                             self.tab = Tab::Result;
                         }
@@ -484,24 +522,46 @@ impl Tester {
 
     fn result(&mut self, _ctx: &egui::Context, ui: &mut Ui) {
         if self.result.is_none() {
+            if ui.button("Load raw data").clicked() {
+                self.load_result();
+            }
+            ui.separator();
             ui.label("No result.");
             return;
         }
-        let result = self.result.as_ref().unwrap();
 
         ui.horizontal_wrapped(|ui| {
             ui.add_enabled_ui(self.result_saved.is_none(), |ui| {
                 if ui.button("Save as image").clicked() {
-                    self.result_saved = Some(test::save_graph(&result.result, "plot"));
+                    self.result_saved = Some(test::save_graph(
+                        &self.result.as_ref().unwrap().result,
+                        "plot",
+                    ));
                 }
             });
             self.result_saved
                 .as_ref()
                 .map(|file| ui.label(format!("Saved as: {file}")));
+
+            ui.add_enabled_ui(self.raw_result_saved.is_none(), |ui| {
+                if ui.button("Save raw data").clicked() {
+                    self.raw_result_saved =
+                        Some(test::save_raw(self.raw_result.as_ref().unwrap(), "data"));
+                }
+            });
+            self.raw_result_saved
+                .as_ref()
+                .map(|file| ui.label(format!("Saved as: {file}")));
+
+            if ui.button("Load raw data").clicked() {
+                self.load_result();
+            }
         });
         ui.separator();
 
         ui.allocate_space(vec2(1.0, 15.0));
+
+        let result = self.result.as_ref().unwrap();
 
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
             let duration = result.result.duration.as_secs_f64() * 1.1;
