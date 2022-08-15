@@ -28,7 +28,10 @@ impl RawPingV0 {
         RawPing {
             index: self.index,
             sent: self.sent,
-            latency: self.latency,
+            latency: self.latency.map(|total| RawLatency {
+                total,
+                up: Duration::from_secs(0),
+            }),
         }
     }
 }
@@ -69,9 +72,10 @@ impl RawResultV0 {
     pub fn to_v1(&self) -> RawResult {
         RawResult {
             version: 0,
+            generated_by: String::new(),
             config: self.config.to_v1(),
             start: self.start,
-            latency_to_server: Duration::from_secs(0),
+            server_latency: Duration::from_secs(0),
             ipv6: false,
             duration: self.duration,
             stream_groups: self.stream_groups.clone(),
@@ -107,11 +111,23 @@ pub struct RawStreamGroup {
     pub streams: Vec<RawStream>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Copy, Clone)]
+pub struct RawLatency {
+    pub total: Duration,
+    pub up: Duration,
+}
+
+impl RawLatency {
+    pub fn down(&self) -> Duration {
+        self.total.saturating_sub(self.up)
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct RawPing {
     pub index: usize,
     pub sent: Duration,
-    pub latency: Option<Duration>,
+    pub latency: Option<RawLatency>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -139,12 +155,13 @@ impl Default for RawHeader {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct RawResult {
     pub version: u64,
+    pub generated_by: String,
     pub config: RawConfig,
     pub ipv6: bool,
-    pub latency_to_server: Duration,
+    pub server_latency: Duration,
     pub start: Duration,
     pub duration: Duration,
     pub stream_groups: Vec<RawStreamGroup>,

@@ -8,7 +8,7 @@ use tokio_util::codec::{length_delimited, LengthDelimitedCodec};
 pub const PORT: u16 = 30481;
 
 pub const MAGIC: u64 = 0x5372ab82ae7c59cb;
-pub const VERSION: u64 = 0;
+pub const VERSION: u64 = 1;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct Hello {
@@ -60,6 +60,7 @@ pub enum ClientMessage {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Ping {
+    pub time: u64,
     pub index: u32,
 }
 

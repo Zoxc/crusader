@@ -2,6 +2,7 @@ use bytes::{Bytes, BytesMut};
 use futures::future::FutureExt;
 use futures::{pin_mut, select, Sink, Stream};
 use futures::{stream, StreamExt};
+use plotters::style::text_anchor::{HPos, Pos, VPos};
 use plotters::style::RGBColor;
 use rand::prelude::StdRng;
 use rand::Rng;
@@ -28,7 +29,7 @@ use tokio::{
 use tokio_util::codec::{Framed, FramedRead, FramedWrite, LengthDelimitedCodec};
 
 use crate::file_format::{
-    RawConfig, RawHeader, RawPing, RawPoint, RawResult, RawStream, RawStreamGroup,
+    RawConfig, RawHeader, RawLatency, RawPing, RawPoint, RawResult, RawStream, RawStreamGroup,
 };
 use crate::protocol::{
     codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
@@ -146,15 +147,14 @@ impl RawResult {
             )
         });
 
+        let pings = self.pings.clone();
+
         TestResult {
+            raw_result: self.clone(),
             config,
             start: self.start,
             duration: self.duration,
-            pings: self
-                .pings
-                .iter()
-                .map(|ping| (ping.index, ping.sent, ping.latency))
-                .collect(),
+            pings,
             both_bytes,
             both_download_bytes: both_download_bytes_sum,
             both_upload_bytes: both_upload_bytes_sum,
@@ -167,6 +167,7 @@ impl RawResult {
 }
 
 pub struct TestResult {
+    pub raw_result: RawResult,
     pub config: Config,
     pub start: Duration,
     pub duration: Duration,
@@ -177,7 +178,7 @@ pub struct TestResult {
     pub both_download_bytes: Option<Vec<(u64, f64)>>,
     pub both_upload_bytes: Option<Vec<(u64, f64)>>,
     pub both_bytes: Option<Vec<(u64, f64)>>,
-    pub pings: Vec<(usize, Duration, Option<Duration>)>,
+    pub pings: Vec<RawPing>,
 }
 
 pub struct Config {
@@ -228,10 +229,10 @@ async fn test_async(
         SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
     };
 
-    let latency = measure_latency(server, local_udp, setup_start).await?;
+    let (latency, server_time_offset) = measure_latency(server, local_udp, setup_start).await?;
 
     msg(&format!(
-        "Latency to server {:.2}",
+        "Latency to server {:.2} ms",
         latency.as_secs_f64() * 1000.0
     ));
 
@@ -333,9 +334,6 @@ async fn test_async(
                     time,
                     bytes,
                 } => {
-                    //let mbits = (bytes as f64 * 8.0) / 1000.0 / 1000.0;
-                    //let rate = mbits / Duration::from_micros(duration).as_secs_f64();
-                    //println!("Rate: {:>10.2} Mbps, Bytes: {}", rate, bytes);
                     bandwidth.push((stream, time, bytes));
                 }
                 ServerMessage::MeasurementsDone => break,
@@ -424,15 +422,19 @@ async fn test_async(
     let download_bytes = wait_on_download_loaders(download).await;
     let both_download_bytes = wait_on_download_loaders(both_download).await;
 
-    pings.sort_by_key(|d| d.0);
+    pings.sort_by_key(|d| d.0.index);
     let pings: Vec<_> = pings_sent
         .into_iter()
         .enumerate()
         .map(|(index, sent)| {
             let latency = pings
-                .binary_search_by_key(&(index as u32), |e| e.0)
+                .binary_search_by_key(&(index as u32), |e| e.0.index)
                 .ok()
-                .map(|ping| pings[ping].1 - sent);
+                .map(|ping| RawLatency {
+                    total: pings[ping].1.saturating_sub(sent),
+                    up: Duration::from_micros(pings[ping].0.time.wrapping_add(server_time_offset))
+                        .saturating_sub(sent),
+                });
             RawPing {
                 index,
                 sent,
@@ -510,9 +512,10 @@ async fn test_async(
 
     let raw_result = RawResult {
         version: RawHeader::default().version,
+        generated_by: format!("Crusader {}", env!("CARGO_PKG_VERSION")),
         config: raw_config,
         ipv6: server.is_ipv6(),
-        latency_to_server: latency,
+        server_latency: latency,
         start,
         duration,
         stream_groups: raw_streams,
@@ -528,7 +531,7 @@ async fn measure_latency(
     server: SocketAddr,
     local_udp: SocketAddr,
     setup_start: Instant,
-) -> Result<Duration, Box<dyn Error>> {
+) -> Result<(Duration, u64), Box<dyn Error>> {
     let udp_socket = Arc::new(net::UdpSocket::bind(local_udp).await?);
     udp_socket.connect(server).await?;
     let udp_socket2 = udp_socket.clone();
@@ -544,25 +547,29 @@ async fn measure_latency(
     let sent = sent.unwrap();
     let mut recv = recv.unwrap();
 
-    recv.sort_by_key(|d| d.0);
-    let mut pings: Vec<_> = sent
+    recv.sort_by_key(|d| d.0.index);
+    let mut pings: Vec<(Duration, Duration, u64)> = sent
         .into_iter()
         .enumerate()
         .filter_map(|(index, sent)| {
-            recv.binary_search_by_key(&(index as u32), |e| e.0)
+            recv.binary_search_by_key(&(index as u32), |e| e.0.index)
                 .ok()
-                .map(|ping| recv[ping].1 - sent)
+                .map(|ping| (sent, recv[ping].1 - sent, recv[ping].0.time))
         })
         .collect();
-    pings.sort();
+    pings.sort_by_key(|d| d.1);
 
     if pings.is_empty() {
         return Err("Unable to measure latency to server".into());
     }
 
-    let latency = pings[pings.len() / 2];
+    let (sent, latency, server_time) = pings[pings.len() / 2];
 
-    Ok(latency)
+    let server_pong = sent + latency / 2;
+
+    let server_offset = (server_pong.as_micros() as u64).wrapping_sub(server_time);
+
+    Ok((latency, server_offset))
 }
 
 async fn ping_measure_send(
@@ -580,7 +587,7 @@ async fn ping_measure_send(
 
         let current = setup_start.elapsed();
 
-        let ping = Ping { index };
+        let ping = Ping { time: 0, index };
 
         let mut cursor = Cursor::new(&mut buf[..]);
         bincode::serialize_into(&mut cursor, &ping).unwrap();
@@ -598,7 +605,7 @@ async fn ping_measure_recv(
     setup_start: Instant,
     socket: Arc<UdpSocket>,
     samples: u32,
-) -> Vec<(u32, Duration)> {
+) -> Vec<(Ping, Duration)> {
     let mut storage = Vec::with_capacity(samples as usize);
     let mut buf = [0; 64];
 
@@ -621,7 +628,7 @@ async fn ping_measure_recv(
         let buf = &mut buf[..len];
         let ping: Ping = bincode::deserialize(buf).unwrap();
 
-        storage.push((ping.index, current));
+        storage.push((ping, current));
     }
 
     storage
@@ -676,7 +683,7 @@ pub fn save_graph(result: &TestResult, name: &str) -> String {
     }
 
     graph(
-        &result.config,
+        result,
         name,
         &result.pings,
         &bandwidth,
@@ -992,7 +999,7 @@ async fn ping_send(
 
         let current = setup_start.elapsed();
 
-        let ping = Ping { index };
+        let ping = Ping { time: 0, index };
 
         let mut cursor = Cursor::new(&mut buf[..]);
         bincode::serialize_into(&mut cursor, &ping).unwrap();
@@ -1012,7 +1019,7 @@ async fn ping_recv(
     socket: Arc<UdpSocket>,
     interval: Duration,
     estimated_duration: Duration,
-) -> Vec<(u32, Duration)> {
+) -> Vec<(Ping, Duration)> {
     let mut storage = Vec::with_capacity(
         ((estimated_duration.as_secs_f64() + 2.0) * (1000.0 / interval.as_millis() as f64) * 1.5)
             as usize,
@@ -1038,7 +1045,7 @@ async fn ping_recv(
         let buf = &mut buf[..len];
         let ping: Ping = bincode::deserialize(buf).unwrap();
 
-        storage.push((ping.index, current));
+        storage.push((ping, current));
     }
 
     storage
@@ -1063,9 +1070,9 @@ fn unique(name: &str, ext: &str) -> String {
 }
 
 fn graph(
-    config: &Config,
+    result: &TestResult,
     name: &str,
-    pings: &[(usize, Duration, Option<Duration>)],
+    pings: &[RawPing],
     bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
     start: f64,
     duration: f64,
@@ -1073,32 +1080,88 @@ fn graph(
     use plotters::prelude::*;
 
     let file = unique(name, "png");
-    let result = file.clone();
+    let file_result = file.clone();
+
+    let width = result.config.plot_width.unwrap_or(1280) as u32;
 
     let root = BitMapBackend::new(
         &file,
-        (
-            config.plot_width.unwrap_or(1280) as u32,
-            config.plot_height.unwrap_or(720) as u32,
-        ),
+        (width, result.config.plot_height.unwrap_or(720) as u32),
     )
     .into_drawing_area();
 
     root.fill(&WHITE).unwrap();
 
-    let root = root
-        .titled("Latency under load", (FontFamily::SansSerif, 26))
+    let style: TextStyle = (FontFamily::SansSerif, 26).into();
+
+    let small_style: TextStyle = (FontFamily::SansSerif, 16).into();
+
+    let lines = 2;
+
+    let text_height = (root.estimate_text_size("Wg", &small_style).unwrap().1 as i32 + 5) * lines;
+
+    let center = text_height / 2 + 10;
+
+    root.draw_text(
+        "Latency under load",
+        &style.pos(Pos::new(HPos::Center, VPos::Center)),
+        (width as i32 / 2, center),
+    )
+    .unwrap();
+
+    if result.raw_result.version >= 1 {
+        let top_margin = 10;
+        root.draw_text(
+            &format!(
+                "Connections: {} over IPv{}",
+                result.config.streams,
+                if result.raw_result.ipv6 { 6 } else { 4 },
+            ),
+            &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
+            (100, top_margin + text_height / lines),
+        )
         .unwrap();
+
+        root.draw_text(
+            &format!(
+                "Load duration: {:.2} s",
+                result.config.load_duration.as_secs_f64(),
+            ),
+            &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
+            (100, top_margin),
+        )
+        .unwrap();
+
+        root.draw_text(
+            &format!(
+                "Server latency: {:.2} ms",
+                result.raw_result.server_latency.as_secs_f64() * 1000.0,
+            ),
+            &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
+            (100 + 170, top_margin),
+        )
+        .unwrap();
+
+        root.draw_text(
+            &result.raw_result.generated_by,
+            &small_style.pos(Pos::new(HPos::Right, VPos::Center)),
+            (width as i32 - 100, center),
+        )
+        .unwrap();
+    }
+
+    let root = root.split_vertically(text_height + 10).1;
 
     let (root, loss) = root.split_vertically(root.relative_to_height(1.0) - 60.0);
 
-    let charts = if config.plot_transferred { 3 } else { 2 };
+    let charts = if result.config.plot_transferred { 3 } else { 2 };
 
     let areas = root.split_evenly((charts, 1));
 
     let max_latency = pings
         .iter()
-        .filter_map(|d| d.2)
+        .filter_map(|d| d.latency)
+        .map(|latency| latency.total)
         .max()
         .unwrap_or(Duration::from_millis(100))
         .as_secs_f64() as f64
@@ -1126,6 +1189,8 @@ fn graph(
     let duration = duration * 1.08;
 
     {
+        // Latency
+
         let mut chart = ChartBuilder::on(&areas[1])
             .margin(6)
             .set_label_area_size(LabelAreaPosition::Left, 100)
@@ -1151,40 +1216,66 @@ fn graph(
             .draw()
             .unwrap();
 
-        let color = RGBColor(50, 50, 50);
-        let mut data = Vec::new();
+        let mut draw_latency =
+            |color: RGBColor, name: &str, get_latency: fn(&RawLatency) -> Duration| {
+                let mut data = Vec::new();
 
-        let flush = |data: &mut Vec<_>| {
-            let data = mem::take(data);
+                let flush = |data: &mut Vec<_>| {
+                    let data = mem::take(data);
 
-            if data.len() == 1 {
-                chart
-                    .plotting_area()
-                    .draw(&Circle::new(data[0], 1, color.filled()))
-                    .unwrap();
-            } else {
-                chart
-                    .plotting_area()
-                    .draw(&PathElement::new(data, color))
-                    .unwrap();
-            }
-        };
+                    if data.len() == 1 {
+                        chart
+                            .plotting_area()
+                            .draw(&Circle::new(data[0], 1, color.filled()))
+                            .unwrap();
+                    } else {
+                        chart
+                            .plotting_area()
+                            .draw(&PathElement::new(data, color))
+                            .unwrap();
+                    }
+                };
 
-        for &(_, ping_start, latency) in pings {
-            match latency {
-                Some(latency) => {
-                    let x = ping_start.as_secs_f64() - start;
-                    let y = latency.as_secs_f64() * 1000.0;
+                for ping in pings {
+                    match &ping.latency {
+                        Some(latency) => {
+                            let x = ping.sent.as_secs_f64() - start;
+                            let y = get_latency(latency).as_secs_f64() * 1000.0;
 
-                    data.push((x, y));
+                            data.push((x, y));
+                        }
+                        None => {
+                            flush(&mut data);
+                        }
+                    }
                 }
-                None => {
-                    flush(&mut data);
-                }
-            }
-        }
 
-        flush(&mut data);
+                flush(&mut data);
+
+                chart
+                    .draw_series(LineSeries::new(std::iter::empty(), color))
+                    .unwrap()
+                    .label(name)
+                    .legend(move |(x, y)| {
+                        Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled())
+                    });
+            };
+
+        draw_latency(RGBColor(37, 83, 169), "Up", |latency| latency.up);
+
+        draw_latency(RGBColor(95, 145, 62), "Down", |latency| latency.down());
+
+        draw_latency(RGBColor(50, 50, 50), "Total", |latency| latency.total);
+
+        chart
+            .configure_series_labels()
+            .background_style(&WHITE.mix(0.8))
+            .label_font(font)
+            .border_style(&BLACK)
+            .draw()
+            .unwrap();
+
+        // Packet loss
 
         let mut chart = ChartBuilder::on(&loss)
             .margin(6)
@@ -1212,9 +1303,9 @@ fn graph(
             .draw()
             .unwrap();
 
-        for (_, ping_start, latency) in pings {
-            let x = ping_start.as_secs_f64() - start;
-            if latency.is_none() {
+        for ping in pings {
+            let x = ping.sent.as_secs_f64() - start;
+            if ping.latency.is_none() {
                 chart
                     .plotting_area()
                     .draw(&PathElement::new(
@@ -1277,7 +1368,7 @@ fn graph(
         .draw()
         .unwrap();
 
-    if config.plot_transferred {
+    if result.config.plot_transferred {
         let mut chart = ChartBuilder::on(&areas[2])
             .margin(6)
             .set_label_area_size(LabelAreaPosition::Left, 100)
@@ -1336,7 +1427,7 @@ fn graph(
 
     root.present().expect("Unable to write plot to file");
 
-    result
+    file_result
 }
 
 pub fn test(config: Config, host: &str) {

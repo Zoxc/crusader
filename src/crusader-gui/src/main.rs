@@ -215,8 +215,10 @@ pub struct TestResult {
     upload: Vec<(f64, f64)>,
     both: Vec<(f64, f64)>,
     latency: Vec<(f64, f64)>,
-    loss: Vec<f64>,
     latency_max: f64,
+    up_latency: Vec<(f64, f64)>,
+    down_latency: Vec<(f64, f64)>,
+    loss: Vec<f64>,
     bandwidth_max: f64,
 }
 
@@ -226,21 +228,56 @@ impl TestResult {
         let download = handle_bytes(&result.combined_download_bytes, start);
         let upload = handle_bytes(&result.combined_upload_bytes, start);
         let both = handle_bytes(result.both_bytes.as_deref().unwrap_or(&[]), start);
+
         let latency: Vec<_> = result
             .pings
             .iter()
-            .filter(|v| v.1 >= result.start)
-            .filter_map(|(_, sent, latency)| {
-                latency.map(|latency| (sent.as_secs_f64() - start, latency.as_secs_f64() * 1000.0))
+            .filter(|p| p.sent >= result.start)
+            .filter_map(|p| {
+                p.latency.map(|latency| {
+                    (
+                        p.sent.as_secs_f64() - start,
+                        latency.total.as_secs_f64() * 1000.0,
+                    )
+                })
             })
             .collect();
+
+        let up_latency: Vec<_> = result
+            .pings
+            .iter()
+            .filter(|p| p.sent >= result.start)
+            .filter_map(|p| {
+                p.latency.map(|latency| {
+                    (
+                        p.sent.as_secs_f64() - start,
+                        latency.up.as_secs_f64() * 1000.0,
+                    )
+                })
+            })
+            .collect();
+
+        let down_latency: Vec<_> = result
+            .pings
+            .iter()
+            .filter(|p| p.sent >= result.start)
+            .filter_map(|p| {
+                p.latency.map(|latency| {
+                    (
+                        p.sent.as_secs_f64() - start,
+                        latency.down().as_secs_f64() * 1000.0,
+                    )
+                })
+            })
+            .collect();
+
         let loss = result
             .pings
             .iter()
-            .filter(|v| v.1 >= result.start)
-            .filter_map(|(_, sent, latency)| {
-                if latency.is_none() {
-                    Some(sent.as_secs_f64() - start)
+            .filter(|p| p.sent >= result.start)
+            .filter_map(|p| {
+                if p.latency.is_none() {
+                    Some(p.sent.as_secs_f64() - start)
                 } else {
                     None
                 }
@@ -258,6 +295,8 @@ impl TestResult {
             upload,
             both,
             latency,
+            up_latency,
+            down_latency,
             loss,
             bandwidth_max,
             latency_max,
@@ -368,6 +407,7 @@ impl Tester {
     fn load_result(&mut self) {
         FileDialog::new()
             .add_filter("Crusader Raw Result", &["crr"])
+            .add_filter("All files", &["*"])
             .pick_file()
             .map(|file| {
                 RawResult::load(&file).map(|raw| {
@@ -601,9 +641,32 @@ impl Tester {
                 });
 
             plot.show(ui, |plot_ui| {
+                if result.result.raw_result.version >= 1 {
+                    let latency = result
+                        .up_latency
+                        .iter()
+                        .map(|v| Value::new(v.0 as f64, v.1));
+                    let latency = Line::new(Values::from_values_iter(latency))
+                        .color(Color32::from_rgb(37, 83, 169))
+                        .name("Up");
+
+                    plot_ui.line(latency);
+
+                    let latency = result
+                        .down_latency
+                        .iter()
+                        .map(|v| Value::new(v.0 as f64, v.1));
+                    let latency = Line::new(Values::from_values_iter(latency))
+                        .color(Color32::from_rgb(95, 145, 62))
+                        .name("Down");
+
+                    plot_ui.line(latency);
+                }
+
                 let latency = result.latency.iter().map(|v| Value::new(v.0 as f64, v.1));
                 let latency = Line::new(Values::from_values_iter(latency))
-                    .color(Color32::from_rgb(50, 50, 50));
+                    .color(Color32::from_rgb(50, 50, 50))
+                    .name("Total");
 
                 plot_ui.line(latency);
             });

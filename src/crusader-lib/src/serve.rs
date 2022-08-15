@@ -42,6 +42,7 @@ struct Client {
 }
 
 struct State {
+    started: Instant,
     dummy_data: Vec<u8>,
     clients: Mutex<HashMap<u64, Arc<Client>>>,
     msg: Box<dyn Fn(&str) + Send + Sync>,
@@ -201,8 +202,9 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                             .message
                             .send(ServerMessage::Measure {
                                 stream: test_stream,
-                                time: current_time.duration_since(client.created).as_micros()
-                                    as u64,
+                                time: current_time
+                                    .saturating_duration_since(client.created)
+                                    .as_micros() as u64,
                                 bytes: current_bytes,
                             })
                             .ok();
@@ -268,6 +270,14 @@ async fn pong(state: Arc<State>, addr: SocketAddr) -> Result<JoinHandle<()>, Box
             match result {
                 Ok((len, src)) => {
                     let buf = &mut buf[..len];
+
+                    let time = Instant::now()
+                        .saturating_duration_since(state.started)
+                        .as_micros() as u64;
+
+                    buf.get_mut(0..8)
+                        .map(|slice| slice.copy_from_slice(&time.to_le_bytes()));
+
                     socket
                         .send_to(buf, &src)
                         .await
@@ -289,6 +299,7 @@ async fn serve_async(
     msg: Box<dyn Fn(&str) + Send + Sync>,
 ) -> Result<(), Box<dyn Error>> {
     let state = Arc::new(State {
+        started: Instant::now(),
         dummy_data: crate::test::data(),
         clients: Mutex::new(HashMap::new()),
         msg,
