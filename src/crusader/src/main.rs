@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use clap::{Parser, Subcommand};
 use crusader_lib::protocol;
 use crusader_lib::test::Config;
@@ -65,13 +67,13 @@ fn main() {
             let mut config = Config {
                 port,
                 streams,
-                grace_duration,
-                load_duration,
+                grace_duration: Duration::from_secs(grace_duration),
+                load_duration: Duration::from_secs(load_duration),
                 download: true,
                 upload: true,
                 both: true,
-                ping_interval: latency_sample_rate,
-                bandwidth_interval: bandwidth_sample_rate,
+                ping_interval: Duration::from_millis(latency_sample_rate),
+                bandwidth_interval: Duration::from_millis(bandwidth_sample_rate),
                 plot_transferred,
                 plot_width,
                 plot_height,

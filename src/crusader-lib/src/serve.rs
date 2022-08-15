@@ -3,12 +3,10 @@ use futures::{pin_mut, select, FutureExt};
 use parking_lot::Mutex;
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::io::AsyncWriteExt;
-use tokio::io::{AsyncRead, ReadBuf};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
@@ -19,30 +17,7 @@ use tokio_util::codec::{Decoder, FramedRead, FramedWrite};
 use crate::protocol::{self, codec, receive, send, ClientMessage, ServerMessage};
 
 use futures::stream::StreamExt;
-use std::future::Future;
-use std::task::{Context, Poll};
 use std::{io, thread};
-
-struct ExtractPollRead<'a, F: AsyncRead + ?Sized> {
-    reader: &'a mut F,
-    buf: &'a mut [u8],
-}
-
-impl<F> Future for ExtractPollRead<'_, F>
-where
-    F: AsyncRead + ?Sized,
-{
-    type Output = Poll<io::Result<usize>>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = unsafe { self.get_unchecked_mut() };
-        let reader = unsafe { Pin::new_unchecked(&mut *this.reader) };
-        let mut buf = ReadBuf::new(this.buf);
-        let poll = reader.poll_read(cx, &mut buf);
-        let poll = poll.map(|result| result.map(|_| buf.filled().len()));
-        Poll::Ready(poll)
-    }
-}
 
 pub struct CountingCodec;
 
@@ -60,26 +35,6 @@ impl Decoder for CountingCodec {
         }
     }
 }
-/*
-impl Encoder<Bytes> for CountingCodec {
-    type Error = io::Error;
-
-    fn encode(&mut self, data: Bytes, buf: &mut BytesMut) -> Result<(), io::Error> {
-        buf.reserve(data.len());
-        buf.put(data);
-        Ok(())
-    }
-}
-
-impl Encoder<BytesMut> for CountingCodec {
-    type Error = io::Error;
-
-    fn encode(&mut self, data: BytesMut, buf: &mut BytesMut) -> Result<(), io::Error> {
-        buf.reserve(data.len());
-        buf.put(data);
-        Ok(())
-    }
-} */
 
 struct Client {
     created: Instant,

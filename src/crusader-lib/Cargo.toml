@@ -17,3 +17,4 @@ tokio-util = { version =  "0.7.2", features = ["codec"] }
 futures = "0.3.21"
 bytes = "1.1.0"
 snap = "1.0.5"
+rmp-serde = "1.1.0"

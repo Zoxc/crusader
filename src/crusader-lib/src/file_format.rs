@@ -9,12 +9,84 @@ use std::time::Duration;
 use crate::protocol;
 
 #[derive(Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Elasped {
+    pub microseconds: u64,
+}
+
+// V0 specific
+
+#[derive(Serialize, Deserialize)]
+pub struct RawPingV0 {
+    pub index: usize,
+    pub sent: Duration,
+    pub latency: Option<Duration>,
+}
+
+impl RawPingV0 {
+    pub fn to_v1(&self) -> RawPing {
+        RawPing {
+            index: self.index,
+            sent: self.sent,
+            latency: self.latency,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct RawConfigV0 {
+    // Seconds
+    pub load_duration: u64,
+    pub grace_duration: u64,
+
+    // Milliseconds
+    pub ping_interval: u64,
+    pub bandwidth_interval: u64,
+}
+
+impl RawConfigV0 {
+    pub fn to_v1(&self) -> RawConfig {
+        RawConfig {
+            stagger: Duration::from_secs(0),
+            load_duration: Duration::from_secs(self.load_duration),
+            grace_duration: Duration::from_secs(self.grace_duration),
+            ping_interval: Duration::from_millis(self.ping_interval),
+            bandwidth_interval: Duration::from_millis(self.bandwidth_interval),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RawResultV0 {
+    pub config: RawConfigV0,
+    pub start: Duration,
+    pub duration: Duration,
+    pub stream_groups: Vec<RawStreamGroup>,
+    pub pings: Vec<RawPingV0>,
+}
+
+impl RawResultV0 {
+    pub fn to_v1(&self) -> RawResult {
+        RawResult {
+            version: 0,
+            config: self.config.to_v1(),
+            start: self.start,
+            latency_to_server: Duration::from_secs(0),
+            ipv6: false,
+            duration: self.duration,
+            stream_groups: self.stream_groups.clone(),
+            pings: self.pings.iter().map(|ping| ping.to_v1()).collect(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct RawPoint {
     pub time: Duration,
     pub bytes: u64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct RawStream {
     pub data: Vec<RawPoint>,
 }
@@ -28,7 +100,7 @@ impl RawStream {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct RawStreamGroup {
     pub download: bool,
     pub both: bool,
@@ -42,12 +114,14 @@ pub struct RawPing {
     pub latency: Option<Duration>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct RawConfig {
-    pub load_duration: u64,
-    pub grace_duration: u64,
-    pub ping_interval: u64,
-    pub bandwidth_interval: u64,
+    // Microseconds
+    pub stagger: Duration,
+    pub load_duration: Duration,
+    pub grace_duration: Duration,
+    pub ping_interval: Duration,
+    pub bandwidth_interval: Duration,
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq)]
@@ -67,7 +141,10 @@ impl Default for RawHeader {
 
 #[derive(Serialize, Deserialize)]
 pub struct RawResult {
+    pub version: u64,
     pub config: RawConfig,
+    pub ipv6: bool,
+    pub latency_to_server: Duration,
     pub start: Duration,
     pub duration: Duration,
     pub stream_groups: Vec<RawStreamGroup>,
@@ -82,10 +159,13 @@ impl RawResult {
             return None;
         }
         match header.version {
-            0 => bincode::deserialize_from(file).ok(),
+            0 => {
+                let result: RawResultV0 = bincode::deserialize_from(file).ok()?;
+                Some(result.to_v1())
+            }
             1 => {
                 let data = snap::read::FrameDecoder::new(file);
-                bincode::deserialize_from(data).ok()
+                Some(rmp_serde::decode::from_read(data).ok()?)
             }
             _ => None,
         }
@@ -98,7 +178,8 @@ impl RawResult {
 
         let mut compressor = snap::write::FrameEncoder::new(file);
 
-        bincode::serialize_into(&mut compressor, self).unwrap();
+        self.serialize(&mut rmp_serde::Serializer::new(&mut compressor).with_struct_map())
+            .unwrap();
 
         compressor.flush().unwrap();
     }

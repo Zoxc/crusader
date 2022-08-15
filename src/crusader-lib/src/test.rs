@@ -17,6 +17,7 @@ use std::{
 };
 use std::{mem, thread};
 use tokio::io::AsyncWriteExt;
+use tokio::join;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::{oneshot, watch, Semaphore};
 use tokio::task::{self, yield_now, JoinHandle};
@@ -26,7 +27,9 @@ use tokio::{
 };
 use tokio_util::codec::{Framed, FramedRead, FramedWrite, LengthDelimitedCodec};
 
-use crate::file_format::{RawConfig, RawPing, RawPoint, RawResult, RawStream, RawStreamGroup};
+use crate::file_format::{
+    RawConfig, RawHeader, RawPing, RawPoint, RawResult, RawStream, RawStreamGroup,
+};
 use crate::protocol::{
     codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
 };
@@ -83,7 +86,7 @@ where
 
 impl RawResult {
     pub fn to_test_result(&self, config: Config) -> TestResult {
-        let bandwidth_interval = Duration::from_millis(self.config.bandwidth_interval);
+        let bandwidth_interval = self.config.bandwidth_interval;
 
         let process_bytes = |bytes: Vec<Vec<(u64, u64)>>| -> Vec<(u64, f64)> {
             let bytes: Vec<_> = bytes.iter().map(|stream| to_float(stream)).collect();
@@ -182,11 +185,11 @@ pub struct Config {
     pub upload: bool,
     pub both: bool,
     pub port: u16,
-    pub load_duration: u64,
-    pub grace_duration: u64,
+    pub load_duration: Duration,
+    pub grace_duration: Duration,
     pub streams: u64,
-    pub ping_interval: u64,
-    pub bandwidth_interval: u64,
+    pub ping_interval: Duration,
+    pub bandwidth_interval: Duration,
     pub plot_transferred: bool,
     pub plot_width: Option<u64>,
     pub plot_height: Option<u64>,
@@ -207,7 +210,7 @@ async fn test_async(
 
     hello(&mut control).await?;
 
-    let bandwidth_interval = Duration::from_millis(config.bandwidth_interval);
+    let bandwidth_interval = config.bandwidth_interval;
 
     send(&mut control, &ClientMessage::NewClient).await?;
 
@@ -225,6 +228,13 @@ async fn test_async(
         SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
     };
 
+    let latency = measure_latency(server, local_udp, setup_start).await?;
+
+    msg(&format!(
+        "Latency to server {:.2}",
+        latency.as_secs_f64() * 1000.0
+    ));
+
     let udp_socket = Arc::new(net::UdpSocket::bind(local_udp).await?);
     udp_socket.connect(server).await?;
     let udp_socket2 = udp_socket.clone();
@@ -233,9 +243,9 @@ async fn test_async(
 
     let loading_streams: u32 = config.streams.try_into().unwrap();
 
-    let grace = Duration::from_secs(config.grace_duration);
-    let load_duration = Duration::from_secs(config.load_duration);
-    let ping_interval = Duration::from_millis(config.ping_interval);
+    let grace = config.grace_duration;
+    let load_duration = config.load_duration;
+    let ping_interval = config.ping_interval;
 
     let loads = config.both as u32 + config.download as u32 + config.upload as u32;
 
@@ -489,6 +499,7 @@ async fn test_async(
     });
 
     let raw_config = RawConfig {
+        stagger: Duration::from_secs(0),
         load_duration: config.load_duration,
         grace_duration: config.grace_duration,
         ping_interval: config.ping_interval,
@@ -498,7 +509,10 @@ async fn test_async(
     let start = start.duration_since(setup_start);
 
     let raw_result = RawResult {
+        version: RawHeader::default().version,
         config: raw_config,
+        ipv6: server.is_ipv6(),
+        latency_to_server: latency,
         start,
         duration,
         stream_groups: raw_streams,
@@ -508,6 +522,109 @@ async fn test_async(
     let result = raw_result.to_test_result(config);
 
     Ok((raw_result, result))
+}
+
+async fn measure_latency(
+    server: SocketAddr,
+    local_udp: SocketAddr,
+    setup_start: Instant,
+) -> Result<Duration, Box<dyn Error>> {
+    let udp_socket = Arc::new(net::UdpSocket::bind(local_udp).await?);
+    udp_socket.connect(server).await?;
+    let udp_socket2 = udp_socket.clone();
+
+    let samples = 50;
+
+    let ping_send = tokio::spawn(ping_measure_send(setup_start, udp_socket, samples));
+
+    let ping_recv = tokio::spawn(ping_measure_recv(setup_start, udp_socket2, samples));
+
+    let (sent, recv) = join!(ping_send, ping_recv);
+
+    let sent = sent.unwrap();
+    let mut recv = recv.unwrap();
+
+    recv.sort_by_key(|d| d.0);
+    let mut pings: Vec<_> = sent
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, sent)| {
+            recv.binary_search_by_key(&(index as u32), |e| e.0)
+                .ok()
+                .map(|ping| recv[ping].1 - sent)
+        })
+        .collect();
+    pings.sort();
+
+    if pings.is_empty() {
+        return Err("Unable to measure latency to server".into());
+    }
+
+    let latency = pings[pings.len() / 2];
+
+    Ok(latency)
+}
+
+async fn ping_measure_send(
+    setup_start: Instant,
+    socket: Arc<UdpSocket>,
+    samples: u32,
+) -> Vec<Duration> {
+    let mut storage = Vec::with_capacity(samples as usize);
+    let mut buf = [0; 64];
+
+    let mut interval = time::interval(Duration::from_millis(10));
+
+    for index in 0..samples {
+        interval.tick().await;
+
+        let current = setup_start.elapsed();
+
+        let ping = Ping { index };
+
+        let mut cursor = Cursor::new(&mut buf[..]);
+        bincode::serialize_into(&mut cursor, &ping).unwrap();
+        let buf = &cursor.get_ref()[0..(cursor.position() as usize)];
+
+        socket.send(buf).await.unwrap();
+
+        storage.push(current);
+    }
+
+    storage
+}
+
+async fn ping_measure_recv(
+    setup_start: Instant,
+    socket: Arc<UdpSocket>,
+    samples: u32,
+) -> Vec<(u32, Duration)> {
+    let mut storage = Vec::with_capacity(samples as usize);
+    let mut buf = [0; 64];
+
+    let end = time::sleep(Duration::from_millis(10) * samples + Duration::from_millis(1000)).fuse();
+    pin_mut!(end);
+
+    loop {
+        let result = {
+            let packet = socket.recv(&mut buf).fuse();
+            pin_mut!(packet);
+
+            select! {
+                result = packet => result,
+                _ = end => break,
+            }
+        };
+
+        let current = setup_start.elapsed();
+        let len = result.unwrap();
+        let buf = &mut buf[..len];
+        let ping: Ping = bincode::deserialize(buf).unwrap();
+
+        storage.push((ping.index, current));
+    }
+
+    storage
 }
 
 pub fn save_raw(result: &RawResult, name: &str) -> String {
