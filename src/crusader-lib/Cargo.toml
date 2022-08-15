@@ -16,4 +16,4 @@ tokio = { version = "1.18.2", features = ["full"] }
 tokio-util = { version =  "0.7.2", features = ["codec"] }
 futures = "0.3.21"
 bytes = "1.1.0"
-
+snap = "1.0.5"

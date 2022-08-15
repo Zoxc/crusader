@@ -6,9 +6,6 @@ use plotters::style::RGBColor;
 use rand::prelude::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{
@@ -29,8 +26,9 @@ use tokio::{
 };
 use tokio_util::codec::{Framed, FramedRead, FramedWrite, LengthDelimitedCodec};
 
+use crate::file_format::{RawConfig, RawPing, RawPoint, RawResult, RawStream, RawStreamGroup};
 use crate::protocol::{
-    self, codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
+    codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
 };
 use crate::serve::CountingCodec;
 
@@ -83,82 +81,7 @@ where
     Ok(())
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct RawPoint {
-    pub time: Duration,
-    pub bytes: u64,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct RawStream {
-    pub data: Vec<RawPoint>,
-}
-
-impl RawStream {
-    fn to_vec(&self) -> Vec<(u64, u64)> {
-        self.data
-            .iter()
-            .map(|point| (point.time.as_micros() as u64, point.bytes))
-            .collect()
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct RawStreamGroup {
-    pub download: bool,
-    pub both: bool,
-    pub streams: Vec<RawStream>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct RawPing {
-    pub index: usize,
-    pub sent: Duration,
-    pub latency: Option<Duration>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct RawConfig {
-    pub load_duration: u64,
-    pub grace_duration: u64,
-    pub ping_interval: u64,
-    pub bandwidth_interval: u64,
-}
-
-#[derive(Serialize, Deserialize, Eq, PartialEq)]
-pub struct RawHeader {
-    pub magic: u64,
-    pub version: u64,
-}
-
-impl Default for RawHeader {
-    fn default() -> Self {
-        Self {
-            magic: protocol::MAGIC,
-            version: 0,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct RawResult {
-    pub config: RawConfig,
-    pub start: Duration,
-    pub duration: Duration,
-    pub stream_groups: Vec<RawStreamGroup>,
-    pub pings: Vec<RawPing>,
-}
-
 impl RawResult {
-    pub fn load(path: &Path) -> Option<Self> {
-        let file = File::open(path).ok()?;
-        let header: RawHeader = bincode::deserialize_from(&file).ok()?;
-        if header != RawHeader::default() {
-            return None;
-        }
-        bincode::deserialize_from(&file).ok()
-    }
-
     pub fn to_test_result(&self, config: Config) -> TestResult {
         let bandwidth_interval = Duration::from_millis(self.config.bandwidth_interval);
 
@@ -589,13 +512,7 @@ async fn test_async(
 
 pub fn save_raw(result: &RawResult, name: &str) -> String {
     let name = unique(name, "crr");
-    let mut file = File::create(&name).unwrap();
-
-    bincode::serialize_into(&mut file, &RawHeader::default()).unwrap();
-    bincode::serialize_into(&mut file, result).unwrap();
-
-    file.flush().unwrap();
-
+    result.save(Path::new(&name));
     name
 }
 

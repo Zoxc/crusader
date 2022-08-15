@@ -8,8 +8,9 @@
 use std::{fs, mem, sync::Arc, time::Duration};
 
 use crusader_lib::{
+    file_format::RawResult,
     protocol, serve,
-    test::{self, float_max, to_rates, Config, RawResult},
+    test::{self, float_max, to_rates, Config},
 };
 use eframe::{
     egui::{
