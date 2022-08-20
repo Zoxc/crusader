@@ -1,3 +1,4 @@
+use plotters::coord::types::RangedCoordf64;
 use plotters::coord::Shift;
 use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
@@ -12,6 +13,26 @@ use crate::test::{unique, PlotConfig};
 impl RawResult {
     pub fn to_test_result(&self) -> TestResult {
         let bandwidth_interval = self.config.bandwidth_interval;
+
+        let stream_groups: Vec<_> = self
+            .stream_groups
+            .iter()
+            .map(|group| TestStreamGroup {
+                download: group.download,
+                both: group.both,
+                streams: (0..(group.streams.len()))
+                    .map(|i| {
+                        let bytes: Vec<_> = (0..i)
+                            .map(|i| to_float(&group.streams[i].to_vec()))
+                            .collect();
+                        let bytes: Vec<_> = bytes.iter().map(|stream| stream.as_slice()).collect();
+                        TestStream {
+                            data: sum_bytes(&bytes, bandwidth_interval),
+                        }
+                    })
+                    .collect(),
+            })
+            .collect();
 
         let process_bytes = |bytes: Vec<Vec<(u64, u64)>>| -> Vec<(u64, f64)> {
             let bytes: Vec<_> = bytes.iter().map(|stream| to_float(stream)).collect();
@@ -85,8 +106,19 @@ impl RawResult {
             upload_bytes: upload_bytes_sum,
             combined_download_bytes,
             combined_upload_bytes,
+            stream_groups,
         }
     }
+}
+
+pub struct TestStream {
+    pub data: Vec<(u64, f64)>,
+}
+
+pub struct TestStreamGroup {
+    pub download: bool,
+    pub both: bool,
+    pub streams: Vec<TestStream>,
 }
 
 pub struct TestResult {
@@ -101,6 +133,7 @@ pub struct TestResult {
     pub both_upload_bytes: Option<Vec<(u64, f64)>>,
     pub both_bytes: Option<Vec<(u64, f64)>>,
     pub pings: Vec<RawPing>,
+    pub stream_groups: Vec<TestStreamGroup>,
 }
 
 pub fn save_graph(config: &PlotConfig, result: &TestResult, name: &str) -> String {
@@ -258,6 +291,50 @@ fn interpolate(input: &[(u64, f64)], interval: u64) -> Vec<(u64, f64)> {
     data
 }
 
+fn new_chart<'a, 'b, 'c>(
+    duration: f64,
+    padding_bottom: Option<i32>,
+    max: f64,
+    label: &'b str,
+    x_label: Option<&'b str>,
+    area: &'a DrawingArea<BitMapBackend<'c>, Shift>,
+) -> ChartContext<'a, BitMapBackend<'c>, Cartesian2d<RangedCoordf64, RangedCoordf64>> {
+    let font = (FontFamily::SansSerif, 18);
+
+    let mut chart = ChartBuilder::on(area)
+        .margin(6)
+        .set_label_area_size(LabelAreaPosition::Left, 100)
+        .set_label_area_size(LabelAreaPosition::Right, 100)
+        .set_label_area_size(LabelAreaPosition::Bottom, padding_bottom.unwrap_or(20))
+        .build_cartesian_2d(0.0..duration, 0.0..max)
+        .unwrap();
+
+    chart
+        .plotting_area()
+        .fill(&RGBColor(248, 248, 248))
+        .unwrap();
+
+    let mut mesh = chart.configure_mesh();
+
+    mesh.disable_x_mesh().disable_y_mesh();
+
+    if x_label.is_none() {
+        mesh.x_labels(20).y_labels(10);
+    } else {
+        mesh.x_labels(0).y_labels(0);
+    }
+
+    mesh.x_label_style(font).y_label_style(font).y_desc(label);
+
+    if let Some(label) = x_label {
+        mesh.x_desc(label);
+    }
+
+    mesh.draw().unwrap();
+
+    chart
+}
+
 fn latency(
     pings: &[RawPing],
     start: f64,
@@ -280,30 +357,7 @@ fn latency(
 
     // Latency
 
-    let mut chart = ChartBuilder::on(area)
-        .margin(6)
-        .set_label_area_size(LabelAreaPosition::Left, 100)
-        .set_label_area_size(LabelAreaPosition::Right, 100)
-        .set_label_area_size(LabelAreaPosition::Bottom, 20)
-        .build_cartesian_2d(0.0..duration, 0.0..max_latency)
-        .unwrap();
-
-    chart
-        .plotting_area()
-        .fill(&RGBColor(248, 248, 248))
-        .unwrap();
-
-    chart
-        .configure_mesh()
-        .disable_x_mesh()
-        .disable_y_mesh()
-        .x_labels(20)
-        .y_labels(10)
-        .x_label_style(font)
-        .y_label_style(font)
-        .y_desc("Latency (ms)")
-        .draw()
-        .unwrap();
+    let mut chart = new_chart(duration, None, max_latency, "Latency (ms)", None, area);
 
     let mut draw_latency = |color: RGBColor,
                             name: &str,
@@ -365,31 +419,14 @@ fn latency(
 
     // Packet loss
 
-    let mut chart = ChartBuilder::on(packet_loss_area)
-        .margin(6)
-        .set_label_area_size(LabelAreaPosition::Left, 100)
-        .set_label_area_size(LabelAreaPosition::Right, 100)
-        .set_label_area_size(LabelAreaPosition::Bottom, 30)
-        .build_cartesian_2d(0.0..duration, 0.0..1.0)
-        .unwrap();
-
-    chart
-        .plotting_area()
-        .fill(&RGBColor(248, 248, 248))
-        .unwrap();
-
-    chart
-        .configure_mesh()
-        .disable_x_mesh()
-        .disable_y_mesh()
-        .x_labels(0)
-        .y_labels(0)
-        .x_label_style(font)
-        .y_label_style(font)
-        .y_desc("Packet loss")
-        .x_desc("Elapsed time (seconds)")
-        .draw()
-        .unwrap();
+    let chart = new_chart(
+        duration,
+        Some(30),
+        1.0,
+        "Packet loss",
+        Some("Elapsed time (seconds)"),
+        packet_loss_area,
+    );
 
     for ping in pings {
         let x = ping.sent.as_secs_f64() - start;
@@ -410,7 +447,89 @@ fn latency(
         .unwrap();
 }
 
-pub(crate) fn plot_bandwidth(
+fn plot_split_bandwidth(
+    download: bool,
+    result: &TestResult,
+    start: f64,
+    duration: f64,
+    area: &DrawingArea<BitMapBackend, Shift>,
+) {
+    let groups: Vec<_> = result
+        .stream_groups
+        .iter()
+        .filter(|group| group.download == download)
+        .map(|group| TestStreamGroup {
+            download,
+            both: group.both,
+            streams: group
+                .streams
+                .iter()
+                .map(|stream| TestStream {
+                    data: to_rates(&stream.data),
+                })
+                .collect(),
+        })
+        .collect();
+
+    let max_bandwidth = float_max(
+        groups
+            .iter()
+            .flat_map(|group| group.streams.last().unwrap().data.iter())
+            .map(|e| e.1),
+    );
+
+    let max_bandwidth = max_bandwidth * 1.05;
+
+    let mut chart = new_chart(
+        duration,
+        None,
+        max_bandwidth,
+        if download {
+            "Download (Mbps)"
+        } else {
+            "Upload (Mbps)"
+        },
+        None,
+        area,
+    );
+
+    for group in groups {
+        for i in 0..(group.streams.len()) {
+            let main = i == group.streams.len() - 1;
+            let color = if download {
+                if main {
+                    RGBColor(95, 145, 62)
+                } else {
+                    if i & 1 == 0 {
+                        RGBColor(188, 203, 177)
+                    } else {
+                        RGBColor(215, 223, 208)
+                    }
+                }
+            } else {
+                if main {
+                    RGBColor(37, 83, 169)
+                } else {
+                    if i & 1 == 0 {
+                        RGBColor(159, 172, 202)
+                    } else {
+                        RGBColor(211, 217, 231)
+                    }
+                }
+            };
+            chart
+                .draw_series(LineSeries::new(
+                    group.streams[i].data.iter().map(|(time, rate)| {
+                        (Duration::from_micros(*time).as_secs_f64() - start, *rate)
+                    }),
+                    color,
+                ))
+                .unwrap();
+        }
+    }
+}
+
+fn plot_bandwidth(
     bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
     start: f64,
     duration: f64,
@@ -422,30 +541,14 @@ pub(crate) fn plot_bandwidth(
 
     let font = (FontFamily::SansSerif, 18);
 
-    let mut chart = ChartBuilder::on(area)
-        .margin(6)
-        .set_label_area_size(LabelAreaPosition::Left, 100)
-        .set_label_area_size(LabelAreaPosition::Right, 100)
-        .set_label_area_size(LabelAreaPosition::Bottom, 20)
-        .build_cartesian_2d(0.0..duration, 0.0..max_bandwidth)
-        .unwrap();
-
-    chart
-        .plotting_area()
-        .fill(&RGBColor(248, 248, 248))
-        .unwrap();
-
-    chart
-        .configure_mesh()
-        .disable_x_mesh()
-        .disable_y_mesh()
-        .x_labels(20)
-        .y_labels(10)
-        .x_label_style(font)
-        .y_label_style(font)
-        .y_desc("Bandwidth (Mbps)")
-        .draw()
-        .unwrap();
+    let mut chart = new_chart(
+        duration,
+        None,
+        max_bandwidth,
+        "Bandwidth (Mbps)",
+        None,
+        area,
+    );
 
     for (name, color, rates, _) in bandwidth {
         chart
@@ -489,30 +592,14 @@ pub(crate) fn bytes_transferred(
 
     let font = (FontFamily::SansSerif, 18);
 
-    let mut chart = ChartBuilder::on(area)
-        .margin(6)
-        .set_label_area_size(LabelAreaPosition::Left, 100)
-        .set_label_area_size(LabelAreaPosition::Right, 100)
-        .set_label_area_size(LabelAreaPosition::Bottom, 50)
-        .build_cartesian_2d(0.0..duration, 0.0..max_bytes)
-        .unwrap();
-
-    chart
-        .plotting_area()
-        .fill(&RGBColor(248, 248, 248))
-        .unwrap();
-
-    chart
-        .configure_mesh()
-        .disable_x_mesh()
-        .disable_y_mesh()
-        .x_labels(20)
-        .y_labels(10)
-        .x_label_style(font)
-        .y_label_style(font)
-        .y_desc("Data transferred (GiB)")
-        .draw()
-        .unwrap();
+    let mut chart = new_chart(
+        duration,
+        Some(50),
+        max_bytes,
+        "Data transferred (GiB)",
+        None,
+        area,
+    );
 
     for (name, color, _, bytes) in bandwidth {
         for (i, bytes) in bytes.iter().enumerate() {
@@ -626,19 +713,41 @@ pub(crate) fn graph(
 
     let (root, loss) = root.split_vertically(root.relative_to_height(1.0) - 60.0);
 
-    let charts = if config.transferred { 3 } else { 2 };
+    let mut charts = 2;
+
+    if config.split_bandwidth {
+        charts += 1
+    }
+    if config.transferred {
+        charts += 1
+    }
 
     let areas = root.split_evenly((charts, 1));
 
     // Scale to fit the legend
     let duration = duration * 1.08;
 
-    plot_bandwidth(bandwidth, start, duration, &areas[0]);
+    let mut chart_index = 0;
 
-    latency(pings, start, duration, &areas[1], &loss);
+    if config.split_bandwidth {
+        plot_split_bandwidth(true, result, start, duration, &areas[chart_index]);
+        chart_index += 1;
+        plot_split_bandwidth(false, result, start, duration, &areas[chart_index]);
+        chart_index += 1;
+    } else {
+        plot_bandwidth(bandwidth, start, duration, &areas[chart_index]);
+        chart_index += 1;
+    }
+
+    latency(pings, start, duration, &areas[chart_index], &loss);
+    chart_index += 1;
 
     if config.transferred {
-        bytes_transferred(bandwidth, start, duration, &areas[2]);
+        bytes_transferred(bandwidth, start, duration, &areas[chart_index]);
+        #[allow(unused_assignments)]
+        {
+            chart_index += 1;
+        }
     }
 
     root.present().expect("Unable to write plot to file");

@@ -17,6 +17,8 @@ struct PlotArgs {
     #[clap(long)]
     plot_transferred: bool,
     #[clap(long)]
+    plot_split_bandwidth: bool,
+    #[clap(long)]
     plot_width: Option<u64>,
     #[clap(long)]
     plot_height: Option<u64>,
@@ -26,6 +28,7 @@ impl PlotArgs {
     fn config(&self) -> PlotConfig {
         PlotConfig {
             transferred: self.plot_transferred,
+            split_bandwidth: self.plot_split_bandwidth,
             width: self.plot_width,
             height: self.plot_height,
         }
