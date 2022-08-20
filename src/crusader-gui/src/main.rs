@@ -11,7 +11,7 @@ use crusader_lib::{
     file_format::RawResult,
     plot::{self, float_max, to_rates},
     protocol, serve,
-    test::{self, Config},
+    test::{self, Config, PlotConfig},
 };
 use eframe::{
     egui::{
@@ -143,7 +143,7 @@ enum ServerState {
 
 struct Client {
     rx: mpsc::UnboundedReceiver<String>,
-    done: Option<oneshot::Receiver<Option<Result<(RawResult, TestResult), String>>>>,
+    done: Option<oneshot::Receiver<Option<Result<RawResult, String>>>>,
     abort: Option<oneshot::Sender<()>>,
 }
 
@@ -358,9 +358,6 @@ impl Tester {
             both: self.settings.both,
             ping_interval: Duration::from_millis(self.settings.latency_sample_rate),
             bandwidth_interval: Duration::from_millis(self.settings.bandwidth_sample_rate),
-            plot_transferred: false,
-            plot_width: None,
-            plot_height: None,
         }
     }
 
@@ -374,24 +371,18 @@ impl Tester {
         let ctx = ctx.clone();
         let ctx_ = ctx.clone();
 
-        let abort =
-            test::test_callback(
-                self.config(),
-                &self.settings.server,
-                Arc::new(move |msg| {
-                    tx.send(msg.to_string()).unwrap();
-                    ctx.request_repaint();
-                }),
-                Box::new(move |result| {
-                    signal_done
-                        .send(result.map(|result| {
-                            result.map(|result| (result.0, TestResult::new(result.1)))
-                        }))
-                        .map_err(|_| ())
-                        .unwrap();
-                    ctx_.request_repaint();
-                }),
-            );
+        let abort = test::test_callback(
+            self.config(),
+            &self.settings.server,
+            Arc::new(move |msg| {
+                tx.send(msg.to_string()).unwrap();
+                ctx.request_repaint();
+            }),
+            Box::new(move |result| {
+                signal_done.send(result).map_err(|_| ()).unwrap();
+                ctx_.request_repaint();
+            }),
+        );
 
         self.client = Some(Client {
             done: Some(done),
@@ -412,7 +403,7 @@ impl Tester {
             .pick_file()
             .map(|file| {
                 RawResult::load(&file).map(|raw| {
-                    let result = raw.to_test_result(self.config());
+                    let result = raw.to_test_result();
 
                     self.result = Some(TestResult::new(result));
                     self.result_saved = None;
@@ -525,8 +516,8 @@ impl Tester {
                 match result {
                     Some(Ok(result)) => {
                         self.msgs.push("Test complete.".to_owned());
-                        self.result = Some(result.1);
-                        self.raw_result = Some(result.0);
+                        self.result = Some(TestResult::new(result.to_test_result()));
+                        self.raw_result = Some(result);
                         if self.tab == Tab::Client {
                             self.tab = Tab::Result;
                         }
@@ -576,6 +567,7 @@ impl Tester {
             ui.add_enabled_ui(self.result_saved.is_none(), |ui| {
                 if ui.button("Save as image").clicked() {
                     self.result_saved = Some(plot::save_graph(
+                        &PlotConfig::default(),
                         &self.result.as_ref().unwrap().result,
                         "plot",
                     ));
@@ -687,7 +679,7 @@ impl Tester {
                 });
 
             plot.show(ui, |plot_ui| {
-                if result.result.config.download {
+                if result.result.raw_result.download() {
                     let download = result.download.iter().map(|v| Value::new(v.0 as f64, v.1));
                     let download = Line::new(Values::from_values_iter(download))
                         .color(Color32::from_rgb(95, 145, 62))
@@ -695,7 +687,7 @@ impl Tester {
 
                     plot_ui.line(download);
                 }
-                if result.result.config.upload {
+                if result.result.raw_result.upload() {
                     let upload = result.upload.iter().map(|v| Value::new(v.0 as f64, v.1));
                     let upload = Line::new(Values::from_values_iter(upload))
                         .color(Color32::from_rgb(37, 83, 169))
@@ -703,7 +695,7 @@ impl Tester {
 
                     plot_ui.line(upload);
                 }
-                if result.result.config.both {
+                if result.result.raw_result.both() {
                     let both = result.both.iter().map(|v| Value::new(v.0 as f64, v.1));
                     let both = Line::new(Values::from_values_iter(both))
                         .color(Color32::from_rgb(149, 96, 153))

@@ -7,10 +7,10 @@ use std::mem;
 use std::time::Duration;
 
 use crate::file_format::{RawLatency, RawPing, RawResult};
-use crate::test::{unique, Config};
+use crate::test::{unique, PlotConfig};
 
 impl RawResult {
-    pub fn to_test_result(&self, config: Config) -> TestResult {
+    pub fn to_test_result(&self) -> TestResult {
         let bandwidth_interval = self.config.bandwidth_interval;
 
         let process_bytes = |bytes: Vec<Vec<(u64, u64)>>| -> Vec<(u64, f64)> {
@@ -61,7 +61,7 @@ impl RawResult {
         .collect();
         let combined_upload_bytes = sum_bytes(&combined_upload_bytes, bandwidth_interval);
 
-        let both_bytes = config.both.then(|| {
+        let both_bytes = self.both().then(|| {
             sum_bytes(
                 &[
                     both_download_bytes_sum.as_deref().unwrap(),
@@ -75,7 +75,6 @@ impl RawResult {
 
         TestResult {
             raw_result: self.clone(),
-            config,
             start: self.start,
             duration: self.duration,
             pings,
@@ -92,7 +91,6 @@ impl RawResult {
 
 pub struct TestResult {
     pub raw_result: RawResult,
-    pub config: Config,
     pub start: Duration,
     pub duration: Duration,
     pub download_bytes: Option<Vec<(u64, f64)>>,
@@ -105,7 +103,7 @@ pub struct TestResult {
     pub pings: Vec<RawPing>,
 }
 
-pub fn save_graph(result: &TestResult, name: &str) -> String {
+pub fn save_graph(config: &PlotConfig, result: &TestResult, name: &str) -> String {
     let mut bandwidth = Vec::new();
 
     result.both_bytes.as_ref().map(|both_bytes| {
@@ -148,6 +146,7 @@ pub fn save_graph(result: &TestResult, name: &str) -> String {
     }
 
     graph(
+        config,
         result,
         name,
         &result.pings,
@@ -547,6 +546,7 @@ pub(crate) fn bytes_transferred(
 }
 
 pub(crate) fn graph(
+    config: &PlotConfig,
     result: &TestResult,
     name: &str,
     pings: &[RawPing],
@@ -557,13 +557,10 @@ pub(crate) fn graph(
     let file = unique(name, "png");
     let file_result = file.clone();
 
-    let width = result.config.plot_width.unwrap_or(1280) as u32;
+    let width = config.width.unwrap_or(1280) as u32;
 
-    let root = BitMapBackend::new(
-        &file,
-        (width, result.config.plot_height.unwrap_or(720) as u32),
-    )
-    .into_drawing_area();
+    let root =
+        BitMapBackend::new(&file, (width, config.height.unwrap_or(720) as u32)).into_drawing_area();
 
     root.fill(&WHITE).unwrap();
 
@@ -589,7 +586,7 @@ pub(crate) fn graph(
         root.draw_text(
             &format!(
                 "Connections: {} over IPv{}",
-                result.config.streams,
+                result.raw_result.streams(),
                 if result.raw_result.ipv6 { 6 } else { 4 },
             ),
             &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
@@ -600,7 +597,7 @@ pub(crate) fn graph(
         root.draw_text(
             &format!(
                 "Load duration: {:.2} s",
-                result.config.load_duration.as_secs_f64(),
+                result.raw_result.config.load_duration.as_secs_f64(),
             ),
             &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
             (100, top_margin),
@@ -629,7 +626,7 @@ pub(crate) fn graph(
 
     let (root, loss) = root.split_vertically(root.relative_to_height(1.0) - 60.0);
 
-    let charts = if result.config.plot_transferred { 3 } else { 2 };
+    let charts = if config.transferred { 3 } else { 2 };
 
     let areas = root.split_evenly((charts, 1));
 
@@ -640,7 +637,7 @@ pub(crate) fn graph(
 
     latency(pings, start, duration, &areas[1], &loss);
 
-    if result.config.plot_transferred {
+    if config.transferred {
         bytes_transferred(bandwidth, start, duration, &areas[2]);
     }
 

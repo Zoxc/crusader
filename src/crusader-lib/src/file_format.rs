@@ -169,6 +169,32 @@ pub struct RawResult {
 }
 
 impl RawResult {
+    pub fn streams(&self) -> u64 {
+        self.stream_groups
+            .first()
+            .unwrap()
+            .streams
+            .len()
+            .try_into()
+            .unwrap()
+    }
+
+    pub fn download(&self) -> bool {
+        self.stream_groups
+            .iter()
+            .any(|group| group.download && !group.both)
+    }
+
+    pub fn upload(&self) -> bool {
+        self.stream_groups
+            .iter()
+            .any(|group| !group.download && !group.both)
+    }
+
+    pub fn both(&self) -> bool {
+        self.stream_groups.iter().any(|group| group.both)
+    }
+
     pub fn load(path: &Path) -> Option<Self> {
         let mut file = BufReader::new(File::open(path).ok()?);
         let header: RawHeader = bincode::deserialize_from(&mut file).ok()?;

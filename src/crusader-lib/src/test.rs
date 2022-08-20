@@ -29,7 +29,7 @@ use tokio_util::codec::{Framed, FramedRead, FramedWrite, LengthDelimitedCodec};
 use crate::file_format::{
     RawConfig, RawHeader, RawLatency, RawPing, RawPoint, RawResult, RawStream, RawStreamGroup,
 };
-use crate::plot::{save_graph, TestResult};
+use crate::plot::save_graph;
 use crate::protocol::{
     codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
 };
@@ -84,6 +84,13 @@ where
     Ok(())
 }
 
+#[derive(Default)]
+pub struct PlotConfig {
+    pub transferred: bool,
+    pub width: Option<u64>,
+    pub height: Option<u64>,
+}
+
 pub struct Config {
     pub download: bool,
     pub upload: bool,
@@ -94,16 +101,9 @@ pub struct Config {
     pub streams: u64,
     pub ping_interval: Duration,
     pub bandwidth_interval: Duration,
-    pub plot_transferred: bool,
-    pub plot_width: Option<u64>,
-    pub plot_height: Option<u64>,
 }
 
-async fn test_async(
-    config: Config,
-    server: &str,
-    msg: Msg,
-) -> Result<(RawResult, TestResult), Box<dyn Error>> {
+async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult, Box<dyn Error>> {
     let control = net::TcpStream::connect((server, config.port)).await?;
 
     let server = control.peer_addr()?;
@@ -425,9 +425,7 @@ async fn test_async(
         pings,
     };
 
-    let result = raw_result.to_test_result(config);
-
-    Ok((raw_result, result))
+    Ok(raw_result)
 }
 
 async fn measure_latency(
@@ -818,21 +816,21 @@ pub(crate) fn unique(name: &str, ext: &str) -> String {
     }
 }
 
-pub fn test(config: Config, host: &str) {
+pub fn test(config: Config, plot: PlotConfig, host: &str) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let result = rt
         .block_on(test_async(config, host, Arc::new(|msg| println!("{msg}"))))
         .unwrap();
     println!("Writing graphs...");
-    save_raw(&result.0, "data");
-    save_graph(&result.1, "plot");
+    save_raw(&result, "data");
+    save_graph(&plot, &result.to_test_result(), "plot");
 }
 
 pub fn test_callback(
     config: Config,
     host: &str,
     msg: Arc<dyn Fn(&str) + Send + Sync>,
-    done: Box<dyn FnOnce(Option<Result<(RawResult, TestResult), String>>) + Send>,
+    done: Box<dyn FnOnce(Option<Result<RawResult, String>>) + Send>,
 ) -> oneshot::Sender<()> {
     let (tx, rx) = oneshot::channel();
     let host = host.to_string();

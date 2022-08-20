@@ -1,13 +1,35 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use crusader_lib::file_format::RawResult;
 use crusader_lib::protocol;
-use crusader_lib::test::Config;
+use crusader_lib::test::{Config, PlotConfig};
 
 #[derive(Parser)]
 struct Cli {
     #[clap(subcommand)]
     command: Commands,
+}
+
+#[derive(clap::Args)]
+struct PlotArgs {
+    #[clap(long)]
+    plot_transferred: bool,
+    #[clap(long)]
+    plot_width: Option<u64>,
+    #[clap(long)]
+    plot_height: Option<u64>,
+}
+
+impl PlotArgs {
+    fn config(&self) -> PlotConfig {
+        PlotConfig {
+            transferred: self.plot_transferred,
+            width: self.plot_width,
+            height: self.plot_height,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -36,12 +58,13 @@ enum Commands {
         latency_sample_rate: u64,
         #[clap(long, default_value_t = 20, value_name = "MILLISECONDS")]
         bandwidth_sample_rate: u64,
-        #[clap(long)]
-        plot_transferred: bool,
-        #[clap(long)]
-        plot_width: Option<u64>,
-        #[clap(long)]
-        plot_height: Option<u64>,
+        #[clap(flatten)]
+        plot: PlotArgs,
+    },
+    Plot {
+        data: PathBuf,
+        #[clap(flatten)]
+        plot: PlotArgs,
     },
 }
 
@@ -56,9 +79,7 @@ fn main() {
             both,
             bandwidth_sample_rate,
             latency_sample_rate,
-            plot_transferred,
-            plot_width,
-            plot_height,
+            ref plot,
             port,
             streams,
             grace_duration,
@@ -74,9 +95,6 @@ fn main() {
                 both: true,
                 ping_interval: Duration::from_millis(latency_sample_rate),
                 bandwidth_interval: Duration::from_millis(bandwidth_sample_rate),
-                plot_transferred,
-                plot_width,
-                plot_height,
             };
 
             if download || upload || both {
@@ -85,10 +103,16 @@ fn main() {
                 config.both = both;
             }
 
-            crusader_lib::test::test(config, server);
+            crusader_lib::test::test(config, plot.config(), server);
         }
         Commands::Serve { port } => {
             crusader_lib::serve::serve(*port);
+        }
+        Commands::Plot { data, plot } => {
+            let result = RawResult::load(data).expect("Unable to load data");
+            let file =
+                crusader_lib::plot::save_graph(&plot.config(), &result.to_test_result(), "plot");
+            println!("Saved plot as {}", file);
         }
     }
 }
