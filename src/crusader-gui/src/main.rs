@@ -350,6 +350,7 @@ impl Tester {
     fn config(&self) -> Config {
         Config {
             port: protocol::PORT,
+            stream_stagger: Duration::from_secs(0),
             streams: self.settings.streams,
             grace_duration: Duration::from_secs(self.settings.grace_duration),
             load_duration: Duration::from_secs(self.settings.load_duration),

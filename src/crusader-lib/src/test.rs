@@ -92,6 +92,7 @@ pub struct PlotConfig {
     pub height: Option<u64>,
 }
 
+#[derive(Copy, Clone)]
 pub struct Config {
     pub download: bool,
     pub upload: bool,
@@ -100,6 +101,7 @@ pub struct Config {
     pub load_duration: Duration,
     pub grace_duration: Duration,
     pub streams: u64,
+    pub stream_stagger: Duration,
     pub ping_interval: Duration,
     pub bandwidth_interval: Duration,
 }
@@ -114,8 +116,6 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
     let mut control = Framed::new(control, codec());
 
     hello(&mut control).await?;
-
-    let bandwidth_interval = config.bandwidth_interval;
 
     send(&mut control, &ClientMessage::NewClient).await?;
 
@@ -163,9 +163,9 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
             id,
             server,
             0,
-            loading_streams,
+            config,
+            Duration::ZERO,
             data.clone(),
-            bandwidth_interval,
             state_rx.clone(),
             TestState::LoadFromClient,
         );
@@ -176,9 +176,9 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
             id,
             server,
             1,
-            loading_streams,
+            config,
+            config.stream_stagger / 2,
             data.clone(),
-            bandwidth_interval,
             state_rx.clone(),
             TestState::LoadFromBoth,
         );
@@ -188,8 +188,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         download_loaders(
             id,
             server,
-            loading_streams,
-            bandwidth_interval,
+            config,
             setup_start,
             state_rx.clone(),
             TestState::LoadFromServer,
@@ -200,8 +199,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         download_loaders(
             id,
             server,
-            loading_streams,
-            bandwidth_interval,
+            config,
             setup_start,
             state_rx.clone(),
             TestState::LoadFromBoth,
@@ -274,37 +272,34 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
     if let Some((semaphore, _)) = download.as_ref() {
         state_tx.send(TestState::LoadFromServer).unwrap();
         msg(&format!("Testing download..."));
-        time::sleep(load_duration).await;
+        let _ = semaphore.acquire_many(loading_streams).await.unwrap();
 
         state_tx.send(TestState::Grace2).unwrap();
-        let _ = semaphore.acquire_many(loading_streams).await.unwrap();
         time::sleep(grace).await;
     }
 
     if config.upload {
         state_tx.send(TestState::LoadFromClient).unwrap();
         msg(&format!("Testing upload..."));
-        time::sleep(load_duration).await;
-
-        state_tx.send(TestState::Grace3).unwrap();
         let _ = upload_semaphore
             .acquire_many(loading_streams)
             .await
             .unwrap();
+
+        state_tx.send(TestState::Grace3).unwrap();
         time::sleep(grace).await;
     }
 
     if let Some((semaphore, _)) = both_download.as_ref() {
         state_tx.send(TestState::LoadFromBoth).unwrap();
         msg(&format!("Testing both download and upload..."));
-        time::sleep(load_duration).await;
-
-        state_tx.send(TestState::Grace4).unwrap();
         let _ = semaphore.acquire_many(loading_streams).await.unwrap();
         let _ = both_upload_semaphore
             .acquire_many(loading_streams)
             .await
             .unwrap();
+
+        state_tx.send(TestState::Grace4).unwrap();
         time::sleep(grace).await;
     }
 
@@ -405,7 +400,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
     });
 
     let raw_config = RawConfig {
-        stagger: Duration::from_secs(0),
+        stagger: config.stream_stagger,
         load_duration: config.load_duration,
         grace_duration: config.grace_duration,
         ping_interval: config.ping_interval,
@@ -545,7 +540,7 @@ pub fn save_raw(result: &RawResult, name: &str) -> String {
 fn setup_loaders(
     id: u64,
     server: SocketAddr,
-    count: u32,
+    count: u64,
 ) -> Vec<JoinHandle<Framed<TcpStream, LengthDelimitedCodec>>> {
     (0..count)
         .map(|_| {
@@ -569,19 +564,25 @@ fn upload_loaders(
     id: u64,
     server: SocketAddr,
     group: u32,
-    count: u32,
+    config: Config,
+    stagger_offset: Duration,
     data: Arc<Vec<u8>>,
-    bandwidth_interval: Duration,
     state_rx: watch::Receiver<TestState>,
     state: TestState,
 ) {
-    let loaders = setup_loaders(id, server, count);
+    let loaders = setup_loaders(id, server, config.streams);
 
     for (i, loader) in loaders.into_iter().enumerate() {
         let mut state_rx = state_rx.clone();
         let data = data.clone();
         tokio::spawn(async move {
             let mut stream = loader.await.unwrap();
+
+            wait_for_state(&mut state_rx, state).await;
+
+            time::sleep(config.stream_stagger * i as u32 + stagger_offset).await;
+
+            let stopping = Instant::now() + config.load_duration;
 
             send(
                 &mut stream,
@@ -590,7 +591,7 @@ fn upload_loaders(
                         group,
                         id: i as u32,
                     },
-                    bandwidth_interval: bandwidth_interval.as_micros() as u64,
+                    bandwidth_interval: config.bandwidth_interval.as_micros() as u64,
                 },
             )
             .await
@@ -598,14 +599,12 @@ fn upload_loaders(
 
             let mut raw = stream.into_inner();
 
-            wait_for_state(&mut state_rx, state).await;
-
             loop {
-                raw.write_all(data.as_ref()).await.unwrap();
-
-                if *state_rx.borrow() != state {
+                if Instant::now() >= stopping {
                     break;
                 }
+
+                raw.write_all(data.as_ref()).await.unwrap();
 
                 yield_now().await;
             }
@@ -631,18 +630,18 @@ async fn wait_on_download_loaders(
 fn download_loaders(
     id: u64,
     server: SocketAddr,
-    count: u32,
-    bandwidth_interval: Duration,
+    config: Config,
     setup_start: Instant,
     state_rx: watch::Receiver<TestState>,
     state: TestState,
 ) -> (Arc<Semaphore>, Vec<JoinHandle<Vec<(u64, u64)>>>) {
     let semaphore = Arc::new(Semaphore::new(0));
-    let loaders = setup_loaders(id, server, count);
+    let loaders = setup_loaders(id, server, config.streams);
 
     let loaders = loaders
         .into_iter()
-        .map(|loader| {
+        .enumerate()
+        .map(|(i, loader)| {
             let mut state_rx = state_rx.clone();
             let semaphore = semaphore.clone();
 
@@ -655,17 +654,14 @@ fn download_loaders(
 
                 wait_for_state(&mut state_rx, state).await;
 
+                time::sleep(config.stream_stagger * i as u32).await;
+
                 send(&mut tx, &ClientMessage::LoadFromServer).await.unwrap();
 
                 tokio::spawn(async move {
-                    loop {
-                        if *state_rx.borrow_and_update() != state {
-                            break;
-                        }
-                        state_rx.changed().await.unwrap();
+                    time::sleep(config.load_duration).await;
 
-                        send(&mut tx, &ClientMessage::Done).await.unwrap();
-                    }
+                    send(&mut tx, &ClientMessage::Done).await.unwrap();
                 });
 
                 let bytes = Arc::new(AtomicU64::new(0));
@@ -676,7 +672,7 @@ fn download_loaders(
 
                 let measures = tokio::spawn(async move {
                     let mut measures = Vec::new();
-                    let mut interval = time::interval(bandwidth_interval);
+                    let mut interval = time::interval(config.bandwidth_interval);
                     loop {
                         interval.tick().await;
 
@@ -822,9 +818,11 @@ pub fn test(config: Config, plot: PlotConfig, host: &str) {
     let result = rt
         .block_on(test_async(config, host, Arc::new(|msg| println!("{msg}"))))
         .unwrap();
-    println!("Writing graphs...");
-    save_raw(&result, "data");
-    save_graph(&plot, &result.to_test_result(), "plot");
+    println!("Writing data...");
+    let raw = save_raw(&result, "data");
+    println!("Saved raw data as {}", raw);
+    let file = save_graph(&plot, &result.to_test_result(), "plot");
+    println!("Saved plot as {}", file);
 }
 
 pub fn test_callback(

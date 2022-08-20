@@ -22,7 +22,7 @@ impl RawResult {
                 both: group.both,
                 streams: (0..(group.streams.len()))
                     .map(|i| {
-                        let bytes: Vec<_> = (0..i)
+                        let bytes: Vec<_> = (0..=i)
                             .map(|i| to_float(&group.streams[i].to_vec()))
                             .collect();
                         let bytes: Vec<_> = bytes.iter().map(|stream| stream.as_slice()).collect();
@@ -204,7 +204,7 @@ fn to_float(stream: &[(u64, u64)]) -> Vec<(u64, f64)> {
 }
 
 pub fn to_rates(stream: &[(u64, f64)]) -> Vec<(u64, f64)> {
-    (0..stream.len())
+    let mut result: Vec<(u64, f64)> = (0..stream.len())
         .map(|i| {
             let rate = if i > 0 {
                 let bytes = stream[i].1 - stream[i - 1].1;
@@ -216,7 +216,17 @@ pub fn to_rates(stream: &[(u64, f64)]) -> Vec<(u64, f64)> {
             };
             (stream[i].0, rate)
         })
-        .collect()
+        .collect();
+
+    // Insert dummy zero points for nicer graphs
+    if !result.is_empty() {
+        result.first().unwrap().0.checked_sub(1).map(|first| {
+            result.insert(0, (first, 0.0));
+        });
+        result.push((result.last().unwrap().0 + 1, 0.0));
+    }
+
+    result
 }
 
 fn sum_bytes(input: &[&[(u64, f64)]], interval: Duration) -> Vec<(u64, f64)> {
@@ -683,6 +693,16 @@ pub(crate) fn graph(
 
         root.draw_text(
             &format!(
+                "Stagger: {} s",
+                result.raw_result.config.stagger.as_secs_f64(),
+            ),
+            &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
+            (100 + 180, top_margin + text_height / lines),
+        )
+        .unwrap();
+
+        root.draw_text(
+            &format!(
                 "Load duration: {:.2} s",
                 result.raw_result.config.load_duration.as_secs_f64(),
             ),
@@ -697,7 +717,7 @@ pub(crate) fn graph(
                 result.raw_result.server_latency.as_secs_f64() * 1000.0,
             ),
             &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
-            (100 + 170, top_margin),
+            (100 + 180, top_margin),
         )
         .unwrap();
 
@@ -713,9 +733,16 @@ pub(crate) fn graph(
 
     let (root, loss) = root.split_vertically(root.relative_to_height(1.0) - 60.0);
 
-    let mut charts = 2;
+    let mut charts = 1;
 
     if config.split_bandwidth {
+        if result.raw_result.download() || result.raw_result.both() {
+            charts += 1
+        }
+        if result.raw_result.upload() || result.raw_result.both() {
+            charts += 1
+        }
+    } else {
         charts += 1
     }
     if config.transferred {
@@ -730,10 +757,14 @@ pub(crate) fn graph(
     let mut chart_index = 0;
 
     if config.split_bandwidth {
-        plot_split_bandwidth(true, result, start, duration, &areas[chart_index]);
-        chart_index += 1;
-        plot_split_bandwidth(false, result, start, duration, &areas[chart_index]);
-        chart_index += 1;
+        if result.raw_result.download() || result.raw_result.both() {
+            plot_split_bandwidth(true, result, start, duration, &areas[chart_index]);
+            chart_index += 1;
+        }
+        if result.raw_result.upload() || result.raw_result.both() {
+            plot_split_bandwidth(false, result, start, duration, &areas[chart_index]);
+            chart_index += 1;
+        }
     } else {
         plot_bandwidth(bandwidth, start, duration, &areas[chart_index]);
         chart_index += 1;

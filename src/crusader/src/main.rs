@@ -53,10 +53,12 @@ enum Commands {
         port: u16,
         #[clap(long, default_value_t = 16)]
         streams: u64,
-        #[clap(long, default_value_t = 5, value_name = "SECONDS")]
-        load_duration: u64,
-        #[clap(long, default_value_t = 1, value_name = "SECONDS")]
-        grace_duration: u64,
+        #[clap(long, default_value_t = 0.0, value_name = "SECONDS")]
+        stream_stagger: f64,
+        #[clap(long, default_value_t = 5.0, value_name = "SECONDS")]
+        load_duration: f64,
+        #[clap(long, default_value_t = 1.0, value_name = "SECONDS")]
+        grace_duration: f64,
         #[clap(long, default_value_t = 5, value_name = "MILLISECONDS")]
         latency_sample_rate: u64,
         #[clap(long, default_value_t = 20, value_name = "MILLISECONDS")]
@@ -85,14 +87,16 @@ fn main() {
             ref plot,
             port,
             streams,
+            stream_stagger,
             grace_duration,
             load_duration,
         } => {
             let mut config = Config {
                 port,
                 streams,
-                grace_duration: Duration::from_secs(grace_duration),
-                load_duration: Duration::from_secs(load_duration),
+                stream_stagger: Duration::from_secs_f64(stream_stagger),
+                grace_duration: Duration::from_secs_f64(grace_duration),
+                load_duration: Duration::from_secs_f64(load_duration),
                 download: true,
                 upload: true,
                 both: true,
@@ -113,8 +117,13 @@ fn main() {
         }
         Commands::Plot { data, plot } => {
             let result = RawResult::load(data).expect("Unable to load data");
-            let file =
-                crusader_lib::plot::save_graph(&plot.config(), &result.to_test_result(), "plot");
+            let file = crusader_lib::plot::save_graph(
+                &plot.config(),
+                &result.to_test_result(),
+                data.file_stem()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("plot"),
+            );
             println!("Saved plot as {}", file);
         }
     }

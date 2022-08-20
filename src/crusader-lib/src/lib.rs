@@ -3,6 +3,7 @@
     clippy::too_many_arguments,
     clippy::useless_format,
     clippy::type_complexity,
+    clippy::collapsible_else_if,
     clippy::option_map_unit_fn
 )]
 
