@@ -538,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "crusader"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "clap",
  "crusader-lib",
@@ -558,7 +558,7 @@ dependencies = [
 
 [[package]]
 name = "crusader-lib"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "bincode",
  "bytes",
