@@ -1,5 +1,8 @@
+use plotters::coord::Shift;
+use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
 use plotters::style::RGBColor;
+
 use std::mem;
 use std::time::Duration;
 
@@ -256,6 +259,293 @@ fn interpolate(input: &[(u64, f64)], interval: u64) -> Vec<(u64, f64)> {
     data
 }
 
+fn latency(
+    pings: &[RawPing],
+    start: f64,
+    duration: f64,
+    area: &DrawingArea<BitMapBackend, Shift>,
+    packet_loss_area: &DrawingArea<BitMapBackend, Shift>,
+) {
+    let max_latency = pings
+        .iter()
+        .filter_map(|d| d.latency)
+        .map(|latency| latency.total)
+        .max()
+        .unwrap_or(Duration::from_millis(100))
+        .as_secs_f64() as f64
+        * 1000.0;
+
+    let max_latency = max_latency * 1.05;
+
+    let font = (FontFamily::SansSerif, 18);
+
+    // Latency
+
+    let mut chart = ChartBuilder::on(area)
+        .margin(6)
+        .set_label_area_size(LabelAreaPosition::Left, 100)
+        .set_label_area_size(LabelAreaPosition::Right, 100)
+        .set_label_area_size(LabelAreaPosition::Bottom, 20)
+        .build_cartesian_2d(0.0..duration, 0.0..max_latency)
+        .unwrap();
+
+    chart
+        .plotting_area()
+        .fill(&RGBColor(248, 248, 248))
+        .unwrap();
+
+    chart
+        .configure_mesh()
+        .disable_x_mesh()
+        .disable_y_mesh()
+        .x_labels(20)
+        .y_labels(10)
+        .x_label_style(font)
+        .y_label_style(font)
+        .y_desc("Latency (ms)")
+        .draw()
+        .unwrap();
+
+    let mut draw_latency = |color: RGBColor,
+                            name: &str,
+                            get_latency: fn(&RawLatency) -> Duration| {
+        let mut data = Vec::new();
+
+        let flush = |data: &mut Vec<_>| {
+            let data = mem::take(data);
+
+            if data.len() == 1 {
+                chart
+                    .plotting_area()
+                    .draw(&Circle::new(data[0], 1, color.filled()))
+                    .unwrap();
+            } else {
+                chart
+                    .plotting_area()
+                    .draw(&PathElement::new(data, color))
+                    .unwrap();
+            }
+        };
+
+        for ping in pings {
+            match &ping.latency {
+                Some(latency) => {
+                    let x = ping.sent.as_secs_f64() - start;
+                    let y = get_latency(latency).as_secs_f64() * 1000.0;
+
+                    data.push((x, y));
+                }
+                None => {
+                    flush(&mut data);
+                }
+            }
+        }
+
+        flush(&mut data);
+
+        chart
+            .draw_series(LineSeries::new(std::iter::empty(), color))
+            .unwrap()
+            .label(name)
+            .legend(move |(x, y)| Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled()));
+    };
+
+    draw_latency(RGBColor(37, 83, 169), "Up", |latency| latency.up);
+
+    draw_latency(RGBColor(95, 145, 62), "Down", |latency| latency.down());
+
+    draw_latency(RGBColor(50, 50, 50), "Total", |latency| latency.total);
+
+    chart
+        .configure_series_labels()
+        .background_style(&WHITE.mix(0.8))
+        .label_font(font)
+        .border_style(&BLACK)
+        .draw()
+        .unwrap();
+
+    // Packet loss
+
+    let mut chart = ChartBuilder::on(packet_loss_area)
+        .margin(6)
+        .set_label_area_size(LabelAreaPosition::Left, 100)
+        .set_label_area_size(LabelAreaPosition::Right, 100)
+        .set_label_area_size(LabelAreaPosition::Bottom, 30)
+        .build_cartesian_2d(0.0..duration, 0.0..1.0)
+        .unwrap();
+
+    chart
+        .plotting_area()
+        .fill(&RGBColor(248, 248, 248))
+        .unwrap();
+
+    chart
+        .configure_mesh()
+        .disable_x_mesh()
+        .disable_y_mesh()
+        .x_labels(0)
+        .y_labels(0)
+        .x_label_style(font)
+        .y_label_style(font)
+        .y_desc("Packet loss")
+        .x_desc("Elapsed time (seconds)")
+        .draw()
+        .unwrap();
+
+    for ping in pings {
+        let x = ping.sent.as_secs_f64() - start;
+        if ping.latency.is_none() {
+            chart
+                .plotting_area()
+                .draw(&PathElement::new(
+                    vec![(x, 0.0), (x, 1.0)],
+                    RGBColor(193, 85, 85),
+                ))
+                .unwrap();
+        }
+    }
+
+    chart
+        .plotting_area()
+        .draw(&PathElement::new(vec![(0.0, 1.0), (duration, 1.0)], BLACK))
+        .unwrap();
+}
+
+pub(crate) fn plot_bandwidth(
+    bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
+    start: f64,
+    duration: f64,
+    area: &DrawingArea<BitMapBackend, Shift>,
+) {
+    let max_bandwidth = float_max(bandwidth.iter().flat_map(|list| list.2.iter()).map(|e| e.1));
+
+    let max_bandwidth = max_bandwidth * 1.05;
+
+    let font = (FontFamily::SansSerif, 18);
+
+    let mut chart = ChartBuilder::on(area)
+        .margin(6)
+        .set_label_area_size(LabelAreaPosition::Left, 100)
+        .set_label_area_size(LabelAreaPosition::Right, 100)
+        .set_label_area_size(LabelAreaPosition::Bottom, 20)
+        .build_cartesian_2d(0.0..duration, 0.0..max_bandwidth)
+        .unwrap();
+
+    chart
+        .plotting_area()
+        .fill(&RGBColor(248, 248, 248))
+        .unwrap();
+
+    chart
+        .configure_mesh()
+        .disable_x_mesh()
+        .disable_y_mesh()
+        .x_labels(20)
+        .y_labels(10)
+        .x_label_style(font)
+        .y_label_style(font)
+        .y_desc("Bandwidth (Mbps)")
+        .draw()
+        .unwrap();
+
+    for (name, color, rates, _) in bandwidth {
+        chart
+            .draw_series(LineSeries::new(
+                rates.iter().map(|(time, rate)| {
+                    (Duration::from_micros(*time).as_secs_f64() - start, *rate)
+                }),
+                color,
+            ))
+            .unwrap()
+            .label(*name)
+            .legend(move |(x, y)| Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled()));
+    }
+
+    chart
+        .configure_series_labels()
+        .background_style(&WHITE.mix(0.8))
+        .label_font(font)
+        .border_style(&BLACK)
+        .draw()
+        .unwrap();
+}
+
+pub(crate) fn bytes_transferred(
+    bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
+    start: f64,
+    duration: f64,
+    area: &DrawingArea<BitMapBackend, Shift>,
+) {
+    let max_bytes = float_max(
+        bandwidth
+            .iter()
+            .flat_map(|list| list.3.iter())
+            .flat_map(|list| list.iter())
+            .map(|e| e.1),
+    );
+
+    let max_bytes = max_bytes / (1024.0 * 1024.0 * 1024.0);
+
+    let max_bytes = max_bytes * 1.05;
+
+    let font = (FontFamily::SansSerif, 18);
+
+    let mut chart = ChartBuilder::on(area)
+        .margin(6)
+        .set_label_area_size(LabelAreaPosition::Left, 100)
+        .set_label_area_size(LabelAreaPosition::Right, 100)
+        .set_label_area_size(LabelAreaPosition::Bottom, 50)
+        .build_cartesian_2d(0.0..duration, 0.0..max_bytes)
+        .unwrap();
+
+    chart
+        .plotting_area()
+        .fill(&RGBColor(248, 248, 248))
+        .unwrap();
+
+    chart
+        .configure_mesh()
+        .disable_x_mesh()
+        .disable_y_mesh()
+        .x_labels(20)
+        .y_labels(10)
+        .x_label_style(font)
+        .y_label_style(font)
+        .y_desc("Data transferred (GiB)")
+        .draw()
+        .unwrap();
+
+    for (name, color, _, bytes) in bandwidth {
+        for (i, bytes) in bytes.iter().enumerate() {
+            let series = chart
+                .draw_series(LineSeries::new(
+                    bytes.iter().map(|(time, bytes)| {
+                        (
+                            Duration::from_micros(*time).as_secs_f64() - start,
+                            *bytes / (1024.0 * 1024.0 * 1024.0),
+                        )
+                    }),
+                    &color,
+                ))
+                .unwrap();
+
+            if i == 0 {
+                series.label(*name).legend(move |(x, y)| {
+                    Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled())
+                });
+            }
+        }
+    }
+
+    chart
+        .configure_series_labels()
+        .background_style(&WHITE.mix(0.8))
+        .label_font(font)
+        .border_style(&BLACK)
+        .draw()
+        .unwrap();
+}
+
 pub(crate) fn graph(
     result: &TestResult,
     name: &str,
@@ -264,8 +554,6 @@ pub(crate) fn graph(
     start: f64,
     duration: f64,
 ) -> String {
-    use plotters::prelude::*;
-
     let file = unique(name, "png");
     let file_result = file.clone();
 
@@ -345,271 +633,15 @@ pub(crate) fn graph(
 
     let areas = root.split_evenly((charts, 1));
 
-    let max_latency = pings
-        .iter()
-        .filter_map(|d| d.latency)
-        .map(|latency| latency.total)
-        .max()
-        .unwrap_or(Duration::from_millis(100))
-        .as_secs_f64() as f64
-        * 1000.0;
-
-    let max_bytes = float_max(
-        bandwidth
-            .iter()
-            .flat_map(|list| list.3.iter())
-            .flat_map(|list| list.iter())
-            .map(|e| e.1),
-    );
-
-    let max_bytes = max_bytes / (1024.0 * 1024.0 * 1024.0);
-
-    let max_bandwidth = float_max(bandwidth.iter().flat_map(|list| list.2.iter()).map(|e| e.1));
-
-    let max_bytes = max_bytes * 1.05;
-    let max_bandwidth = max_bandwidth * 1.05;
-    let max_latency = max_latency * 1.05;
-
-    let font = (FontFamily::SansSerif, 18);
-
     // Scale to fit the legend
     let duration = duration * 1.08;
 
-    {
-        // Latency
+    plot_bandwidth(bandwidth, start, duration, &areas[0]);
 
-        let mut chart = ChartBuilder::on(&areas[1])
-            .margin(6)
-            .set_label_area_size(LabelAreaPosition::Left, 100)
-            .set_label_area_size(LabelAreaPosition::Right, 100)
-            .set_label_area_size(LabelAreaPosition::Bottom, 20)
-            .build_cartesian_2d(0.0..duration, 0.0..max_latency)
-            .unwrap();
-
-        chart
-            .plotting_area()
-            .fill(&RGBColor(248, 248, 248))
-            .unwrap();
-
-        chart
-            .configure_mesh()
-            .disable_x_mesh()
-            .disable_y_mesh()
-            .x_labels(20)
-            .y_labels(10)
-            .x_label_style(font)
-            .y_label_style(font)
-            .y_desc("Latency (ms)")
-            .draw()
-            .unwrap();
-
-        let mut draw_latency =
-            |color: RGBColor, name: &str, get_latency: fn(&RawLatency) -> Duration| {
-                let mut data = Vec::new();
-
-                let flush = |data: &mut Vec<_>| {
-                    let data = mem::take(data);
-
-                    if data.len() == 1 {
-                        chart
-                            .plotting_area()
-                            .draw(&Circle::new(data[0], 1, color.filled()))
-                            .unwrap();
-                    } else {
-                        chart
-                            .plotting_area()
-                            .draw(&PathElement::new(data, color))
-                            .unwrap();
-                    }
-                };
-
-                for ping in pings {
-                    match &ping.latency {
-                        Some(latency) => {
-                            let x = ping.sent.as_secs_f64() - start;
-                            let y = get_latency(latency).as_secs_f64() * 1000.0;
-
-                            data.push((x, y));
-                        }
-                        None => {
-                            flush(&mut data);
-                        }
-                    }
-                }
-
-                flush(&mut data);
-
-                chart
-                    .draw_series(LineSeries::new(std::iter::empty(), color))
-                    .unwrap()
-                    .label(name)
-                    .legend(move |(x, y)| {
-                        Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled())
-                    });
-            };
-
-        draw_latency(RGBColor(37, 83, 169), "Up", |latency| latency.up);
-
-        draw_latency(RGBColor(95, 145, 62), "Down", |latency| latency.down());
-
-        draw_latency(RGBColor(50, 50, 50), "Total", |latency| latency.total);
-
-        chart
-            .configure_series_labels()
-            .background_style(&WHITE.mix(0.8))
-            .label_font(font)
-            .border_style(&BLACK)
-            .draw()
-            .unwrap();
-
-        // Packet loss
-
-        let mut chart = ChartBuilder::on(&loss)
-            .margin(6)
-            .set_label_area_size(LabelAreaPosition::Left, 100)
-            .set_label_area_size(LabelAreaPosition::Right, 100)
-            .set_label_area_size(LabelAreaPosition::Bottom, 30)
-            .build_cartesian_2d(0.0..duration, 0.0..1.0)
-            .unwrap();
-
-        chart
-            .plotting_area()
-            .fill(&RGBColor(248, 248, 248))
-            .unwrap();
-
-        chart
-            .configure_mesh()
-            .disable_x_mesh()
-            .disable_y_mesh()
-            .x_labels(0)
-            .y_labels(0)
-            .x_label_style(font)
-            .y_label_style(font)
-            .y_desc("Packet loss")
-            .x_desc("Elapsed time (seconds)")
-            .draw()
-            .unwrap();
-
-        for ping in pings {
-            let x = ping.sent.as_secs_f64() - start;
-            if ping.latency.is_none() {
-                chart
-                    .plotting_area()
-                    .draw(&PathElement::new(
-                        vec![(x, 0.0), (x, 1.0)],
-                        RGBColor(193, 85, 85),
-                    ))
-                    .unwrap();
-            }
-        }
-
-        chart
-            .plotting_area()
-            .draw(&PathElement::new(vec![(0.0, 1.0), (duration, 1.0)], BLACK))
-            .unwrap();
-    }
-
-    let mut chart = ChartBuilder::on(&areas[0])
-        .margin(6)
-        .set_label_area_size(LabelAreaPosition::Left, 100)
-        .set_label_area_size(LabelAreaPosition::Right, 100)
-        .set_label_area_size(LabelAreaPosition::Bottom, 20)
-        .build_cartesian_2d(0.0..duration, 0.0..max_bandwidth)
-        .unwrap();
-
-    chart
-        .plotting_area()
-        .fill(&RGBColor(248, 248, 248))
-        .unwrap();
-
-    chart
-        .configure_mesh()
-        .disable_x_mesh()
-        .disable_y_mesh()
-        .x_labels(20)
-        .y_labels(10)
-        .x_label_style(font)
-        .y_label_style(font)
-        .y_desc("Bandwidth (Mbps)")
-        .draw()
-        .unwrap();
-
-    for (name, color, rates, _) in bandwidth {
-        chart
-            .draw_series(LineSeries::new(
-                rates.iter().map(|(time, rate)| {
-                    (Duration::from_micros(*time).as_secs_f64() - start, *rate)
-                }),
-                color,
-            ))
-            .unwrap()
-            .label(*name)
-            .legend(move |(x, y)| Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled()));
-    }
-
-    chart
-        .configure_series_labels()
-        .background_style(&WHITE.mix(0.8))
-        .label_font(font)
-        .border_style(&BLACK)
-        .draw()
-        .unwrap();
+    latency(pings, start, duration, &areas[1], &loss);
 
     if result.config.plot_transferred {
-        let mut chart = ChartBuilder::on(&areas[2])
-            .margin(6)
-            .set_label_area_size(LabelAreaPosition::Left, 100)
-            .set_label_area_size(LabelAreaPosition::Right, 100)
-            .set_label_area_size(LabelAreaPosition::Bottom, 50)
-            .build_cartesian_2d(0.0..duration, 0.0..max_bytes)
-            .unwrap();
-
-        chart
-            .plotting_area()
-            .fill(&RGBColor(248, 248, 248))
-            .unwrap();
-
-        chart
-            .configure_mesh()
-            .disable_x_mesh()
-            .disable_y_mesh()
-            .x_labels(20)
-            .y_labels(10)
-            .x_label_style(font)
-            .y_label_style(font)
-            .y_desc("Data transferred (GiB)")
-            .draw()
-            .unwrap();
-
-        for (name, color, _, bytes) in bandwidth {
-            for (i, bytes) in bytes.iter().enumerate() {
-                let series = chart
-                    .draw_series(LineSeries::new(
-                        bytes.iter().map(|(time, bytes)| {
-                            (
-                                Duration::from_micros(*time).as_secs_f64() - start,
-                                *bytes / (1024.0 * 1024.0 * 1024.0),
-                            )
-                        }),
-                        &color,
-                    ))
-                    .unwrap();
-
-                if i == 0 {
-                    series.label(*name).legend(move |(x, y)| {
-                        Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled())
-                    });
-                }
-            }
-        }
-
-        chart
-            .configure_series_labels()
-            .background_style(&WHITE.mix(0.8))
-            .label_font(font)
-            .border_style(&BLACK)
-            .draw()
-            .unwrap();
+        bytes_transferred(bandwidth, start, duration, &areas[2]);
     }
 
     root.present().expect("Unable to write plot to file");
