@@ -7,6 +7,7 @@
 )]
 
 pub mod file_format;
+pub mod plot;
 pub mod protocol;
 pub mod serve;
 pub mod test;

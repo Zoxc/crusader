@@ -9,8 +9,9 @@ use std::{fs, mem, sync::Arc, time::Duration};
 
 use crusader_lib::{
     file_format::RawResult,
+    plot::{self, float_max, to_rates},
     protocol, serve,
-    test::{self, float_max, to_rates, Config},
+    test::{self, Config},
 };
 use eframe::{
     egui::{
@@ -210,7 +211,7 @@ struct Tester {
 }
 
 pub struct TestResult {
-    result: test::TestResult,
+    result: plot::TestResult,
     download: Vec<(f64, f64)>,
     upload: Vec<(f64, f64)>,
     both: Vec<(f64, f64)>,
@@ -223,7 +224,7 @@ pub struct TestResult {
 }
 
 impl TestResult {
-    fn new(result: test::TestResult) -> Self {
+    fn new(result: plot::TestResult) -> Self {
         let start = result.start.as_secs_f64();
         let download = handle_bytes(&result.combined_download_bytes, start);
         let upload = handle_bytes(&result.combined_upload_bytes, start);
@@ -574,7 +575,7 @@ impl Tester {
         ui.horizontal_wrapped(|ui| {
             ui.add_enabled_ui(self.result_saved.is_none(), |ui| {
                 if ui.button("Save as image").clicked() {
-                    self.result_saved = Some(test::save_graph(
+                    self.result_saved = Some(plot::save_graph(
                         &self.result.as_ref().unwrap().result,
                         "plot",
                     ));
