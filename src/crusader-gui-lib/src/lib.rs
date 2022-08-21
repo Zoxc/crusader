@@ -29,103 +29,6 @@ use tokio::sync::{
     oneshot,
 };
 
-fn main() {
-    let mut options = eframe::NativeOptions::default();
-
-    // VSync causes performance issues so turn it off.
-    options.vsync = false;
-
-    let settings = std::env::current_exe()
-        .ok()
-        .and_then(|exe| fs::read_to_string(exe.with_extension("toml")).ok())
-        .and_then(|data| toml::from_str(&data).ok())
-        .and_then(|toml: toml::Value| {
-            toml.get("client")
-                .and_then(|table| table.as_table())
-                .map(|table| {
-                    let mut settings = Settings::default();
-
-                    table
-                        .get("server")
-                        .and_then(|value| value.as_str())
-                        .map(|value| settings.server = value.to_string());
-
-                    table
-                        .get("download")
-                        .and_then(|value| value.as_bool())
-                        .map(|value| settings.download = value);
-
-                    table
-                        .get("upload")
-                        .and_then(|value| value.as_bool())
-                        .map(|value| settings.upload = value);
-
-                    table
-                        .get("both")
-                        .and_then(|value| value.as_bool())
-                        .map(|value| settings.both = value);
-
-                    table
-                        .get("streams")
-                        .and_then(|value| {
-                            value.as_integer().and_then(|value| value.try_into().ok())
-                        })
-                        .map(|value| settings.streams = value);
-
-                    table
-                        .get("load_duration")
-                        .and_then(|value| {
-                            value.as_integer().and_then(|value| value.try_into().ok())
-                        })
-                        .map(|value| settings.load_duration = value);
-
-                    table
-                        .get("grace_duration")
-                        .and_then(|value| {
-                            value.as_integer().and_then(|value| value.try_into().ok())
-                        })
-                        .map(|value| settings.grace_duration = value);
-
-                    table
-                        .get("latency_sample_rate")
-                        .and_then(|value| {
-                            value.as_integer().and_then(|value| value.try_into().ok())
-                        })
-                        .map(|value| settings.latency_sample_rate = value);
-
-                    table
-                        .get("bandwidth_sample_rate")
-                        .and_then(|value| {
-                            value.as_integer().and_then(|value| value.try_into().ok())
-                        })
-                        .map(|value| settings.bandwidth_sample_rate = value);
-
-                    settings
-                })
-        })
-        .unwrap_or_default();
-    eframe::run_native(
-        "Crusader Network Tester",
-        options,
-        Box::new(|_cc| {
-            Box::new(Tester {
-                tab: Tab::Client,
-                settings,
-                client_state: ClientState::Stopped,
-                client: None,
-                result: None,
-                result_saved: None,
-                raw_result: None,
-                raw_result_saved: None,
-                msgs: Vec::new(),
-                server_state: ServerState::Stopped(None),
-                server: None,
-                axis: LinkedAxisGroup::x(),
-            })
-        }),
-    );
-}
-
 struct Server {
     done: Option<oneshot::Receiver<()>>,
     msgs: Vec<String>,
@@ -167,16 +70,16 @@ struct TomlSettings {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-struct Settings {
-    server: String,
-    download: bool,
-    upload: bool,
-    both: bool,
-    streams: u64,
-    load_duration: u64,
-    grace_duration: u64,
-    latency_sample_rate: u64,
-    bandwidth_sample_rate: u64,
+pub struct Settings {
+    pub server: String,
+    pub download: bool,
+    pub upload: bool,
+    pub both: bool,
+    pub streams: u64,
+    pub load_duration: u64,
+    pub grace_duration: u64,
+    pub latency_sample_rate: u64,
+    pub bandwidth_sample_rate: u64,
 }
 
 impl Default for Settings {
@@ -195,7 +98,7 @@ impl Default for Settings {
     }
 }
 
-struct Tester {
+pub struct Tester {
     tab: Tab,
     settings: Settings,
     server_state: ServerState,
@@ -347,6 +250,23 @@ impl Drop for Tester {
 }
 
 impl Tester {
+    pub fn new(settings: Settings) -> Tester {
+        Tester {
+            tab: Tab::Client,
+            settings,
+            client_state: ClientState::Stopped,
+            client: None,
+            result: None,
+            result_saved: None,
+            raw_result: None,
+            raw_result_saved: None,
+            msgs: Vec::new(),
+            server_state: ServerState::Stopped(None),
+            server: None,
+            axis: LinkedAxisGroup::x(),
+        }
+    }
+
     fn config(&self) -> Config {
         Config {
             port: protocol::PORT,
@@ -829,30 +749,19 @@ impl Tester {
             }
         }
     }
-}
 
-impl eframe::App for Tester {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let mut style = ctx.style();
-        let style_ = Arc::make_mut(&mut style);
-        style_.spacing.button_padding = vec2(6.0, 0.0);
-        style_.spacing.interact_size.y = 30.0;
-        style_.spacing.item_spacing = vec2(5.0, 5.0);
-        ctx.set_style(style);
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.selectable_value(&mut self.tab, Tab::Client, "Client");
-                ui.selectable_value(&mut self.tab, Tab::Server, "Server");
-                ui.selectable_value(&mut self.tab, Tab::Result, "Result");
-            });
-            ui.separator();
-
-            match self.tab {
-                Tab::Client => self.client(ctx, ui),
-                Tab::Server => self.server(ctx, ui),
-                Tab::Result => self.result(ctx, ui),
-            }
+    pub fn show(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.tab, Tab::Client, "Client");
+            ui.selectable_value(&mut self.tab, Tab::Server, "Server");
+            ui.selectable_value(&mut self.tab, Tab::Result, "Result");
         });
+        ui.separator();
+
+        match self.tab {
+            Tab::Client => self.client(ctx, ui),
+            Tab::Server => self.server(ctx, ui),
+            Tab::Result => self.result(ctx, ui),
+        }
     }
 }

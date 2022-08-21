@@ -1,5 +1,5 @@
 [package]
-name = "crusader-gui"
+name = "crusader-gui-lib"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 toml = "0.5.9"
 serde = { version = "1.0.137", features = ["derive"] }
-crusader-gui-lib = { path = "../crusader-gui-lib" }
+crusader-lib = { path = "../crusader-lib" }
 tokio = { version = "1.18.2", features = ["full"] }
 eframe = "0.18.0"
 rfd = { version = "0.10.0", default-features = false, features = ["xdg-portal"] }
