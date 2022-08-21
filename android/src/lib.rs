@@ -1,3 +1,6 @@
+#![allow(clippy::field_reassign_with_default)]
+
+use crusader_gui_lib::{Settings, Tester};
 use eframe::egui::{self, vec2, Align, FontFamily, Layout};
 use std::sync::Arc;
 
@@ -8,17 +11,18 @@ use {
     log::Level,
 };
 
-struct Test;
+struct App {
+    tester: Tester,
+}
 
-impl eframe::App for Test {
+impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         use eframe::egui::FontFamily::Proportional;
         use eframe::egui::FontId;
         use eframe::egui::TextStyle::*;
 
-        let mut style = ctx.style().clone();
+        let mut style = ctx.style();
         let style_ = Arc::make_mut(&mut style);
-        style_.visuals.dark_mode = false;
         style_.spacing.button_padding = vec2(10.0, 0.0);
         style_.spacing.interact_size.y = 40.0;
         style_.spacing.item_spacing = vec2(10.0, 10.0);
@@ -40,11 +44,10 @@ impl eframe::App for Test {
             rect.set_height(rect.height() - 60.0);
             let mut ui = ui.child_ui(rect, Layout::left_to_right(Align::Center));
             ui.vertical(|ui| {
-                ui.heading("Testing 1");
+                ui.heading("Crusader Network Benchmark");
                 ui.separator();
-                ui.heading("Testing 2");
-                ui.separator();
-                ui.checkbox(&mut true, "Check");
+
+                self.tester.show(ctx, ui);
             });
         });
     }
@@ -55,12 +58,18 @@ impl eframe::App for Test {
 fn android_main(app: AndroidApp) {
     android_logger::init_once(android_logger::Config::default().with_min_level(Level::Trace));
 
+    crusader_lib::plot::register_fonts();
+
     let mut options = NativeOptions::default();
     options.android_app = Some(app);
     options.renderer = Renderer::Wgpu;
     eframe::run_native(
         "Crusader Network Tester",
         options,
-        Box::new(|_cc| Box::new(Test)),
+        Box::new(|_cc| {
+            Box::new(App {
+                tester: Tester::new(Settings::default()),
+            })
+        }),
     );
 }

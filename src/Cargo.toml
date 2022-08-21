@@ -9,5 +9,4 @@ panic = "abort"
 strip = "symbols"
 
 [patch.crates-io]
-freetype-sys = { git = 'https://github.com/Zoxc/freetype-sys.git' }
-expat-sys = { git = 'https://github.com/Zoxc/libexpat.git' }
+winit = { git = "https://github.com/Zoxc/winit", branch = "crusader" }

@@ -17,6 +17,8 @@ fn main() {
     // VSync causes performance issues so turn it off.
     options.vsync = false;
 
+    crusader_lib::plot::register_fonts();
+
     let settings = std::env::current_exe()
         .ok()
         .and_then(|exe| fs::read_to_string(exe.with_extension("toml")).ok())
@@ -105,10 +107,6 @@ struct TomlSettings {
 
 struct App {
     tester: Tester,
-}
-
-impl Drop for App {
-    fn drop(&mut self) {}
 }
 
 impl eframe::App for App {

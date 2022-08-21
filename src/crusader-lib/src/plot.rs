@@ -2,13 +2,19 @@ use plotters::coord::types::RangedCoordf64;
 use plotters::coord::Shift;
 use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
-use plotters::style::RGBColor;
+use plotters::style::{register_font, RGBColor};
 
 use std::mem;
 use std::time::Duration;
 
 use crate::file_format::{RawLatency, RawPing, RawResult};
 use crate::test::{unique, PlotConfig};
+
+pub fn register_fonts() {
+    register_font("sans-serif", include_bytes!("../Ubuntu-Light.ttf"))
+        .map_err(|_| ())
+        .unwrap();
+}
 
 impl RawResult {
     pub fn to_test_result(&self) -> TestResult {
@@ -309,7 +315,7 @@ fn new_chart<'a, 'b, 'c>(
     x_label: Option<&'b str>,
     area: &'a DrawingArea<BitMapBackend<'c>, Shift>,
 ) -> ChartContext<'a, BitMapBackend<'c>, Cartesian2d<RangedCoordf64, RangedCoordf64>> {
-    let font = (FontFamily::SansSerif, 18);
+    let font = (FontFamily::SansSerif, 16);
 
     let mut chart = ChartBuilder::on(area)
         .margin(6)
@@ -345,6 +351,20 @@ fn new_chart<'a, 'b, 'c>(
     chart
 }
 
+fn legends<'a, 'b: 'a>(
+    chart: &mut ChartContext<'a, BitMapBackend<'b>, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+) {
+    let font = (FontFamily::SansSerif, 16);
+
+    chart
+        .configure_series_labels()
+        .background_style(&WHITE.mix(0.8))
+        .label_font(font)
+        .border_style(&BLACK)
+        .draw()
+        .unwrap();
+}
+
 fn latency(
     pings: &[RawPing],
     start: f64,
@@ -362,8 +382,6 @@ fn latency(
         * 1000.0;
 
     let max_latency = max_latency * 1.05;
-
-    let font = (FontFamily::SansSerif, 18);
 
     // Latency
 
@@ -419,13 +437,7 @@ fn latency(
 
     draw_latency(RGBColor(50, 50, 50), "Total", |latency| latency.total);
 
-    chart
-        .configure_series_labels()
-        .background_style(&WHITE.mix(0.8))
-        .label_font(font)
-        .border_style(&BLACK)
-        .draw()
-        .unwrap();
+    legends(&mut chart);
 
     // Packet loss
 
@@ -549,8 +561,6 @@ fn plot_bandwidth(
 
     let max_bandwidth = max_bandwidth * 1.05;
 
-    let font = (FontFamily::SansSerif, 18);
-
     let mut chart = new_chart(
         duration,
         None,
@@ -573,13 +583,7 @@ fn plot_bandwidth(
             .legend(move |(x, y)| Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled()));
     }
 
-    chart
-        .configure_series_labels()
-        .background_style(&WHITE.mix(0.8))
-        .label_font(font)
-        .border_style(&BLACK)
-        .draw()
-        .unwrap();
+    legends(&mut chart);
 }
 
 pub(crate) fn bytes_transferred(
@@ -599,8 +603,6 @@ pub(crate) fn bytes_transferred(
     let max_bytes = max_bytes / (1024.0 * 1024.0 * 1024.0);
 
     let max_bytes = max_bytes * 1.05;
-
-    let font = (FontFamily::SansSerif, 18);
 
     let mut chart = new_chart(
         duration,
@@ -633,13 +635,7 @@ pub(crate) fn bytes_transferred(
         }
     }
 
-    chart
-        .configure_series_labels()
-        .background_style(&WHITE.mix(0.8))
-        .label_font(font)
-        .border_style(&BLACK)
-        .draw()
-        .unwrap();
+    legends(&mut chart);
 }
 
 pub(crate) fn graph(
@@ -663,7 +659,7 @@ pub(crate) fn graph(
 
     let style: TextStyle = (FontFamily::SansSerif, 26).into();
 
-    let small_style: TextStyle = (FontFamily::SansSerif, 16).into();
+    let small_style: TextStyle = (FontFamily::SansSerif, 14).into();
 
     let lines = 2;
 

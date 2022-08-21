@@ -10,26 +10,72 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v2
 
-    - uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        override: true
-        components: rustfmt, clippy
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
 
-    - name: Build
-      run: cargo build
-      working-directory: src
+      - name: Build
+        run: cargo build
+        working-directory: src
 
-    - name: Lint
-      run: cargo clippy --all -- -D warnings
-      working-directory: src
+      - name: Lint
+        run: cargo clippy --all -- -D warnings
+        working-directory: src
 
-    - name: Format
-      run: cargo fmt --all -- --check
-      working-directory: src
+      - name: Format
+        run: cargo fmt --all -- --check
+        working-directory: src
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+
+      - name: Install Rust targets
+        run: >
+          rustup target add
+          aarch64-linux-android
+          armv7-linux-androideabi
+          x86_64-linux-android
+          i686-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+
+      - name: Build Android Rust crates
+        working-directory: android
+        run: cargo ndk -t arm64-v8a -o app/src/main/jniLibs/ -- build
+
+      - name: Build Android APK
+        working-directory: android
+        run: ./gradlew buildDebug
+
+      # Wait for a new cargo ndk release for better clippy support
+      #- name: Lint
+      #  run: cargo ndk -t arm64-v8a -- clippy --all -- -D warnings
+      #  working-directory: android
+
+      - name: Format
+        run: cargo fmt --all -- --check
+        working-directory: android

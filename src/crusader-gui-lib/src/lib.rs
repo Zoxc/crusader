@@ -16,13 +16,16 @@ use crusader_lib::{
 use eframe::{
     egui::{
         self,
-        plot::{Legend, Line, LinkedAxisGroup, Plot, VLine, Value, Values},
+        plot::{Legend, Line, LinkedAxisGroup, Plot, PlotPoints, VLine},
         Grid, Layout, ScrollArea, TextEdit, TextStyle, Ui,
     },
     emath::{vec2, Align, Vec2},
     epaint::Color32,
 };
+
+#[cfg(not(target_os = "android"))]
 use rfd::FileDialog;
+
 use serde::{Deserialize, Serialize};
 use tokio::sync::{
     mpsc::{self, error::TryRecvError},
@@ -318,26 +321,29 @@ impl Tester {
     }
 
     fn load_result(&mut self) {
-        FileDialog::new()
-            .add_filter("Crusader Raw Result", &["crr"])
-            .add_filter("All files", &["*"])
-            .pick_file()
-            .map(|file| {
-                RawResult::load(&file).map(|raw| {
-                    let result = raw.to_test_result();
+        #[cfg(not(target_os = "android"))]
+        {
+            FileDialog::new()
+                .add_filter("Crusader Raw Result", &["crr"])
+                .add_filter("All files", &["*"])
+                .pick_file()
+                .map(|file| {
+                    RawResult::load(&file).map(|raw| {
+                        let result = raw.to_test_result();
 
-                    self.result = Some(TestResult::new(result));
-                    self.result_saved = None;
-                    self.raw_result = Some(raw);
-                    self.raw_result_saved = Some(
-                        file.file_name()
-                            .unwrap_or_default()
-                            .to_str()
-                            .unwrap_or_default()
-                            .to_string(),
-                    );
-                })
-            });
+                        self.result = Some(TestResult::new(result));
+                        self.result_saved = None;
+                        self.raw_result = Some(raw);
+                        self.raw_result_saved = Some(
+                            file.file_name()
+                                .unwrap_or_default()
+                                .to_str()
+                                .unwrap_or_default()
+                                .to_string(),
+                        );
+                    })
+                });
+        }
     }
 
     fn client(&mut self, ctx: &egui::Context, ui: &mut Ui) {
@@ -460,7 +466,7 @@ impl Tester {
         }
 
         ScrollArea::vertical()
-            .stick_to_bottom()
+            .stick_to_bottom(true)
             .auto_shrink([false; 2])
             .show_rows(
                 ui,
@@ -556,29 +562,23 @@ impl Tester {
 
             plot.show(ui, |plot_ui| {
                 if result.result.raw_result.version >= 1 {
-                    let latency = result
-                        .up_latency
-                        .iter()
-                        .map(|v| Value::new(v.0 as f64, v.1));
-                    let latency = Line::new(Values::from_values_iter(latency))
+                    let latency = result.up_latency.iter().map(|v| [v.0 as f64, v.1]);
+                    let latency = Line::new(PlotPoints::from_iter(latency))
                         .color(Color32::from_rgb(37, 83, 169))
                         .name("Up");
 
                     plot_ui.line(latency);
 
-                    let latency = result
-                        .down_latency
-                        .iter()
-                        .map(|v| Value::new(v.0 as f64, v.1));
-                    let latency = Line::new(Values::from_values_iter(latency))
+                    let latency = result.down_latency.iter().map(|v| [v.0 as f64, v.1]);
+                    let latency = Line::new(PlotPoints::from_iter(latency))
                         .color(Color32::from_rgb(95, 145, 62))
                         .name("Down");
 
                     plot_ui.line(latency);
                 }
 
-                let latency = result.latency.iter().map(|v| Value::new(v.0 as f64, v.1));
-                let latency = Line::new(Values::from_values_iter(latency))
+                let latency = result.latency.iter().map(|v| [v.0 as f64, v.1]);
+                let latency = Line::new(PlotPoints::from_iter(latency))
                     .color(Color32::from_rgb(50, 50, 50))
                     .name("Total");
 
@@ -601,24 +601,24 @@ impl Tester {
 
             plot.show(ui, |plot_ui| {
                 if result.result.raw_result.download() {
-                    let download = result.download.iter().map(|v| Value::new(v.0 as f64, v.1));
-                    let download = Line::new(Values::from_values_iter(download))
+                    let download = result.download.iter().map(|v| [v.0 as f64, v.1]);
+                    let download = Line::new(PlotPoints::from_iter(download))
                         .color(Color32::from_rgb(95, 145, 62))
                         .name("Download");
 
                     plot_ui.line(download);
                 }
                 if result.result.raw_result.upload() {
-                    let upload = result.upload.iter().map(|v| Value::new(v.0 as f64, v.1));
-                    let upload = Line::new(Values::from_values_iter(upload))
+                    let upload = result.upload.iter().map(|v| [v.0 as f64, v.1]);
+                    let upload = Line::new(PlotPoints::from_iter(upload))
                         .color(Color32::from_rgb(37, 83, 169))
                         .name("Upload");
 
                     plot_ui.line(upload);
                 }
                 if result.result.raw_result.both() {
-                    let both = result.both.iter().map(|v| Value::new(v.0 as f64, v.1));
-                    let both = Line::new(Values::from_values_iter(both))
+                    let both = result.both.iter().map(|v| [v.0 as f64, v.1]);
+                    let both = Line::new(PlotPoints::from_iter(both))
                         .color(Color32::from_rgb(149, 96, 153))
                         .name("Both");
 
@@ -695,7 +695,7 @@ impl Tester {
                 }
 
                 ScrollArea::vertical()
-                    .stick_to_bottom()
+                    .stick_to_bottom(true)
                     .auto_shrink([false; 2])
                     .show_rows(
                         ui,

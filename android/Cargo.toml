@@ -9,7 +9,8 @@ resolver = "2"
 [dependencies]
 log = "0.4"
 eframe = { git = "https://github.com/Zoxc/egui.git", branch = "crusader", features = [ "wgpu" ] }
-egui_demo_lib = "0.18"
+crusader-gui-lib = { path = "../src/crusader-gui-lib" }
+crusader-lib = { path = "../src/crusader-lib" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.11.0"

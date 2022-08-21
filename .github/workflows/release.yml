@@ -6,7 +6,6 @@ on:
 
 env:
   CARGO_INCREMENTAL: 0
-  RUSTFLAGS: "-C target-feature=+crt-static"
 
 jobs:
   create-release:
@@ -37,7 +36,12 @@ jobs:
       matrix:
         build:
           - os: ubuntu-latest
-            target: arm-unknown-linux-gnueabihf
+            target: arm-unknown-linux-musleabihf
+            exe_postfix:
+            cargo: cross
+
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
             exe_postfix:
             cargo: cross
 
@@ -76,8 +80,6 @@ jobs:
 
       - name: Install cross
         if: matrix.build.cargo == 'cross'
-        env:
-          RUSTFLAGS:
         run: cargo install cross
 
       - name: Install and use musl
@@ -90,6 +92,8 @@ jobs:
       - name: Build
         run: ${{ matrix.build.cargo }} build --target ${{ matrix.build.target }} --release
         working-directory: src
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
 
       - name: Build output
         shell: bash
@@ -128,4 +132,69 @@ jobs:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
           asset_name: ${{ env.ASSET }}
           asset_path: ${{ env.ASSET }}
+          asset_content_type: application/octet-stream
+
+  release-android-assets:
+    name: Android APK
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Install Rust targets
+        run: >
+          rustup target add
+          aarch64-linux-android
+          armv7-linux-androideabi
+          x86_64-linux-android
+          i686-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+
+      - name: Build Android Rust crates
+        working-directory: android
+        run: >
+          cargo ndk
+          -t arm64-v8a
+          -t armeabi-v7a
+          -t x86_64
+          -t x86
+          -o app/src/main/jniLibs/ -- build --release
+
+      - name: Decode Keystore
+        env:
+            ENCODED_STRING: ${{ secrets.KEYSTORE }}
+        run: echo "$ENCODED_STRING" | base64 -di > ../android.keystore
+
+      - name: Build Android APK
+        working-directory: android
+        run: ./gradlew build
+        env:
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+
+      - name: Upload APK
+        uses: actions/upload-release-asset@v1.0.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_name: crusader-android.apk
+          asset_path: android/app/build/outputs/apk/release/app-release.apk
           asset_content_type: application/octet-stream

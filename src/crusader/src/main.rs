@@ -76,6 +76,8 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
 
+    crusader_lib::plot::register_fonts();
+
     match &cli.command {
         &Commands::Test {
             ref server,
