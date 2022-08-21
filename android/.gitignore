@@ -1,0 +1,4 @@
+.gradle
+/target
+/app/build
+/app/src/main/jniLibs
