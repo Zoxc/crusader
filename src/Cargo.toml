@@ -1,5 +1,5 @@
 [workspace]
-members = ["crusader", "crusader-lib", "crusader-gui"]
+members = ["crusader", "crusader-lib", "crusader-gui-lib", "crusader-gui"]
 
 [profile.dev]
 panic = "abort"

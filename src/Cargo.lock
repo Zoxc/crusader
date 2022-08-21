@@ -557,6 +557,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "crusader-gui-lib"
+version = "0.1.0"
+
+[[package]]
 name = "crusader-lib"
 version = "0.0.6"
 dependencies = [
