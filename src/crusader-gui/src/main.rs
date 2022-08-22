@@ -8,11 +8,13 @@
 use std::{fs, sync::Arc};
 
 use crusader_gui_lib::{Settings, Tester};
-use eframe::{egui, emath::vec2};
+use eframe::{egui, emath::vec2, Theme};
 use serde::{Deserialize, Serialize};
 
 fn main() {
     let mut options = eframe::NativeOptions::default();
+    options.follow_system_theme = false;
+    options.default_theme = Theme::Light;
 
     // VSync causes performance issues so turn it off.
     options.vsync = false;

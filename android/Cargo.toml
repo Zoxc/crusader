@@ -11,6 +11,7 @@ log = "0.4"
 eframe = { git = "https://github.com/Zoxc/egui.git", branch = "crusader", features = [ "wgpu" ] }
 crusader-gui-lib = { path = "../src/crusader-gui-lib" }
 crusader-lib = { path = "../src/crusader-lib" }
+winit = "0.27"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.11.0"

@@ -7,8 +7,9 @@ use std::sync::Arc;
 #[cfg(target_os = "android")]
 use {
     android_activity::AndroidApp,
-    eframe::{NativeOptions, Renderer},
+    eframe::{NativeOptions, Renderer, Theme},
     log::Level,
+    winit::platform::android::EventLoopBuilderExtAndroid,
 };
 
 struct App {
@@ -61,8 +62,12 @@ fn android_main(app: AndroidApp) {
     crusader_lib::plot::register_fonts();
 
     let mut options = NativeOptions::default();
-    options.android_app = Some(app);
+    options.follow_system_theme = false;
+    options.default_theme = Theme::Light;
     options.renderer = Renderer::Wgpu;
+    options.event_loop_builder = Some(Box::new(move |builder| {
+        builder.with_android_app(app);
+    }));
     eframe::run_native(
         "Crusader Network Tester",
         options,
