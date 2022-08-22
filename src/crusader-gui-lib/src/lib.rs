@@ -113,6 +113,7 @@ pub struct Tester {
     raw_result: Option<RawResult>,
     raw_result_saved: Option<String>,
     msgs: Vec<String>,
+    msg_scrolled: usize,
     axis: LinkedAxisGroup,
 }
 
@@ -264,6 +265,7 @@ impl Tester {
             raw_result: None,
             raw_result_saved: None,
             msgs: Vec::new(),
+            msg_scrolled: 0,
             server_state: ServerState::Stopped(None),
             server: None,
             axis: LinkedAxisGroup::x(),
@@ -288,6 +290,7 @@ impl Tester {
     fn start_client(&mut self, ctx: &egui::Context) {
         self.client_state = ClientState::Running;
         self.msgs.clear();
+        self.msg_scrolled = 0;
 
         let (signal_done, done) = oneshot::channel();
         let (tx, rx) = mpsc::unbounded_channel();
@@ -346,10 +349,10 @@ impl Tester {
         }
     }
 
-    fn client(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+    fn client(&mut self, ctx: &egui::Context, ui: &mut Ui, compact: bool) {
         let active = self.client_state == ClientState::Stopped;
 
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add_enabled_ui(active, |ui| {
                 ui.label("Server address:");
                 ui.add(TextEdit::singleline(&mut self.settings.server));
@@ -378,106 +381,157 @@ impl Tester {
 
         ui.separator();
 
-        ui.add_enabled_ui(active, |ui| {
-            Grid::new("settings").show(ui, |ui| {
-                ui.checkbox(&mut self.settings.download, "Download");
-                ui.allocate_space(vec2(1.0, 1.0));
-                ui.label("Streams: ");
-                ui.add(
-                    egui::DragValue::new(&mut self.settings.streams)
-                        .clamp_range(1..=1000)
-                        .speed(0.05),
-                );
-                ui.label("");
-                ui.allocate_space(vec2(1.0, 1.0));
-                ui.label("Latency sample rate:");
-                ui.add(
-                    egui::DragValue::new(&mut self.settings.latency_sample_rate)
-                        .clamp_range(1..=1000)
-                        .speed(0.05),
-                );
-                ui.label("milliseconds");
-                ui.end_row();
+        ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                if compact {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.checkbox(&mut self.settings.download, "Download");
+                        ui.add_space(10.0);
+                        ui.checkbox(&mut self.settings.upload, "Upload");
+                        ui.add_space(10.0);
+                        ui.checkbox(&mut self.settings.both, "Both");
+                    });
+                    Grid::new("settings-compact").show(ui, |ui| {
+                        ui.label("Streams: ");
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings.streams)
+                                .clamp_range(1..=1000)
+                                .speed(0.05),
+                        );
+                        ui.end_row();
+                        ui.label("Load duration: ");
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings.load_duration)
+                                .clamp_range(1..=1000)
+                                .speed(0.05),
+                        );
+                        ui.label("seconds");
+                        ui.end_row();
+                        ui.label("Grace duration: ");
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings.grace_duration)
+                                .clamp_range(1..=1000)
+                                .speed(0.05),
+                        );
+                        ui.label("seconds");
+                        ui.end_row();
+                        ui.label("Latency sample rate:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings.latency_sample_rate)
+                                .clamp_range(1..=1000)
+                                .speed(0.05),
+                        );
+                        ui.label("milliseconds");
+                        ui.end_row();
+                        ui.label("Bandwidth sample rate:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings.bandwidth_sample_rate)
+                                .clamp_range(1..=1000)
+                                .speed(0.05),
+                        );
+                        ui.label("milliseconds");
+                        ui.end_row();
+                    });
+                } else {
+                    ui.add_enabled_ui(active, |ui| {
+                        Grid::new("settings").show(ui, |ui| {
+                            ui.checkbox(&mut self.settings.download, "Download");
+                            ui.allocate_space(vec2(1.0, 1.0));
+                            ui.label("Streams: ");
+                            ui.add(
+                                egui::DragValue::new(&mut self.settings.streams)
+                                    .clamp_range(1..=1000)
+                                    .speed(0.05),
+                            );
+                            ui.label("");
+                            ui.allocate_space(vec2(1.0, 1.0));
+                            ui.label("Latency sample rate:");
+                            ui.add(
+                                egui::DragValue::new(&mut self.settings.latency_sample_rate)
+                                    .clamp_range(1..=1000)
+                                    .speed(0.05),
+                            );
+                            ui.label("milliseconds");
+                            ui.end_row();
 
-                ui.checkbox(&mut self.settings.upload, "Upload");
-                ui.label("");
-                ui.label("Load duration: ");
-                ui.add(
-                    egui::DragValue::new(&mut self.settings.load_duration)
-                        .clamp_range(1..=1000)
-                        .speed(0.05),
-                );
-                ui.label("seconds");
-                ui.label("");
-                ui.label("Bandwidth sample rate:");
-                ui.add(
-                    egui::DragValue::new(&mut self.settings.bandwidth_sample_rate)
-                        .clamp_range(1..=1000)
-                        .speed(0.05),
-                );
-                ui.label("milliseconds");
-                ui.end_row();
+                            ui.checkbox(&mut self.settings.upload, "Upload");
+                            ui.label("");
+                            ui.label("Load duration: ");
+                            ui.add(
+                                egui::DragValue::new(&mut self.settings.load_duration)
+                                    .clamp_range(1..=1000)
+                                    .speed(0.05),
+                            );
+                            ui.label("seconds");
+                            ui.label("");
+                            ui.label("Bandwidth sample rate:");
+                            ui.add(
+                                egui::DragValue::new(&mut self.settings.bandwidth_sample_rate)
+                                    .clamp_range(1..=1000)
+                                    .speed(0.05),
+                            );
+                            ui.label("milliseconds");
+                            ui.end_row();
 
-                ui.checkbox(&mut self.settings.both, "Both");
-                ui.label("");
-                ui.label("Grace duration: ");
-                ui.add(
-                    egui::DragValue::new(&mut self.settings.grace_duration)
-                        .clamp_range(1..=1000)
-                        .speed(0.05),
-                );
-                ui.label("seconds");
-                ui.end_row();
-            });
-        });
+                            ui.checkbox(&mut self.settings.both, "Both");
+                            ui.label("");
+                            ui.label("Grace duration: ");
+                            ui.add(
+                                egui::DragValue::new(&mut self.settings.grace_duration)
+                                    .clamp_range(1..=1000)
+                                    .speed(0.05),
+                            );
+                            ui.label("seconds");
+                            ui.end_row();
+                        });
+                    });
+                }
 
-        if self.client_state == ClientState::Running || self.client_state == ClientState::Stopping {
-            let client = self.client.as_mut().unwrap();
+                if self.client_state == ClientState::Running
+                    || self.client_state == ClientState::Stopping
+                {
+                    let client = self.client.as_mut().unwrap();
 
-            while let Ok(msg) = client.rx.try_recv() {
-                println!("[Client] {msg}");
-                self.msgs.push(msg);
-            }
+                    while let Ok(msg) = client.rx.try_recv() {
+                        println!("[Client] {msg}");
+                        self.msgs.push(msg);
+                    }
 
-            if let Ok(result) = client.done.as_mut().unwrap().try_recv() {
-                match result {
-                    Some(Ok(result)) => {
-                        self.msgs.push("Test complete.".to_owned());
-                        self.result = Some(TestResult::new(result.to_test_result()));
-                        self.raw_result = Some(result);
-                        if self.tab == Tab::Client {
-                            self.tab = Tab::Result;
+                    if let Ok(result) = client.done.as_mut().unwrap().try_recv() {
+                        match result {
+                            Some(Ok(result)) => {
+                                self.msgs.push("Test complete.".to_owned());
+                                self.result = Some(TestResult::new(result.to_test_result()));
+                                self.raw_result = Some(result);
+                                if self.tab == Tab::Client {
+                                    self.tab = Tab::Result;
+                                }
+                            }
+                            Some(Err(error)) => {
+                                self.msgs.push(format!("Error: {error}"));
+                            }
+                            None => {
+                                self.msgs.push("Aborted...".to_owned());
+                            }
                         }
-                    }
-                    Some(Err(error)) => {
-                        self.msgs.push(format!("Error: {error}"));
-                    }
-                    None => {
-                        self.msgs.push("Aborted...".to_owned());
+                        self.client = None;
+                        self.client_state = ClientState::Stopped;
                     }
                 }
-                self.client = None;
-                self.client_state = ClientState::Stopped;
-            }
-        }
 
-        if !self.msgs.is_empty() {
-            ui.separator();
-        }
+                if !self.msgs.is_empty() {
+                    ui.separator();
+                }
 
-        ScrollArea::vertical()
-            .stick_to_bottom(true)
-            .auto_shrink([false; 2])
-            .show_rows(
-                ui,
-                ui.text_style_height(&TextStyle::Body),
-                self.msgs.len(),
-                |ui, rows| {
-                    for row in rows {
-                        ui.label(&self.msgs[row]);
+                for (i, msg) in self.msgs.iter().enumerate() {
+                    let response = ui.label(msg);
+                    if self.msg_scrolled <= i {
+                        self.msg_scrolled = i + 1;
+                        response.scroll_to_me(Some(Align::Max));
                     }
-                },
-            );
+                }
+            });
     }
 
     fn result(&mut self, _ctx: &egui::Context, ui: &mut Ui) {
@@ -751,6 +805,7 @@ impl Tester {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        let compact = ui.available_width() < 620.0;
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Client, "Client");
             ui.selectable_value(&mut self.tab, Tab::Server, "Server");
@@ -759,7 +814,7 @@ impl Tester {
         ui.separator();
 
         match self.tab {
-            Tab::Client => self.client(ctx, ui),
+            Tab::Client => self.client(ctx, ui, compact),
             Tab::Server => self.server(ctx, ui),
             Tab::Result => self.result(ctx, ui),
         }
