@@ -795,9 +795,13 @@ async fn ping_recv(
     storage
 }
 
-pub(crate) fn unique(name: &str, ext: &str) -> String {
+pub fn timed(name: &str) -> String {
     let time = chrono::Local::now().format(" %Y.%m.%d %H-%M-%S");
-    let stem = format!("{}{}", name, time);
+    format!("{}{}", name, time)
+}
+
+pub(crate) fn unique(name: &str, ext: &str) -> String {
+    let stem = timed(name);
     let mut i: usize = 0;
     loop {
         let file = if i != 0 {

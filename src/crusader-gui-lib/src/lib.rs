@@ -194,6 +194,9 @@ pub struct Tester {
     msgs: Vec<String>,
     msg_scrolled: usize,
     axis: LinkedAxisGroup,
+    pub file_loader: Option<Box<dyn Fn(&mut Tester)>>,
+    pub plot_saver: Option<Box<dyn Fn(&plot::TestResult)>>,
+    pub raw_saver: Option<Box<dyn Fn(&RawResult)>>,
 }
 
 pub struct TestResult {
@@ -300,7 +303,6 @@ pub fn handle_bytes(data: &[(u64, f64)], start: f64) -> Vec<(f64, f64)> {
 
 impl Drop for Tester {
     fn drop(&mut self) {
-        println!("DROP Tester");
         // Stop client
         self.client.as_mut().map(|client| {
             mem::take(&mut client.abort).map(|abort| {
@@ -323,7 +325,6 @@ impl Drop for Tester {
 
         // Store settings
         self.settings_path.as_deref().map(|path| {
-            println!("STORE settings {:?}", path);
             toml::ser::to_string_pretty(&TomlSettings {
                 client: Some(self.settings.clone()),
             })
@@ -339,7 +340,7 @@ impl Tester {
             tab: Tab::Client,
             settings: settings_path
                 .as_deref()
-                .map_or(Settings::default(), |path| Settings::from_path(path)),
+                .map_or(Settings::default(), Settings::from_path),
             settings_path,
             client_state: ClientState::Stopped,
             client: None,
@@ -352,7 +353,26 @@ impl Tester {
             server_state: ServerState::Stopped(None),
             server: None,
             axis: LinkedAxisGroup::x(),
+            file_loader: None,
+            raw_saver: None,
+            plot_saver: None,
         }
+    }
+
+    pub fn load_file(&mut self, name: String, raw: RawResult) {
+        let result = raw.to_test_result();
+        self.result = Some(TestResult::new(result));
+        self.result_saved = None;
+        self.raw_result = Some(raw);
+        self.raw_result_saved = Some(name);
+    }
+
+    pub fn save_raw(&mut self, name: String) {
+        self.raw_result_saved = Some(name);
+    }
+
+    pub fn save_plot(&mut self, name: String) {
+        self.result_saved = Some(name);
     }
 
     fn config(&self) -> Config {
@@ -415,21 +435,20 @@ impl Tester {
                 .pick_file()
                 .map(|file| {
                     RawResult::load(&file).map(|raw| {
-                        let result = raw.to_test_result();
-
-                        self.result = Some(TestResult::new(result));
-                        self.result_saved = None;
-                        self.raw_result = Some(raw);
-                        self.raw_result_saved = Some(
+                        self.load_file(
                             file.file_name()
                                 .unwrap_or_default()
                                 .to_str()
                                 .unwrap_or_default()
                                 .to_string(),
+                            raw,
                         );
                     })
                 });
         }
+        let file_loader = self.file_loader.take();
+        file_loader.as_ref().map(|loader| loader(self));
+        self.file_loader = file_loader;
     }
 
     fn client(&mut self, ctx: &egui::Context, ui: &mut Ui, compact: bool) {
@@ -467,57 +486,57 @@ impl Tester {
         ScrollArea::vertical()
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                if compact {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.checkbox(&mut self.settings.download, "Download");
-                        ui.add_space(10.0);
-                        ui.checkbox(&mut self.settings.upload, "Upload");
-                        ui.add_space(10.0);
-                        ui.checkbox(&mut self.settings.both, "Both");
-                    });
-                    Grid::new("settings-compact").show(ui, |ui| {
-                        ui.label("Streams: ");
-                        ui.add(
-                            egui::DragValue::new(&mut self.settings.streams)
-                                .clamp_range(1..=1000)
-                                .speed(0.05),
-                        );
-                        ui.end_row();
-                        ui.label("Load duration: ");
-                        ui.add(
-                            egui::DragValue::new(&mut self.settings.load_duration)
-                                .clamp_range(1..=1000)
-                                .speed(0.05),
-                        );
-                        ui.label("seconds");
-                        ui.end_row();
-                        ui.label("Grace duration: ");
-                        ui.add(
-                            egui::DragValue::new(&mut self.settings.grace_duration)
-                                .clamp_range(1..=1000)
-                                .speed(0.05),
-                        );
-                        ui.label("seconds");
-                        ui.end_row();
-                        ui.label("Latency sample rate:");
-                        ui.add(
-                            egui::DragValue::new(&mut self.settings.latency_sample_rate)
-                                .clamp_range(1..=1000)
-                                .speed(0.05),
-                        );
-                        ui.label("milliseconds");
-                        ui.end_row();
-                        ui.label("Bandwidth sample rate:");
-                        ui.add(
-                            egui::DragValue::new(&mut self.settings.bandwidth_sample_rate)
-                                .clamp_range(1..=1000)
-                                .speed(0.05),
-                        );
-                        ui.label("milliseconds");
-                        ui.end_row();
-                    });
-                } else {
-                    ui.add_enabled_ui(active, |ui| {
+                ui.add_enabled_ui(active, |ui| {
+                    if compact {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.checkbox(&mut self.settings.download, "Download");
+                            ui.add_space(10.0);
+                            ui.checkbox(&mut self.settings.upload, "Upload");
+                            ui.add_space(10.0);
+                            ui.checkbox(&mut self.settings.both, "Both");
+                        });
+                        Grid::new("settings-compact").show(ui, |ui| {
+                            ui.label("Streams: ");
+                            ui.add(
+                                egui::DragValue::new(&mut self.settings.streams)
+                                    .clamp_range(1..=1000)
+                                    .speed(0.05),
+                            );
+                            ui.end_row();
+                            ui.label("Load duration: ");
+                            ui.add(
+                                egui::DragValue::new(&mut self.settings.load_duration)
+                                    .clamp_range(1..=1000)
+                                    .speed(0.05),
+                            );
+                            ui.label("seconds");
+                            ui.end_row();
+                            ui.label("Grace duration: ");
+                            ui.add(
+                                egui::DragValue::new(&mut self.settings.grace_duration)
+                                    .clamp_range(1..=1000)
+                                    .speed(0.05),
+                            );
+                            ui.label("seconds");
+                            ui.end_row();
+                            ui.label("Latency sample rate:");
+                            ui.add(
+                                egui::DragValue::new(&mut self.settings.latency_sample_rate)
+                                    .clamp_range(1..=1000)
+                                    .speed(0.05),
+                            );
+                            ui.label("milliseconds");
+                            ui.end_row();
+                            ui.label("Bandwidth sample rate:");
+                            ui.add(
+                                egui::DragValue::new(&mut self.settings.bandwidth_sample_rate)
+                                    .clamp_range(1..=1000)
+                                    .speed(0.05),
+                            );
+                            ui.label("milliseconds");
+                            ui.end_row();
+                        });
+                    } else {
                         Grid::new("settings").show(ui, |ui| {
                             ui.checkbox(&mut self.settings.download, "Download");
                             ui.allocate_space(vec2(1.0, 1.0));
@@ -568,8 +587,8 @@ impl Tester {
                             ui.label("seconds");
                             ui.end_row();
                         });
-                    });
-                }
+                    }
+                });
 
                 if self.client_state == ClientState::Running
                     || self.client_state == ClientState::Stopping
@@ -630,11 +649,18 @@ impl Tester {
         ui.horizontal_wrapped(|ui| {
             ui.add_enabled_ui(self.result_saved.is_none(), |ui| {
                 if ui.button("Save as image").clicked() {
-                    self.result_saved = Some(plot::save_graph(
-                        &PlotConfig::default(),
-                        &self.result.as_ref().unwrap().result,
-                        "plot",
-                    ));
+                    match self.plot_saver.as_ref() {
+                        Some(saver) => {
+                            saver(&self.result.as_ref().unwrap().result);
+                        }
+                        None => {
+                            self.result_saved = Some(plot::save_graph(
+                                &PlotConfig::default(),
+                                &self.result.as_ref().unwrap().result,
+                                "plot",
+                            ));
+                        }
+                    }
                 }
             });
             self.result_saved
@@ -643,8 +669,15 @@ impl Tester {
 
             ui.add_enabled_ui(self.raw_result_saved.is_none(), |ui| {
                 if ui.button("Save raw data").clicked() {
-                    self.raw_result_saved =
-                        Some(test::save_raw(self.raw_result.as_ref().unwrap(), "data"));
+                    match self.raw_saver.as_ref() {
+                        Some(saver) => {
+                            saver(self.raw_result.as_ref().unwrap());
+                        }
+                        None => {
+                            self.raw_result_saved =
+                                Some(test::save_raw(self.raw_result.as_ref().unwrap(), "data"));
+                        }
+                    }
                 }
             });
             self.raw_result_saved

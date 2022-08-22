@@ -561,7 +561,9 @@ dependencies = [
  "crusader-gui-lib",
  "crusader-lib",
  "eframe",
+ "jni",
  "log",
+ "ndk-context",
  "winit",
 ]
 

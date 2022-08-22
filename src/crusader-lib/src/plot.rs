@@ -5,6 +5,7 @@ use plotters::style::text_anchor::{HPos, Pos, VPos};
 use plotters::style::{register_font, RGBColor};
 
 use std::mem;
+use std::path::Path;
 use std::time::Duration;
 
 use crate::file_format::{RawLatency, RawPing, RawResult};
@@ -143,6 +144,12 @@ pub struct TestResult {
 }
 
 pub fn save_graph(config: &PlotConfig, result: &TestResult, name: &str) -> String {
+    let file = unique(name, "png");
+    save_graph_to_path(file.as_ref(), config, result);
+    file
+}
+
+pub fn save_graph_to_path(path: &Path, config: &PlotConfig, result: &TestResult) {
     let mut bandwidth = Vec::new();
 
     result.both_bytes.as_ref().map(|both_bytes| {
@@ -185,14 +192,14 @@ pub fn save_graph(config: &PlotConfig, result: &TestResult, name: &str) -> Strin
     }
 
     graph(
+        path,
         config,
         result,
-        name,
         &result.pings,
         &bandwidth,
         result.start.as_secs_f64(),
         result.duration.as_secs_f64(),
-    )
+    );
 }
 
 pub fn float_max(iter: impl Iterator<Item = f64>) -> f64 {
@@ -639,21 +646,18 @@ pub(crate) fn bytes_transferred(
 }
 
 pub(crate) fn graph(
+    path: &Path,
     config: &PlotConfig,
     result: &TestResult,
-    name: &str,
     pings: &[RawPing],
     bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
     start: f64,
     duration: f64,
-) -> String {
-    let file = unique(name, "png");
-    let file_result = file.clone();
-
+) {
     let width = config.width.unwrap_or(1280) as u32;
 
     let root =
-        BitMapBackend::new(&file, (width, config.height.unwrap_or(720) as u32)).into_drawing_area();
+        BitMapBackend::new(path, (width, config.height.unwrap_or(720) as u32)).into_drawing_area();
 
     root.fill(&WHITE).unwrap();
 
@@ -778,6 +782,4 @@ pub(crate) fn graph(
     }
 
     root.present().expect("Unable to write plot to file");
-
-    file_result
 }

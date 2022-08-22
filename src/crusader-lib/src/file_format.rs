@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
 use std::io::BufWriter;
+use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
@@ -195,8 +196,8 @@ impl RawResult {
         self.stream_groups.iter().any(|group| group.both)
     }
 
-    pub fn load(path: &Path) -> Option<Self> {
-        let mut file = BufReader::new(File::open(path).ok()?);
+    pub fn load_from_reader(reader: impl Read) -> Option<Self> {
+        let mut file = BufReader::new(reader);
         let header: RawHeader = bincode::deserialize_from(&mut file).ok()?;
         if header.magic != RawHeader::default().magic {
             return None;
@@ -214,8 +215,12 @@ impl RawResult {
         }
     }
 
-    pub fn save(&self, name: &Path) {
-        let mut file = BufWriter::new(File::create(name).unwrap());
+    pub fn load(path: &Path) -> Option<Self> {
+        Self::load_from_reader(File::open(path).ok()?)
+    }
+
+    pub fn save_to_writer(&self, writer: impl Write) {
+        let mut file = BufWriter::new(writer);
 
         bincode::serialize_into(&mut file, &RawHeader::default()).unwrap();
 
@@ -225,5 +230,9 @@ impl RawResult {
             .unwrap();
 
         compressor.flush().unwrap();
+    }
+
+    pub fn save(&self, name: &Path) {
+        self.save_to_writer(File::create(name).unwrap())
     }
 }
