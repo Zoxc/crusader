@@ -5,7 +5,12 @@
 )]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{fs, mem, sync::Arc, time::Duration};
+use std::{
+    fs, mem,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use crusader_lib::{
     file_format::RawResult,
@@ -85,6 +90,79 @@ pub struct Settings {
     pub bandwidth_sample_rate: u64,
 }
 
+impl Settings {
+    fn from_path(path: &Path) -> Self {
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|data| toml::from_str(&data).ok())
+            .and_then(|toml: toml::Value| {
+                toml.get("client")
+                    .and_then(|table| table.as_table())
+                    .map(|table| {
+                        let mut settings = Settings::default();
+
+                        table
+                            .get("server")
+                            .and_then(|value| value.as_str())
+                            .map(|value| settings.server = value.to_string());
+
+                        table
+                            .get("download")
+                            .and_then(|value| value.as_bool())
+                            .map(|value| settings.download = value);
+
+                        table
+                            .get("upload")
+                            .and_then(|value| value.as_bool())
+                            .map(|value| settings.upload = value);
+
+                        table
+                            .get("both")
+                            .and_then(|value| value.as_bool())
+                            .map(|value| settings.both = value);
+
+                        table
+                            .get("streams")
+                            .and_then(|value| {
+                                value.as_integer().and_then(|value| value.try_into().ok())
+                            })
+                            .map(|value| settings.streams = value);
+
+                        table
+                            .get("load_duration")
+                            .and_then(|value| {
+                                value.as_integer().and_then(|value| value.try_into().ok())
+                            })
+                            .map(|value| settings.load_duration = value);
+
+                        table
+                            .get("grace_duration")
+                            .and_then(|value| {
+                                value.as_integer().and_then(|value| value.try_into().ok())
+                            })
+                            .map(|value| settings.grace_duration = value);
+
+                        table
+                            .get("latency_sample_rate")
+                            .and_then(|value| {
+                                value.as_integer().and_then(|value| value.try_into().ok())
+                            })
+                            .map(|value| settings.latency_sample_rate = value);
+
+                        table
+                            .get("bandwidth_sample_rate")
+                            .and_then(|value| {
+                                value.as_integer().and_then(|value| value.try_into().ok())
+                            })
+                            .map(|value| settings.bandwidth_sample_rate = value);
+
+                        settings
+                    })
+            })
+            .unwrap_or_default()
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -104,6 +182,7 @@ impl Default for Settings {
 pub struct Tester {
     tab: Tab,
     settings: Settings,
+    settings_path: Option<PathBuf>,
     server_state: ServerState,
     server: Option<Server>,
     client_state: ClientState,
@@ -221,6 +300,7 @@ pub fn handle_bytes(data: &[(u64, f64)], start: f64) -> Vec<(f64, f64)> {
 
 impl Drop for Tester {
     fn drop(&mut self) {
+        println!("DROP Tester");
         // Stop client
         self.client.as_mut().map(|client| {
             mem::take(&mut client.abort).map(|abort| {
@@ -242,22 +322,25 @@ impl Drop for Tester {
         });
 
         // Store settings
-        toml::ser::to_string_pretty(&TomlSettings {
-            client: Some(self.settings.clone()),
-        })
-        .map(|data| {
-            std::env::current_exe()
-                .map(|exe| fs::write(exe.with_extension("toml"), data.as_bytes()))
-        })
-        .ok();
+        self.settings_path.as_deref().map(|path| {
+            println!("STORE settings {:?}", path);
+            toml::ser::to_string_pretty(&TomlSettings {
+                client: Some(self.settings.clone()),
+            })
+            .map(|data| fs::write(path, data.as_bytes()))
+            .ok();
+        });
     }
 }
 
 impl Tester {
-    pub fn new(settings: Settings) -> Tester {
+    pub fn new(settings_path: Option<PathBuf>) -> Tester {
         Tester {
             tab: Tab::Client,
-            settings,
+            settings: settings_path
+                .as_deref()
+                .map_or(Settings::default(), |path| Settings::from_path(path)),
+            settings_path,
             client_state: ClientState::Stopped,
             client: None,
             result: None,

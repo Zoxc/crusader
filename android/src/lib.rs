@@ -1,6 +1,6 @@
 #![allow(clippy::field_reassign_with_default)]
 
-use crusader_gui_lib::{Settings, Tester};
+use crusader_gui_lib::Tester;
 use eframe::egui::{self, vec2, Align, FontFamily, Layout};
 use std::sync::Arc;
 
@@ -47,7 +47,6 @@ impl eframe::App for App {
             ui.vertical(|ui| {
                 ui.heading("Crusader Network Benchmark");
                 ui.separator();
-
                 self.tester.show(ctx, ui);
             });
         });
@@ -61,6 +60,10 @@ fn android_main(app: AndroidApp) {
 
     crusader_lib::plot::register_fonts();
 
+    let settings = app
+        .internal_data_path()
+        .map(|path| path.join("settings.toml"));
+
     let mut options = NativeOptions::default();
     options.follow_system_theme = false;
     options.default_theme = Theme::Light;
@@ -73,7 +76,7 @@ fn android_main(app: AndroidApp) {
         options,
         Box::new(|_cc| {
             Box::new(App {
-                tester: Tester::new(Settings::default()),
+                tester: Tester::new(settings),
             })
         }),
     );
