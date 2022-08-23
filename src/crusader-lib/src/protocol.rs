@@ -5,7 +5,7 @@ use futures::{Sink, SinkExt, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio_util::codec::{length_delimited, LengthDelimitedCodec};
 
-pub const PORT: u16 = 30481;
+pub const PORT: u16 = 35481;
 
 pub const MAGIC: u64 = 0x5372ab82ae7c59cb;
 pub const VERSION: u64 = 1;

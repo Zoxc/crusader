@@ -10,7 +10,7 @@ To host a server run:
 ```sh
 crusader serve
 ```
-It uses TCP and UDP port 30481.
+It uses TCP and UDP port 35481.
 
 
 To do a test run:
