@@ -123,7 +123,8 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
 
     let reply: ServerMessage = receive(&mut control).await?;
     let id = match reply {
-        ServerMessage::NewClient(id) => id,
+        ServerMessage::NewClient(Some(id)) => id,
+        ServerMessage::NewClient(None) => return Err("Server was unable to create client".into()),
         _ => return Err(format!("Unexpected message {:?}", reply).into()),
     };
 
@@ -133,7 +134,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
     };
 
-    let (latency, server_time_offset) = measure_latency(server, local_udp, setup_start).await?;
+    let (latency, server_time_offset) = measure_latency(id, server, local_udp, setup_start).await?;
 
     msg(&format!(
         "Latency to server {:.2} ms",
@@ -247,6 +248,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
     });
 
     let ping_send = tokio::spawn(ping_send(
+        id,
         state_rx.clone(),
         setup_start,
         udp_socket2.clone(),
@@ -425,6 +427,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
 }
 
 async fn measure_latency(
+    id: u64,
     server: SocketAddr,
     local_udp: SocketAddr,
     setup_start: Instant,
@@ -435,7 +438,7 @@ async fn measure_latency(
 
     let samples = 50;
 
-    let ping_send = tokio::spawn(ping_measure_send(setup_start, udp_socket, samples));
+    let ping_send = tokio::spawn(ping_measure_send(id, setup_start, udp_socket, samples));
 
     let ping_recv = tokio::spawn(ping_measure_recv(setup_start, udp_socket2, samples));
 
@@ -470,6 +473,7 @@ async fn measure_latency(
 }
 
 async fn ping_measure_send(
+    id: u64,
     setup_start: Instant,
     socket: Arc<UdpSocket>,
     samples: u32,
@@ -484,7 +488,7 @@ async fn ping_measure_send(
 
         let current = setup_start.elapsed();
 
-        let ping = Ping { time: 0, index };
+        let ping = Ping { id, time: 0, index };
 
         let mut cursor = Cursor::new(&mut buf[..]);
         bincode::serialize_into(&mut cursor, &ping).unwrap();
@@ -718,6 +722,7 @@ async fn wait_for_state(state_rx: &mut watch::Receiver<TestState>, state: TestSt
 }
 
 async fn ping_send(
+    id: u64,
     state_rx: watch::Receiver<TestState>,
     setup_start: Instant,
     socket: Arc<UdpSocket>,
@@ -743,7 +748,7 @@ async fn ping_send(
 
         let current = setup_start.elapsed();
 
-        let ping = Ping { time: 0, index };
+        let ping = Ping { id, time: 0, index };
 
         let mut cursor = Cursor::new(&mut buf[..]);
         bincode::serialize_into(&mut cursor, &ping).unwrap();

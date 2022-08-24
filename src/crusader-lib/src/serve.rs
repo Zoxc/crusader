@@ -5,7 +5,7 @@ use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -36,7 +36,53 @@ impl Decoder for CountingCodec {
     }
 }
 
+struct SlotState {
+    address: [AtomicU64; 2],
+    overflow: AtomicBool,
+}
+
+impl SlotState {
+    fn new() -> Self {
+        Self {
+            address: [AtomicU64::new(0), AtomicU64::new(0)],
+            overflow: AtomicBool::new(false),
+        }
+    }
+
+    fn load(&self) -> [u8; 16] {
+        // Load the address from the slot
+        let mut address: [u8; 16] = [0; 16];
+        for i in 0..2 {
+            address[(i * 8)..((i + 1) * 8)]
+                .copy_from_slice(&self.address[i].load(Ordering::Acquire).to_ne_bytes());
+        }
+        address
+    }
+
+    fn store(&self, ip: IpAddr) {
+        let bytes = ip_to_octets(ip);
+        self.address[0].store(
+            u64::from_ne_bytes(bytes[0..8].try_into().unwrap()),
+            Ordering::Release,
+        );
+        self.address[1].store(
+            u64::from_ne_bytes(bytes[8..16].try_into().unwrap()),
+            Ordering::Release,
+        );
+        self.overflow.store(false, Ordering::Release);
+    }
+}
+
+struct PongSlot {
+    state: Arc<SlotState>,
+}
+
+struct HandlerSlot {
+    state: Arc<SlotState>,
+}
+
 struct Client {
+    ip: IpAddr,
     created: Instant,
     message: UnboundedSender<ServerMessage>,
 }
@@ -44,8 +90,26 @@ struct Client {
 struct State {
     started: Instant,
     dummy_data: Vec<u8>,
-    clients: Mutex<HashMap<u64, Arc<Client>>>,
+    clients: Mutex<Vec<Option<Arc<Client>>>>,
+    ipv4_slots: Vec<HandlerSlot>,
+    ipv6_slots: Vec<HandlerSlot>,
     msg: Box<dyn Fn(&str) + Send + Sync>,
+}
+
+fn ip_to_octets(ip: IpAddr) -> [u8; 16] {
+    match ip {
+        IpAddr::V4(ip) => ip.to_ipv6_mapped(),
+        IpAddr::V6(ip) => ip,
+    }
+    .octets()
+}
+
+pub struct OnDrop<F: Fn()>(pub F);
+
+impl<F: Fn()> Drop for OnDrop<F> {
+    fn drop(&mut self) {
+        (self.0)();
+    }
 }
 
 async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Error>> {
@@ -71,6 +135,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
     let mut client = None;
     let mut receiver = None;
+    let mut client_dropper = None;
 
     loop {
         let request: ClientMessage = receive(&mut stream_rx).await?;
@@ -80,23 +145,51 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 let (tx, rx) = unbounded_channel();
 
-                receiver = Some(rx);
+                let client = {
+                    let mut clients = state.clients.lock();
+                    let free_slot = clients.iter_mut().enumerate().find(|slot| slot.1.is_none());
 
-                let client = Arc::new(Client {
-                    created: Instant::now(),
-                    message: tx,
-                });
-                let id = Arc::as_ptr(&client) as u64;
-                state.clients.lock().insert(id, client);
-                send(&mut stream_tx, &ServerMessage::NewClient(id)).await?;
+                    free_slot.map(|(slot, data)| {
+                        let slot = slot as u64;
+                        let client = Arc::new(Client {
+                            ip: addr.ip(),
+                            created: Instant::now(),
+                            message: tx,
+                        });
+                        *data = Some(client);
+
+                        state.ipv4_slots[slot as usize].state.store(addr.ip());
+                        state.ipv6_slots[slot as usize].state.store(addr.ip());
+
+                        receiver = Some(rx);
+
+                        let state = state.clone();
+                        client_dropper = Some(move || {
+                            let mut clients = state.clients.lock();
+                            clients[slot as usize] = None;
+                            state.ipv4_slots[slot as usize]
+                                .state
+                                .store(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+                            state.ipv6_slots[slot as usize]
+                                .state
+                                .store(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+                        });
+
+                        slot
+                    })
+                };
+
+                send(&mut stream_tx, &ServerMessage::NewClient(client)).await?;
             }
             ClientMessage::Associate(id) => {
                 client = Some(
                     state
                         .clients
                         .lock()
-                        .get(&id)
+                        .get(id as usize)
+                        .and_then(|client| client.as_ref())
                         .cloned()
+                        .and_then(|client| (client.ip == addr.ip()).then_some(client))
                         .ok_or("Unable to assoicate client")?,
                 );
             }
@@ -258,33 +351,51 @@ async fn listen(state: Arc<State>, listener: TcpListener) {
     }
 }
 
-async fn pong(state: Arc<State>, addr: SocketAddr) -> Result<JoinHandle<()>, Box<dyn Error>> {
+async fn pong(
+    state: Arc<State>,
+    slots: Vec<PongSlot>,
+    addr: SocketAddr,
+) -> Result<JoinHandle<()>, Box<dyn Error>> {
     let socket = UdpSocket::bind(addr).await?;
 
     Ok(tokio::spawn(async move {
-        let mut buf = [0; 256];
+        let mut buf = [0; 128];
 
         loop {
             let result = socket.recv_from(&mut buf).await;
 
             match result {
                 Ok((len, src)) => {
-                    let buf = &mut buf[..len];
-
                     let time = Instant::now()
                         .saturating_duration_since(state.started)
                         .as_micros() as u64;
 
-                    buf.get_mut(0..8)
-                        .map(|slice| slice.copy_from_slice(&time.to_le_bytes()));
+                    let buf = &mut buf[..len];
 
-                    socket
-                        .send_to(buf, &src)
-                        .await
-                        .map_err(|error| {
-                            (state.msg)(&format!("Unable to reply to UDP ping: {:?}", error));
+                    let valid = buf
+                        .get_mut(0..8)
+                        .and_then(|bytes| bytes.try_into().ok())
+                        .and_then(|client| {
+                            let client = u64::from_le_bytes(client);
+                            slots.get(client as usize)
                         })
-                        .ok();
+                        .and_then(|slot| {
+                            (ip_to_octets(src.ip()) == slot.state.load()).then_some(|| ())
+                        })
+                        .is_some();
+
+                    if valid {
+                        buf.get_mut(8..16)
+                            .map(|slice| slice.copy_from_slice(&time.to_le_bytes()));
+
+                        socket
+                            .send_to(buf, &src)
+                            .await
+                            .map_err(|error| {
+                                (state.msg)(&format!("Unable to reply to UDP ping: {:?}", error));
+                            })
+                            .ok();
+                    }
                 }
                 Err(error) => {
                     (state.msg)(&format!("Unable to get UDP ping: {:?}", error));
@@ -298,10 +409,31 @@ async fn serve_async(
     port: u16,
     msg: Box<dyn Fn(&str) + Send + Sync>,
 ) -> Result<(), Box<dyn Error>> {
+    let slots = 1000;
+
+    let create_slots = || -> (Vec<PongSlot>, Vec<HandlerSlot>) {
+        (0..slots)
+            .map(|_| {
+                let state = Arc::new(SlotState::new());
+                (
+                    PongSlot {
+                        state: state.clone(),
+                    },
+                    HandlerSlot { state },
+                )
+            })
+            .unzip()
+    };
+
+    let (ipv6_pong_slots, ipv6_slots) = create_slots();
+    let (ipv4_pong_slots, ipv4_slots) = create_slots();
+
     let state = Arc::new(State {
         started: Instant::now(),
         dummy_data: crate::test::data(),
-        clients: Mutex::new(HashMap::new()),
+        clients: Mutex::new((0..slots).map(|_| None).collect()),
+        ipv6_slots,
+        ipv4_slots,
         msg,
     });
 
@@ -313,11 +445,13 @@ async fn serve_async(
 
     pong(
         state.clone(),
+        ipv6_pong_slots,
         SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port),
     )
     .await?;
     pong(
         state.clone(),
+        ipv4_pong_slots,
         SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port),
     )
     .await

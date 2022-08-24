@@ -8,7 +8,7 @@ use tokio_util::codec::{length_delimited, LengthDelimitedCodec};
 pub const PORT: u16 = 35481;
 
 pub const MAGIC: u64 = 0x5372ab82ae7c59cb;
-pub const VERSION: u64 = 1;
+pub const VERSION: u64 = 2;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct Hello {
@@ -33,7 +33,7 @@ pub struct TestStream {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ServerMessage {
-    NewClient(u64),
+    NewClient(Option<u64>),
     Measure {
         stream: TestStream,
         time: u64,
@@ -60,6 +60,7 @@ pub enum ClientMessage {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Ping {
+    pub id: u64,
     pub time: u64,
     pub index: u32,
 }
