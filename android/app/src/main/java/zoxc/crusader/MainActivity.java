@@ -21,6 +21,7 @@ import android.app.Activity;
 import android.view.inputmethod.InputMethodManager;
 import android.provider.OpenableColumns;
 import android.database.Cursor;
+import android.content.Context;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -32,7 +33,7 @@ public class MainActivity extends GameActivity {
     }
 
     public void showKeyboard(boolean show) {
-        InputMethodManager input = (InputMethodManager)getSystemService("input_method");
+        InputMethodManager input = (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
         if (show) {
             input.showSoftInput(getWindow().getDecorView().getRootView(), 0);
         } else {
@@ -74,6 +75,8 @@ public class MainActivity extends GameActivity {
     @Override
     public void onActivityResult(int requestCode, int resultCode,
             Intent resultData) {
+        super.onActivityResult(requestCode, resultCode, resultData);
+
         if (requestCode == ACTIVITY_CREATE_FILE) {
             if (resultCode == Activity.RESULT_OK && resultData != null) {
                 Uri uri = resultData.getData();
@@ -116,9 +119,10 @@ public class MainActivity extends GameActivity {
         String name = "";
         try {
             if (cursor != null && cursor.moveToFirst()) {
-                name = cursor.getString(
-                    cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                );
+                int column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (column != -1) {
+                    name = cursor.getString(column);
+                }
                 return name;
             }
         } finally {
