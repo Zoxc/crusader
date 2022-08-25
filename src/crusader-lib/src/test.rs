@@ -433,7 +433,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         bandwidth
             .iter()
             .filter(|e| e.0.group == group && e.0.id == id)
-            .map(|e| (e.1, e.2))
+            .map(|e| (e.1.wrapping_add(server_time_offset), e.2))
             .collect()
     };
 

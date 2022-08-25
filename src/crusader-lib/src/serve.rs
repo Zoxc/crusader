@@ -48,7 +48,6 @@ struct SlotUpdate {
 #[derive(Debug)]
 struct Client {
     ip: Ipv6Addr,
-    created: Instant,
     tx_message: UnboundedSender<ServerMessage>,
     tx_latency: Sender<LatencyMeasure>,
     rx_latency: Mutex<Receiver<LatencyMeasure>>,
@@ -139,7 +138,6 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                             let slot = slot as u64;
                             let new_client = Arc::new(Client {
                                 ip: ip_to_ipv6_mapped(addr.ip()),
-                                created: Instant::now(),
                                 tx_message,
                                 tx_latency,
                                 rx_latency: Mutex::new(rx_latency),
@@ -351,7 +349,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                             .send(ServerMessage::Measure {
                                 stream: test_stream,
                                 time: current_time
-                                    .saturating_duration_since(client.created)
+                                    .saturating_duration_since(state.started)
                                     .as_micros() as u64,
                                 bytes: current_bytes,
                             })
