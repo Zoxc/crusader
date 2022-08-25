@@ -11,6 +11,9 @@ use std::time::Duration;
 use crate::file_format::{RawLatency, RawPing, RawResult};
 use crate::test::{unique, PlotConfig};
 
+const UP_COLOR: RGBColor = RGBColor(37, 83, 169);
+const DOWN_COLOR: RGBColor = RGBColor(95, 145, 62);
+
 pub fn register_fonts() {
     register_font("sans-serif", include_bytes!("../Ubuntu-Light.ttf"))
         .map_err(|_| ())
@@ -164,7 +167,7 @@ pub fn save_graph_to_path(path: &Path, config: &PlotConfig, result: &TestResult)
     if result.upload_bytes.is_some() || result.both_upload_bytes.is_some() {
         bandwidth.push((
             "Upload",
-            RGBColor(37, 83, 169),
+            UP_COLOR,
             to_rates(&result.combined_upload_bytes),
             [
                 result.upload_bytes.as_deref(),
@@ -179,7 +182,7 @@ pub fn save_graph_to_path(path: &Path, config: &PlotConfig, result: &TestResult)
     if result.download_bytes.is_some() || result.both_download_bytes.is_some() {
         bandwidth.push((
             "Download",
-            RGBColor(95, 145, 62),
+            DOWN_COLOR,
             to_rates(&result.combined_download_bytes),
             [
                 result.download_bytes.as_deref(),
@@ -373,6 +376,7 @@ fn legends<'a, 'b: 'a>(
 }
 
 fn latency(
+    result: &TestResult,
     pings: &[RawPing],
     start: f64,
     duration: f64,
@@ -382,7 +386,7 @@ fn latency(
     let max_latency = pings
         .iter()
         .filter_map(|d| d.latency)
-        .map(|latency| latency.total)
+        .filter_map(|latency| latency.total)
         .max()
         .unwrap_or(Duration::from_millis(100))
         .as_secs_f64() as f64
@@ -394,53 +398,59 @@ fn latency(
 
     let mut chart = new_chart(duration, None, max_latency, "Latency (ms)", None, area);
 
-    let mut draw_latency = |color: RGBColor,
-                            name: &str,
-                            get_latency: fn(&RawLatency) -> Duration| {
-        let mut data = Vec::new();
+    let mut draw_latency =
+        |color: RGBColor, name: &str, get_latency: fn(&RawLatency) -> Option<Duration>| {
+            let mut data = Vec::new();
 
-        let flush = |data: &mut Vec<_>| {
-            let data = mem::take(data);
+            let flush = |data: &mut Vec<_>| {
+                let data = mem::take(data);
 
-            if data.len() == 1 {
-                chart
-                    .plotting_area()
-                    .draw(&Circle::new(data[0], 1, color.filled()))
-                    .unwrap();
-            } else {
-                chart
-                    .plotting_area()
-                    .draw(&PathElement::new(data, color))
-                    .unwrap();
+                if data.len() == 1 {
+                    chart
+                        .plotting_area()
+                        .draw(&Circle::new(data[0], 1, color.filled()))
+                        .unwrap();
+                } else {
+                    chart
+                        .plotting_area()
+                        .draw(&PathElement::new(data, color))
+                        .unwrap();
+                }
+            };
+
+            for ping in pings {
+                match &ping.latency {
+                    Some(latency) => match get_latency(latency) {
+                        Some(latency) => {
+                            let x = ping.sent.as_secs_f64() - start;
+                            let y = latency.as_secs_f64() * 1000.0;
+
+                            data.push((x, y));
+                        }
+                        None => {
+                            flush(&mut data);
+                        }
+                    },
+                    None => {
+                        flush(&mut data);
+                    }
+                }
             }
+
+            flush(&mut data);
+
+            chart
+                .draw_series(LineSeries::new(std::iter::empty(), color))
+                .unwrap()
+                .label(name)
+                .legend(move |(x, y)| {
+                    Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled())
+                });
         };
 
-        for ping in pings {
-            match &ping.latency {
-                Some(latency) => {
-                    let x = ping.sent.as_secs_f64() - start;
-                    let y = get_latency(latency).as_secs_f64() * 1000.0;
+    draw_latency(UP_COLOR, "Up", |latency| Some(latency.up));
 
-                    data.push((x, y));
-                }
-                None => {
-                    flush(&mut data);
-                }
-            }
-        }
-
-        flush(&mut data);
-
-        chart
-            .draw_series(LineSeries::new(std::iter::empty(), color))
-            .unwrap()
-            .label(name)
-            .legend(move |(x, y)| Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled()));
-    };
-
-    draw_latency(RGBColor(37, 83, 169), "Up", |latency| latency.up);
-
-    draw_latency(RGBColor(95, 145, 62), "Down", |latency| latency.down());
+    draw_latency(DOWN_COLOR, "Down", |latency| latency.down());
 
     draw_latency(RGBColor(50, 50, 50), "Total", |latency| latency.total);
 
@@ -459,13 +469,19 @@ fn latency(
 
     for ping in pings {
         let x = ping.sent.as_secs_f64() - start;
-        if ping.latency.is_none() {
+        if ping.latency.and_then(|latency| latency.total).is_none() {
+            let color = if result.raw_result.version >= 2 {
+                if ping.latency.is_none() {
+                    UP_COLOR
+                } else {
+                    DOWN_COLOR
+                }
+            } else {
+                RGBColor(193, 85, 85)
+            };
             chart
                 .plotting_area()
-                .draw(&PathElement::new(
-                    vec![(x, 0.0), (x, 1.0)],
-                    RGBColor(193, 85, 85),
-                ))
+                .draw(&PathElement::new(vec![(x, 0.0), (x, 1.0)], color))
                 .unwrap();
         }
     }
@@ -527,7 +543,7 @@ fn plot_split_bandwidth(
             let main = i == group.streams.len() - 1;
             let color = if download {
                 if main {
-                    RGBColor(95, 145, 62)
+                    DOWN_COLOR
                 } else {
                     if i & 1 == 0 {
                         RGBColor(188, 203, 177)
@@ -537,7 +553,7 @@ fn plot_split_bandwidth(
                 }
             } else {
                 if main {
-                    RGBColor(37, 83, 169)
+                    UP_COLOR
                 } else {
                     if i & 1 == 0 {
                         RGBColor(159, 172, 202)
@@ -770,7 +786,7 @@ pub(crate) fn graph(
         chart_index += 1;
     }
 
-    latency(pings, start, duration, &areas[chart_index], &loss);
+    latency(result, pings, start, duration, &areas[chart_index], &loss);
     chart_index += 1;
 
     if config.transferred {

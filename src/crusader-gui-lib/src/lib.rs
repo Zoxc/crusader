@@ -208,7 +208,7 @@ pub struct TestResult {
     latency_max: f64,
     up_latency: Vec<(f64, f64)>,
     down_latency: Vec<(f64, f64)>,
-    loss: Vec<f64>,
+    loss: Vec<(f64, Color32)>,
     bandwidth_max: f64,
 }
 
@@ -224,11 +224,10 @@ impl TestResult {
             .iter()
             .filter(|p| p.sent >= result.start)
             .filter_map(|p| {
-                p.latency.map(|latency| {
-                    (
-                        p.sent.as_secs_f64() - start,
-                        latency.total.as_secs_f64() * 1000.0,
-                    )
+                p.latency.and_then(|latency| {
+                    latency
+                        .total
+                        .map(|total| (p.sent.as_secs_f64() - start, total.as_secs_f64() * 1000.0))
                 })
             })
             .collect();
@@ -252,11 +251,10 @@ impl TestResult {
             .iter()
             .filter(|p| p.sent >= result.start)
             .filter_map(|p| {
-                p.latency.map(|latency| {
-                    (
-                        p.sent.as_secs_f64() - start,
-                        latency.down().as_secs_f64() * 1000.0,
-                    )
+                p.latency.and_then(|latency| {
+                    latency
+                        .down()
+                        .map(|down| (p.sent.as_secs_f64() - start, down.as_secs_f64() * 1000.0))
                 })
             })
             .collect();
@@ -265,9 +263,18 @@ impl TestResult {
             .pings
             .iter()
             .filter(|p| p.sent >= result.start)
-            .filter_map(|p| {
-                if p.latency.is_none() {
-                    Some(p.sent.as_secs_f64() - start)
+            .filter_map(|ping| {
+                if ping.latency.and_then(|latency| latency.total).is_none() {
+                    let color = if result.raw_result.version >= 2 {
+                        if ping.latency.is_none() {
+                            Color32::from_rgb(37, 83, 169)
+                        } else {
+                            Color32::from_rgb(95, 145, 62)
+                        }
+                    } else {
+                        Color32::from_rgb(193, 85, 85)
+                    };
+                    Some((ping.sent.as_secs_f64() - start, color))
                 } else {
                     None
                 }
@@ -690,9 +697,14 @@ impl Tester {
         });
         ui.separator();
 
-        ui.allocate_space(vec2(1.0, 15.0));
-
         let result = self.result.as_ref().unwrap();
+
+        if result.result.raw_result.server_overload {
+            ui.label("Warning: Server overload detected during test. Result should be discarded.");
+            ui.separator();
+        }
+
+        ui.allocate_space(vec2(1.0, 15.0));
 
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
             let duration = result.result.duration.as_secs_f64() * 1.1;
@@ -710,8 +722,8 @@ impl Tester {
                 .label_formatter(|_, value| format!("Time = {:.2} s", value.x));
 
             plot.show(ui, |plot_ui| {
-                for loss in &result.loss {
-                    plot_ui.vline(VLine::new(*loss).color(Color32::from_rgb(193, 85, 85)))
+                for (loss, color) in &result.loss {
+                    plot_ui.vline(VLine::new(*loss).color(*color))
                 }
             });
             ui.label("Packet loss");

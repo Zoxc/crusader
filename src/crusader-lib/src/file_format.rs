@@ -9,6 +9,9 @@ use std::time::Duration;
 
 use crate::protocol;
 
+// Note that rmp_serde doesn't not use an enumerator when serializing Option.
+// Be careful about which types are inside Option.
+
 #[derive(Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Elasped {
@@ -19,7 +22,7 @@ pub struct Elasped {
 
 #[derive(Serialize, Deserialize)]
 pub struct RawPingV0 {
-    pub index: usize,
+    pub index: u64,
     pub sent: Duration,
     pub latency: Option<Duration>,
 }
@@ -30,7 +33,7 @@ impl RawPingV0 {
             index: self.index,
             sent: self.sent,
             latency: self.latency.map(|total| RawLatency {
-                total,
+                total: Some(total),
                 up: Duration::from_secs(0),
             }),
         }
@@ -81,6 +84,7 @@ impl RawResultV0 {
             duration: self.duration,
             stream_groups: self.stream_groups.clone(),
             pings: self.pings.iter().map(|ping| ping.to_v1()).collect(),
+            server_overload: false,
         }
     }
 }
@@ -114,19 +118,20 @@ pub struct RawStreamGroup {
 
 #[derive(Serialize, Deserialize, Copy, Clone)]
 pub struct RawLatency {
-    pub total: Duration,
+    // Changed from Duration to Option<Duration> in v2.
+    pub total: Option<Duration>,
     pub up: Duration,
 }
 
 impl RawLatency {
-    pub fn down(&self) -> Duration {
-        self.total.saturating_sub(self.up)
+    pub fn down(&self) -> Option<Duration> {
+        self.total.map(|total| total.saturating_sub(self.up))
     }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RawPing {
-    pub index: usize,
+    pub index: u64,
     pub sent: Duration,
     pub latency: Option<RawLatency>,
 }
@@ -151,7 +156,7 @@ impl Default for RawHeader {
     fn default() -> Self {
         Self {
             magic: protocol::MAGIC,
-            version: 1,
+            version: 2,
         }
     }
 }
@@ -162,6 +167,8 @@ pub struct RawResult {
     pub generated_by: String,
     pub config: RawConfig,
     pub ipv6: bool,
+    #[serde(default)]
+    pub server_overload: bool, // Added in V2
     pub server_latency: Duration,
     pub start: Duration,
     pub duration: Duration,
@@ -207,7 +214,7 @@ impl RawResult {
                 let result: RawResultV0 = bincode::deserialize_from(file).ok()?;
                 Some(result.to_v1())
             }
-            1 => {
+            1 | 2 => {
                 let data = snap::read::FrameDecoder::new(file);
                 Some(rmp_serde::decode::from_read(data).ok()?)
             }

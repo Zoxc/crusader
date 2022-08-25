@@ -32,8 +32,15 @@ pub struct TestStream {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct LatencyMeasure {
+    pub time: u64,
+    pub index: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub enum ServerMessage {
     NewClient(Option<u64>),
+    LatencyMeasures(Vec<LatencyMeasure>),
     Measure {
         stream: TestStream,
         time: u64,
@@ -42,7 +49,9 @@ pub enum ServerMessage {
     MeasureStreamDone {
         stream: TestStream,
     },
-    MeasurementsDone,
+    MeasurementsDone {
+        overload: bool,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -56,13 +65,13 @@ pub enum ClientMessage {
     },
     LoadFromServer,
     GetMeasurements,
+    StopMeasurements,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Ping {
     pub id: u64,
-    pub time: u64,
-    pub index: u32,
+    pub index: u64,
 }
 
 pub fn codec() -> LengthDelimitedCodec {

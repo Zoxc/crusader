@@ -1,6 +1,6 @@
 [package]
 name = "crusader-lib"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -18,4 +18,3 @@ futures = "0.3.21"
 bytes = "1.1.0"
 snap = "1.0.5"
 rmp-serde = "1.1.0"
-bbqueue = "0.5.1"

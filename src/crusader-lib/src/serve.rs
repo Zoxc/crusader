@@ -8,13 +8,15 @@ use std::time::Duration;
 use std::{sync::Arc, time::Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{
+    channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+};
 use tokio::sync::oneshot;
-use tokio::task::{self, yield_now, JoinHandle};
+use tokio::task::{self, yield_now};
 use tokio::{join, signal, time};
 use tokio_util::codec::{Decoder, FramedRead, FramedWrite};
 
-use crate::protocol::{self, codec, receive, send, ClientMessage, ServerMessage};
+use crate::protocol::{self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage};
 
 use futures::stream::StreamExt;
 use std::{io, thread};
@@ -36,72 +38,53 @@ impl Decoder for CountingCodec {
     }
 }
 
-struct SlotState {
-    address: [AtomicU64; 2],
-    overflow: AtomicBool,
+#[derive(Debug)]
+struct SlotUpdate {
+    slot: u64,
+    client: Option<Arc<Client>>,
+    reply: Option<oneshot::Sender<()>>,
 }
 
-impl SlotState {
-    fn new() -> Self {
-        Self {
-            address: [AtomicU64::new(0), AtomicU64::new(0)],
-            overflow: AtomicBool::new(false),
-        }
-    }
-
-    fn load(&self) -> [u8; 16] {
-        // Load the address from the slot
-        let mut address: [u8; 16] = [0; 16];
-        for i in 0..2 {
-            address[(i * 8)..((i + 1) * 8)]
-                .copy_from_slice(&self.address[i].load(Ordering::Acquire).to_ne_bytes());
-        }
-        address
-    }
-
-    fn store(&self, ip: IpAddr) {
-        let bytes = ip_to_octets(ip);
-        self.address[0].store(
-            u64::from_ne_bytes(bytes[0..8].try_into().unwrap()),
-            Ordering::Release,
-        );
-        self.address[1].store(
-            u64::from_ne_bytes(bytes[8..16].try_into().unwrap()),
-            Ordering::Release,
-        );
-        self.overflow.store(false, Ordering::Release);
-    }
-}
-
-struct PongSlot {
-    state: Arc<SlotState>,
-}
-
-struct HandlerSlot {
-    state: Arc<SlotState>,
-}
-
+#[derive(Debug)]
 struct Client {
-    ip: IpAddr,
+    ip: Ipv6Addr,
     created: Instant,
-    message: UnboundedSender<ServerMessage>,
+    tx_message: UnboundedSender<ServerMessage>,
+    tx_latency: Sender<LatencyMeasure>,
+    rx_latency: Mutex<Receiver<LatencyMeasure>>,
+    overload: AtomicBool,
+}
+
+impl Client {
+    fn forward_latency_msgs(&self) {
+        let mut rx = self.rx_latency.lock();
+
+        let mut measures = Vec::new();
+
+        while let Ok(measure) = rx.try_recv() {
+            measures.push(measure);
+        }
+
+        self.tx_message
+            .send(ServerMessage::LatencyMeasures(measures))
+            .ok();
+    }
 }
 
 struct State {
     started: Instant,
     dummy_data: Vec<u8>,
     clients: Mutex<Vec<Option<Arc<Client>>>>,
-    ipv4_slots: Vec<HandlerSlot>,
-    ipv6_slots: Vec<HandlerSlot>,
+    pong_v6: UnboundedSender<SlotUpdate>,
+    pong_v4: Option<UnboundedSender<SlotUpdate>>,
     msg: Box<dyn Fn(&str) + Send + Sync>,
 }
 
-fn ip_to_octets(ip: IpAddr) -> [u8; 16] {
+fn ip_to_ipv6_mapped(ip: IpAddr) -> Ipv6Addr {
     match ip {
         IpAddr::V4(ip) => ip.to_ipv6_mapped(),
         IpAddr::V6(ip) => ip,
     }
-    .octets()
 }
 
 pub struct OnDrop<F: Fn()>(pub F);
@@ -135,7 +118,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
     let mut client = None;
     let mut receiver = None;
-    let mut client_dropper = None;
+    let mut _client_dropper = None;
 
     loop {
         let request: ClientMessage = receive(&mut stream_rx).await?;
@@ -143,40 +126,83 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             ClientMessage::NewClient => {
                 (state.msg)(&format!("Serving {}, version {}", addr, hello.version));
 
-                let (tx, rx) = unbounded_channel();
-
                 let client = {
-                    let mut clients = state.clients.lock();
-                    let free_slot = clients.iter_mut().enumerate().find(|slot| slot.1.is_none());
+                    let client = {
+                        let mut clients = state.clients.lock();
+                        let free_slot =
+                            clients.iter_mut().enumerate().find(|slot| slot.1.is_none());
 
-                    free_slot.map(|(slot, data)| {
-                        let slot = slot as u64;
-                        let client = Arc::new(Client {
-                            ip: addr.ip(),
-                            created: Instant::now(),
-                            message: tx,
+                        free_slot.map(|(slot, data)| {
+                            let (tx_message, rx_message) = unbounded_channel();
+
+                            let (tx_latency, rx_latency) = channel(100);
+                            let slot = slot as u64;
+                            let new_client = Arc::new(Client {
+                                ip: ip_to_ipv6_mapped(addr.ip()),
+                                created: Instant::now(),
+                                tx_message,
+                                tx_latency,
+                                rx_latency: Mutex::new(rx_latency),
+                                overload: AtomicBool::new(false),
+                            });
+                            *data = Some(new_client.clone());
+
+                            receiver = Some(rx_message);
+                            client = Some(new_client.clone());
+                            (slot, new_client)
+                        })
+                    };
+
+                    if let Some((slot, client)) = client {
+                        // Update IPv6 pong
+                        let (rx, tx) = oneshot::channel();
+                        state.pong_v6.send(SlotUpdate {
+                            slot,
+                            client: Some(client.clone()),
+                            reply: Some(rx),
+                        })?;
+                        tx.await.ok();
+
+                        // Update IPv4 pong
+                        let tx = state.pong_v4.as_ref().map(|pong_v4| {
+                            let (reply, tx) = oneshot::channel();
+                            pong_v4
+                                .send(SlotUpdate {
+                                    slot,
+                                    client: Some(client.clone()),
+                                    reply: Some(reply),
+                                })
+                                .ok();
+                            tx
                         });
-                        *data = Some(client);
-
-                        state.ipv4_slots[slot as usize].state.store(addr.ip());
-                        state.ipv6_slots[slot as usize].state.store(addr.ip());
-
-                        receiver = Some(rx);
+                        if let Some(tx) = tx {
+                            tx.await.ok();
+                        }
 
                         let state = state.clone();
-                        client_dropper = Some(move || {
-                            let mut clients = state.clients.lock();
-                            clients[slot as usize] = None;
-                            state.ipv4_slots[slot as usize]
-                                .state
-                                .store(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
-                            state.ipv6_slots[slot as usize]
-                                .state
-                                .store(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+                        _client_dropper = Some(move || {
+                            state
+                                .pong_v6
+                                .send(SlotUpdate {
+                                    slot,
+                                    client: None,
+                                    reply: None,
+                                })
+                                .ok();
+                            state.pong_v4.as_ref().map(|rx| {
+                                rx.send(SlotUpdate {
+                                    slot,
+                                    client: None,
+                                    reply: None,
+                                })
+                                .ok()
+                            });
                         });
 
-                        slot
-                    })
+                        Some(slot)
+                    } else {
+                        None
+                    }
                 };
 
                 send(&mut stream_tx, &ServerMessage::NewClient(client)).await?;
@@ -193,39 +219,68 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         .ok_or("Unable to assoicate client")?,
                 );
             }
-            ClientMessage::GetMeasurements => loop {
-                let message = {
-                    let request = receive::<_, ClientMessage, _>(&mut stream_rx).fuse();
-                    pin_mut!(request);
+            ClientMessage::GetMeasurements => {
+                let receiver = receiver.as_mut().ok_or("Not the main client")?;
 
-                    let message = receiver
-                        .as_mut()
-                        .ok_or("Not the main client")?
-                        .recv()
-                        .fuse();
-                    pin_mut!(message);
+                let client = client.clone().ok_or("Not the main client")?;
 
-                    select! {
-                        request = request => {
-                            match request? {
-                                ClientMessage::Done => None,
-                                _ => {
-                                    Err("Closed early")?
-                                }
-                            }
-                        },
-                        message = message => message,
+                let done = Arc::new(AtomicBool::new(false));
+                let done_ = done.clone();
+
+                let get_pings = tokio::spawn(async move {
+                    let mut interval = time::interval(Duration::from_millis(20));
+                    loop {
+                        interval.tick().await;
+
+                        client.forward_latency_msgs();
+
+                        if done_.load(Ordering::Acquire) {
+                            return client.overload.load(Ordering::SeqCst);
+                        }
                     }
-                };
+                });
 
-                if let Some(message) = message {
-                    send(&mut stream_tx, &message).await?;
-                } else {
-                    send(&mut stream_tx, &ServerMessage::MeasurementsDone).await?;
-                    (state.msg)(&format!("Serving complete for {}", addr));
-                    return Ok(());
+                loop {
+                    let message = {
+                        let request = receive::<_, ClientMessage, _>(&mut stream_rx).fuse();
+                        pin_mut!(request);
+
+                        let message = receiver.recv().fuse();
+                        pin_mut!(message);
+
+                        select! {
+                            request = request => {
+                                match request? {
+                                    ClientMessage::StopMeasurements => None,
+                                    _ => {
+                                        Err("Closed early")?
+                                    }
+                                }
+                            },
+                            message = message => message,
+                        }
+                    };
+
+                    if let Some(message) = message {
+                        send(&mut stream_tx, &message).await?;
+                    } else {
+                        done.store(true, Ordering::Release);
+                        let overload = get_pings.await?;
+
+                        // Send pending messages
+                        while let Ok(message) = receiver.try_recv() {
+                            send(&mut stream_tx, &message).await?;
+                        }
+
+                        send(
+                            &mut stream_tx,
+                            &ServerMessage::MeasurementsDone { overload },
+                        )
+                        .await?;
+                        break;
+                    }
                 }
-            },
+            }
             ClientMessage::LoadFromServer => {
                 let raw = stream_tx.get_mut();
 
@@ -292,7 +347,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         let current_bytes = bytes_.load(Ordering::Acquire);
 
                         client
-                            .message
+                            .tx_message
                             .send(ServerMessage::Measure {
                                 stream: test_stream,
                                 time: current_time
@@ -304,7 +359,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                         if done_.load(Ordering::Acquire) {
                             client
-                                .message
+                                .tx_message
                                 .send(ServerMessage::MeasureStreamDone {
                                     stream: test_stream,
                                 })
@@ -323,6 +378,9 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 done.store(true, Ordering::Release);
 
                 return Ok(());
+            }
+            ClientMessage::StopMeasurements => {
+                return Err("Unexpected StopMeasurements".into());
             }
             ClientMessage::Done => {
                 (state.msg)(&format!("Serving complete for {}", addr));
@@ -351,89 +409,111 @@ async fn listen(state: Arc<State>, listener: TcpListener) {
     }
 }
 
-async fn pong(
-    state: Arc<State>,
-    slots: Vec<PongSlot>,
-    addr: SocketAddr,
-) -> Result<JoinHandle<()>, Box<dyn Error>> {
-    let socket = UdpSocket::bind(addr).await?;
+async fn handle_ping(
+    state: &State,
+    slots: &[Option<Arc<Client>>],
+    packet: &[u8],
+    src: SocketAddr,
+    socket: &UdpSocket,
+) {
+    let valid_ping = bincode::deserialize(packet)
+        .ok()
+        .and_then(|ping: protocol::Ping| {
+            slots
+                .get(ping.id as usize)
+                .and_then(|client| client.as_ref())
+                .and_then(|client| {
+                    (ip_to_ipv6_mapped(src.ip()) == client.ip).then_some((client, ping))
+                })
+        });
 
-    Ok(tokio::spawn(async move {
-        let mut buf = [0; 128];
+    if let Some((client, ping)) = valid_ping {
+        let time = Instant::now()
+            .saturating_duration_since(state.started)
+            .as_micros() as u64;
 
-        loop {
-            let result = socket.recv_from(&mut buf).await;
+        let measure = LatencyMeasure {
+            time,
+            index: ping.index,
+        };
 
-            match result {
-                Ok((len, src)) => {
-                    let time = Instant::now()
-                        .saturating_duration_since(state.started)
-                        .as_micros() as u64;
-
-                    let buf = &mut buf[..len];
-
-                    let valid = buf
-                        .get_mut(0..8)
-                        .and_then(|bytes| bytes.try_into().ok())
-                        .and_then(|client| {
-                            let client = u64::from_le_bytes(client);
-                            slots.get(client as usize)
-                        })
-                        .and_then(|slot| {
-                            (ip_to_octets(src.ip()) == slot.state.load()).then_some(|| ())
-                        })
-                        .is_some();
-
-                    if valid {
-                        buf.get_mut(8..16)
-                            .map(|slice| slice.copy_from_slice(&time.to_le_bytes()));
-
-                        socket
-                            .send_to(buf, &src)
-                            .await
-                            .map_err(|error| {
-                                (state.msg)(&format!("Unable to reply to UDP ping: {:?}", error));
-                            })
-                            .ok();
-                    }
-                }
-                Err(error) => {
-                    (state.msg)(&format!("Unable to get UDP ping: {:?}", error));
-                }
-            }
+        if client.tx_latency.try_send(measure).is_err() {
+            client.overload.store(true, Ordering::SeqCst);
         }
-    }))
+
+        socket
+            .send_to(packet, &src)
+            .await
+            .map_err(|error| {
+                (state.msg)(&format!("Unable to reply to UDP ping: {:?}", error));
+            })
+            .ok();
+    }
 }
+
+async fn pong(socket: UdpSocket, state: Arc<State>, mut rx: UnboundedReceiver<SlotUpdate>) {
+    let mut slots: Vec<_> = (0..SLOTS).map(|_| None).collect();
+    let mut buf = [0; 128];
+
+    loop {
+        let packet = {
+            let socket_packet = socket.recv_from(&mut buf).fuse();
+            pin_mut!(socket_packet);
+
+            let message = rx.recv().fuse();
+            pin_mut!(message);
+
+            select! {
+                result = socket_packet => {
+                    match result {
+                        Ok((len, src)) => {
+                            Some((len, src))
+                        }
+                        Err(error) => {
+                            (state.msg)(&format!("Unable to get UDP ping: {:?}", error));
+                            None
+                        }
+                    }
+                },
+                slot_update = message => {
+                    slot_update.map(|slot_update| {
+                        slots[slot_update.slot as usize] = slot_update.client;
+                        slot_update.reply.map(|reply| reply.send(()).ok());
+                    });
+                    None
+                },
+            }
+        };
+
+        if let Some((len, src)) = packet {
+            let packet = &mut buf[..len];
+            handle_ping(&state, slots.as_slice(), packet, src, &socket).await;
+        }
+    }
+}
+
+const SLOTS: usize = 1000;
 
 async fn serve_async(
     port: u16,
     msg: Box<dyn Fn(&str) + Send + Sync>,
 ) -> Result<(), Box<dyn Error>> {
-    let slots = 1000;
+    let socket_v6 =
+        UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port)).await?;
+    let socket_v4 = UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))
+        .await
+        .map_err(|err| (msg)(&format!("Failed to bind IPv4 UDP: {}", err)))
+        .ok();
 
-    let create_slots = || -> (Vec<PongSlot>, Vec<HandlerSlot>) {
-        (0..slots)
-            .map(|_| {
-                let state = Arc::new(SlotState::new());
-                (
-                    PongSlot {
-                        state: state.clone(),
-                    },
-                    HandlerSlot { state },
-                )
-            })
-            .unzip()
-    };
-
-    let (ipv6_pong_slots, ipv6_slots) = create_slots();
-    let (ipv4_pong_slots, ipv4_slots) = create_slots();
+    let (pong_ipv6_tx, pong_ipv6_rx) = unbounded_channel();
+    let (pong_ipv4_tx, pong_ipv4_rx) = unbounded_channel();
 
     let state = Arc::new(State {
         started: Instant::now(),
         dummy_data: crate::test::data(),
-        clients: Mutex::new((0..slots).map(|_| None).collect()),
-        ipv6_slots,
-        ipv4_slots,
+        clients: Mutex::new((0..SLOTS).map(|_| None).collect()),
+        pong_v6: pong_ipv6_tx,
+        pong_v4: socket_v4.as_ref().map(|_| pong_ipv4_tx),
         msg,
     });
 
@@ -443,20 +523,11 @@ async fn serve_async(
         .map_err(|err| (state.msg)(&format!("Failed to bind IPv4 TCP: {}", err)))
         .ok();
 
-    pong(
-        state.clone(),
-        ipv6_pong_slots,
-        SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port),
-    )
-    .await?;
-    pong(
-        state.clone(),
-        ipv4_pong_slots,
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port),
-    )
-    .await
-    .map_err(|err| (state.msg)(&format!("Failed to bind IPv4 UDP: {}", err)))
-    .ok();
+    tokio::spawn(pong(socket_v6, state.clone(), pong_ipv6_rx));
+
+    socket_v4.map(|socket| {
+        tokio::spawn(pong(socket, state.clone(), pong_ipv4_rx));
+    });
 
     task::spawn(listen(state.clone(), v6));
     v4.map(|v4| task::spawn(listen(state.clone(), v4)));

@@ -17,6 +17,7 @@ use std::{
 };
 use tokio::io::AsyncWriteExt;
 use tokio::join;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::{oneshot, watch, Semaphore};
 use tokio::task::{self, yield_now, JoinHandle};
@@ -63,7 +64,7 @@ pub(crate) fn data() -> Vec<u8> {
     vec
 }
 
-async fn hello<S: Sink<Bytes> + Stream<Item = Result<BytesMut, S::Error>> + Unpin>(
+async fn hello_combined<S: Sink<Bytes> + Stream<Item = Result<BytesMut, S::Error>> + Unpin>(
     stream: &mut S,
 ) -> Result<(), Box<dyn Error>>
 where
@@ -73,6 +74,29 @@ where
 
     send(stream, &hello).await?;
     let server_hello: Hello = receive(stream).await?;
+
+    if hello != server_hello {
+        panic!(
+            "Mismatched server hello, got {:?}, expected {:?}",
+            server_hello, hello
+        );
+    }
+
+    Ok(())
+}
+
+async fn hello<T: Sink<Bytes> + Unpin, R: Stream<Item = Result<BytesMut, RE>> + Unpin, RE>(
+    tx: &mut T,
+    rx: &mut R,
+) -> Result<(), Box<dyn Error>>
+where
+    T::Error: Error + 'static,
+    RE: Error + 'static,
+{
+    let hello = Hello::new();
+
+    send(tx, &hello).await?;
+    let server_hello: Hello = receive(rx).await?;
 
     if hello != server_hello {
         panic!(
@@ -113,15 +137,17 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
 
     msg(&format!("Connected to server {}", server));
 
-    let mut control = Framed::new(control, codec());
+    let (rx, tx) = control.into_split();
+    let mut control_rx = FramedRead::new(rx, codec());
+    let mut control_tx = FramedWrite::new(tx, codec());
 
-    hello(&mut control).await?;
+    hello(&mut control_tx, &mut control_rx).await?;
 
-    send(&mut control, &ClientMessage::NewClient).await?;
+    send(&mut control_tx, &ClientMessage::NewClient).await?;
 
     let setup_start = Instant::now();
 
-    let reply: ServerMessage = receive(&mut control).await?;
+    let reply: ServerMessage = receive(&mut control_rx).await?;
     let id = match reply {
         ServerMessage::NewClient(Some(id)) => id,
         ServerMessage::NewClient(None) => return Err("Server was unable to create client".into()),
@@ -134,7 +160,18 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
     };
 
-    let (latency, server_time_offset) = measure_latency(id, server, local_udp, setup_start).await?;
+    let mut ping_index = 0;
+
+    let (latency, server_time_offset, mut control_rx) = measure_latency(
+        id,
+        &mut ping_index,
+        &mut control_tx,
+        control_rx,
+        server,
+        local_udp,
+        setup_start,
+    )
+    .await?;
 
     msg(&format!(
         "Latency to server {:.2} ms",
@@ -207,22 +244,20 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         )
     });
 
-    send(&mut control, &ClientMessage::GetMeasurements).await?;
-
-    let (rx, tx) = control.into_inner().into_split();
-    let mut rx = FramedRead::new(rx, codec());
-    let mut tx = FramedWrite::new(tx, codec());
+    send(&mut control_tx, &ClientMessage::GetMeasurements).await?;
 
     let upload_semaphore = Arc::new(Semaphore::new(0));
     let upload_semaphore_ = upload_semaphore.clone();
     let both_upload_semaphore = Arc::new(Semaphore::new(0));
     let both_upload_semaphore_ = both_upload_semaphore.clone();
 
-    let bandwidth = tokio::spawn(async move {
+    let measures = tokio::spawn(async move {
         let mut bandwidth = Vec::new();
+        let mut latencies = Vec::new();
+        let overload_;
 
         loop {
-            let reply: ServerMessage = receive(&mut rx).await.unwrap();
+            let reply: ServerMessage = receive(&mut control_rx).await.unwrap();
             match reply {
                 ServerMessage::MeasureStreamDone { stream } => {
                     if stream.group == 0 {
@@ -239,15 +274,23 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
                 } => {
                     bandwidth.push((stream, time, bytes));
                 }
-                ServerMessage::MeasurementsDone => break,
+                ServerMessage::LatencyMeasures(measures) => {
+                    latencies.extend(measures.into_iter());
+                }
+                ServerMessage::MeasurementsDone { overload } => {
+                    overload_ = overload;
+                    break;
+                }
                 _ => panic!("Unexpected message {:?}", reply),
             };
         }
 
-        bandwidth
+        (latencies, bandwidth, overload_)
     });
 
+    let ping_start_index = ping_index;
     let ping_send = tokio::spawn(ping_send(
+        ping_index,
         id,
         state_rx.clone(),
         setup_start,
@@ -314,28 +357,43 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
     let duration = start.elapsed();
 
     let pings_sent = ping_send.await?;
-    send(&mut tx, &ClientMessage::Done).await?;
+    send(&mut control_tx, &ClientMessage::StopMeasurements).await?;
+    send(&mut control_tx, &ClientMessage::Done).await?;
 
-    let mut pings = ping_recv.await?;
+    let mut pongs = ping_recv.await?;
 
-    let bandwidth = bandwidth.await?;
+    let (mut latencies, bandwidth, server_overload) = measures.await?;
 
     let download_bytes = wait_on_download_loaders(download).await;
     let both_download_bytes = wait_on_download_loaders(both_download).await;
 
-    pings.sort_by_key(|d| d.0.index);
+    latencies.sort_by_key(|d| d.index);
+    pongs.sort_by_key(|d| d.0.index);
     let pings: Vec<_> = pings_sent
         .into_iter()
         .enumerate()
         .map(|(index, sent)| {
-            let latency = pings
-                .binary_search_by_key(&(index as u32), |e| e.0.index)
+            let index = index as u64 + ping_start_index;
+            let mut latency = latencies
+                .binary_search_by_key(&index, |e| e.index)
                 .ok()
                 .map(|ping| RawLatency {
-                    total: pings[ping].1.saturating_sub(sent),
-                    up: Duration::from_micros(pings[ping].0.time.wrapping_add(server_time_offset))
-                        .saturating_sub(sent),
+                    total: None,
+                    up: Duration::from_micros(
+                        latencies[ping].time.wrapping_add(server_time_offset),
+                    )
+                    .saturating_sub(sent),
                 });
+
+            latency.as_mut().map(|latency| {
+                pongs
+                    .binary_search_by_key(&index, |e| e.0.index)
+                    .ok()
+                    .map(|ping| {
+                        latency.total = Some(pongs[ping].1.saturating_sub(sent));
+                    });
+            });
+
             RawPing {
                 index,
                 sent,
@@ -409,6 +467,12 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         bandwidth_interval: config.bandwidth_interval,
     };
 
+    if server_overload {
+        msg(&format!(
+            "Warning: Server overload detected during test. Result should be discarded."
+        ));
+    }
+
     let start = start.duration_since(setup_start);
 
     let raw_result = RawResult {
@@ -416,6 +480,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         generated_by: format!("Crusader {}", env!("CARGO_PKG_VERSION")),
         config: raw_config,
         ipv6: server.is_ipv6(),
+        server_overload,
         server_latency: latency,
         start,
         duration,
@@ -428,40 +493,90 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
 
 async fn measure_latency(
     id: u64,
+    ping_index: &mut u64,
+    mut control_tx: &mut FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
+    mut control_rx: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     server: SocketAddr,
     local_udp: SocketAddr,
     setup_start: Instant,
-) -> Result<(Duration, u64), Box<dyn Error>> {
+) -> Result<
+    (
+        Duration,
+        u64,
+        FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
+    ),
+    Box<dyn Error>,
+> {
+    send(&mut control_tx, &ClientMessage::GetMeasurements).await?;
+
+    let latencies = tokio::spawn(async move {
+        let mut latencies = Vec::new();
+
+        loop {
+            let reply: ServerMessage = receive(&mut control_rx).await.unwrap();
+            match reply {
+                ServerMessage::LatencyMeasures(measures) => {
+                    latencies.extend(measures.into_iter());
+                }
+                ServerMessage::MeasurementsDone { .. } => break,
+                _ => panic!("Unexpected message {:?}", reply),
+            };
+        }
+
+        (latencies, control_rx)
+    });
+
     let udp_socket = Arc::new(net::UdpSocket::bind(local_udp).await?);
     udp_socket.connect(server).await?;
     let udp_socket2 = udp_socket.clone();
 
     let samples = 50;
 
-    let ping_send = tokio::spawn(ping_measure_send(id, setup_start, udp_socket, samples));
+    let ping_start_index = *ping_index;
+    let ping_send = tokio::spawn(ping_measure_send(
+        ping_start_index,
+        id,
+        setup_start,
+        udp_socket,
+        samples,
+    ));
 
     let ping_recv = tokio::spawn(ping_measure_recv(setup_start, udp_socket2, samples));
 
     let (sent, recv) = join!(ping_send, ping_recv);
 
-    let sent = sent.unwrap();
+    send(&mut control_tx, &ClientMessage::StopMeasurements).await?;
+
+    let (mut latencies, control_rx) = latencies.await?;
+
+    let (sent, new_ping_index) = sent.unwrap();
+    *ping_index = new_ping_index;
     let mut recv = recv.unwrap();
 
+    latencies.sort_by_key(|d| d.index);
     recv.sort_by_key(|d| d.0.index);
     let mut pings: Vec<(Duration, Duration, u64)> = sent
         .into_iter()
         .enumerate()
         .filter_map(|(index, sent)| {
-            recv.binary_search_by_key(&(index as u32), |e| e.0.index)
+            let index = index as u64 + ping_start_index;
+            let latency = latencies
+                .binary_search_by_key(&index, |e| e.index)
                 .ok()
-                .map(|ping| (sent, recv[ping].1 - sent, recv[ping].0.time))
+                .map(|ping| latencies[ping].time);
+
+            latency.and_then(|time| {
+                recv.binary_search_by_key(&index, |e| e.0.index)
+                    .ok()
+                    .map(|ping| (sent, recv[ping].1 - sent, time))
+            })
         })
         .collect();
-    pings.sort_by_key(|d| d.1);
-
     if pings.is_empty() {
         return Err("Unable to measure latency to server".into());
     }
+
+    pings.sort_by_key(|d| d.1);
 
     let (sent, latency, server_time) = pings[pings.len() / 2];
 
@@ -469,26 +584,29 @@ async fn measure_latency(
 
     let server_offset = (server_pong.as_micros() as u64).wrapping_sub(server_time);
 
-    Ok((latency, server_offset))
+    Ok((latency, server_offset, control_rx))
 }
 
 async fn ping_measure_send(
+    mut index: u64,
     id: u64,
     setup_start: Instant,
     socket: Arc<UdpSocket>,
     samples: u32,
-) -> Vec<Duration> {
+) -> (Vec<Duration>, u64) {
     let mut storage = Vec::with_capacity(samples as usize);
     let mut buf = [0; 64];
 
     let mut interval = time::interval(Duration::from_millis(10));
 
-    for index in 0..samples {
+    for _ in 0..samples {
         interval.tick().await;
 
         let current = setup_start.elapsed();
 
-        let ping = Ping { id, time: 0, index };
+        let ping = Ping { id, index };
+
+        index += 1;
 
         let mut cursor = Cursor::new(&mut buf[..]);
         bincode::serialize_into(&mut cursor, &ping).unwrap();
@@ -499,7 +617,7 @@ async fn ping_measure_send(
         storage.push(current);
     }
 
-    storage
+    (storage, index)
 }
 
 async fn ping_measure_recv(
@@ -553,7 +671,7 @@ fn setup_loaders(
                     .await
                     .expect("unable to bind TCP socket");
                 let mut stream = Framed::new(stream, codec());
-                hello(&mut stream).await.unwrap();
+                hello_combined(&mut stream).await.unwrap();
                 send(&mut stream, &ClientMessage::Associate(id))
                     .await
                     .unwrap();
@@ -722,6 +840,7 @@ async fn wait_for_state(state_rx: &mut watch::Receiver<TestState>, state: TestSt
 }
 
 async fn ping_send(
+    mut ping_index: u64,
     id: u64,
     state_rx: watch::Receiver<TestState>,
     setup_start: Instant,
@@ -744,11 +863,14 @@ async fn ping_send(
             break;
         }
 
-        let index = storage.len().try_into().unwrap();
-
         let current = setup_start.elapsed();
 
-        let ping = Ping { id, time: 0, index };
+        let ping = Ping {
+            id,
+            index: ping_index,
+        };
+
+        ping_index += 1;
 
         let mut cursor = Cursor::new(&mut buf[..]);
         bincode::serialize_into(&mut cursor, &ping).unwrap();

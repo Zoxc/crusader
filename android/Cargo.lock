@@ -276,12 +276,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
-name = "bbqueue"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd3baa8859d1a4c7411039a75c0599a4640ef1c9a8fc811e4325b00e6cfe0a55"
-
-[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -587,9 +581,8 @@ dependencies = [
 
 [[package]]
 name = "crusader-lib"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
- "bbqueue",
  "bincode",
  "bytes",
  "chrono",
