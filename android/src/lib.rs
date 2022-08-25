@@ -176,7 +176,7 @@ fn android_main(app: AndroidApp) {
     options.default_theme = Theme::Light;
     options.renderer = Renderer::Wgpu;
     options.event_loop_builder = Some(Box::new(move |builder| {
-        builder.with_android_app(app);
+        builder.with_android_app(app.clone());
     }));
     let mut tester = Tester::new(settings);
     tester.file_loader = Some(Box::new(|_| load_file().unwrap()));

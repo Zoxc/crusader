@@ -64,8 +64,8 @@ dependencies = [
 
 [[package]]
 name = "android-activity"
-version = "0.1.1"
-source = "git+https://github.com/Zoxc/android-activity?branch=crusader#6ea3f82fb8f6c7b2c850ce3879420955a2133cf1"
+version = "0.2.0"
+source = "git+https://github.com/Zoxc/android-activity?branch=crusader#1503983727bd4843d2ab5e0fb59f9fa2b488d335"
 dependencies = [
  "android-properties",
  "bitflags",
@@ -2970,7 +2970,7 @@ checksum = "f4dd6dc7df2d84cf7b33822ed5b86318fb1781948e9663bacd047fc9dd52259d"
 [[package]]
 name = "winit"
 version = "0.27.2"
-source = "git+https://github.com/Zoxc/winit?branch=crusader#6780b7258ca89b59a53132f508263af31cb7c338"
+source = "git+https://github.com/Zoxc/winit?branch=crusader#75c0ae474bfc129005d4f6f8c3ed6885c1bbb645"
 dependencies = [
  "android-activity",
  "bitflags",

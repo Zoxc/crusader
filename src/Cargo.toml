@@ -7,6 +7,3 @@ panic = "abort"
 [profile.release]
 panic = "abort"
 strip = "symbols"
-
-[patch.crates-io]
-winit = { git = "https://github.com/Zoxc/winit", branch = "crusader" }

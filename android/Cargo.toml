@@ -17,10 +17,11 @@ ndk-context = "0.1"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.11.0"
-android-activity = { git = "https://github.com/Zoxc/android-activity", branch = "crusader", features = [ "game-activity" ] }
+android-activity = { version = "0.2", features = [ "game-activity" ] }
 
 [patch.crates-io]
 winit = { git = "https://github.com/Zoxc/winit", branch = "crusader" }
+android-activity = { git = "https://github.com/Zoxc/android-activity", branch = "crusader" }
 
 [lib]
 name="main"
