@@ -21,7 +21,7 @@ use crusader_lib::{
 use eframe::{
     egui::{
         self,
-        plot::{Legend, Line, LinkedAxisGroup, Plot, PlotPoints, VLine},
+        plot::{Legend, Line, LinkedAxisGroup, LinkedCursorsGroup, Plot, PlotPoints, VLine},
         Grid, Layout, ScrollArea, TextEdit, TextStyle, Ui,
     },
     emath::{vec2, Align, Vec2},
@@ -194,6 +194,7 @@ pub struct Tester {
     msgs: Vec<String>,
     msg_scrolled: usize,
     axis: LinkedAxisGroup,
+    cursor: LinkedCursorsGroup,
     pub file_loader: Option<Box<dyn Fn(&mut Tester)>>,
     pub plot_saver: Option<Box<dyn Fn(&plot::TestResult)>>,
     pub raw_saver: Option<Box<dyn Fn(&RawResult)>>,
@@ -360,6 +361,7 @@ impl Tester {
             server_state: ServerState::Stopped(None),
             server: None,
             axis: LinkedAxisGroup::x(),
+            cursor: LinkedCursorsGroup::x(),
             file_loader: None,
             raw_saver: None,
             plot_saver: None,
@@ -714,6 +716,7 @@ impl Tester {
                 .legend(Legend::default())
                 .show_axes([false, false])
                 .link_axis(self.axis.clone())
+                .link_cursor(self.cursor.clone())
                 .include_x(0.0)
                 .include_x(duration)
                 .include_y(0.0)
@@ -734,6 +737,7 @@ impl Tester {
                 .legend(Legend::default())
                 .height(ui.available_height() / 2.0)
                 .link_axis(self.axis.clone())
+                .link_cursor(self.cursor.clone())
                 .include_x(0.0)
                 .include_x(duration)
                 .include_y(0.0)
@@ -772,6 +776,7 @@ impl Tester {
             let plot = Plot::new("result")
                 .legend(Legend::default())
                 .link_axis(self.axis.clone())
+                .link_cursor(self.cursor.clone())
                 .set_margin_fraction(Vec2 { x: 0.2, y: 0.0 })
                 .include_x(0.0)
                 .include_x(duration)
