@@ -21,7 +21,7 @@ use crusader_lib::{
 use eframe::{
     egui::{
         self,
-        plot::{Legend, Line, LinkedAxisGroup, LinkedCursorsGroup, Plot, PlotPoints, VLine},
+        plot::{Legend, Line, LinkedAxisGroup, LinkedCursorsGroup, Plot, PlotPoints},
         Grid, Layout, ScrollArea, TextEdit, TextStyle, Ui,
     },
     emath::{vec2, Align, Vec2},
@@ -209,7 +209,7 @@ pub struct TestResult {
     latency_max: f64,
     up_latency: Vec<(f64, f64)>,
     down_latency: Vec<(f64, f64)>,
-    loss: Vec<(f64, Color32)>,
+    loss: Vec<(f64, Option<bool>)>,
     bandwidth_max: f64,
 }
 
@@ -266,16 +266,9 @@ impl TestResult {
             .filter(|p| p.sent >= result.start)
             .filter_map(|ping| {
                 if ping.latency.and_then(|latency| latency.total).is_none() {
-                    let color = if result.raw_result.version >= 2 {
-                        if ping.latency.is_none() {
-                            Color32::from_rgb(37, 83, 169)
-                        } else {
-                            Color32::from_rgb(95, 145, 62)
-                        }
-                    } else {
-                        Color32::from_rgb(193, 85, 85)
-                    };
-                    Some((ping.sent.as_secs_f64() - start, color))
+                    let down_loss =
+                        (result.raw_result.version >= 2).then_some(ping.latency.is_some());
+                    Some((ping.sent.as_secs_f64() - start, down_loss))
                 } else {
                     None
                 }
@@ -717,16 +710,42 @@ impl Tester {
                 .show_axes([false, false])
                 .link_axis(self.axis.clone())
                 .link_cursor(self.cursor.clone())
+                .center_y_axis(true)
                 .include_x(0.0)
                 .include_x(duration)
-                .include_y(0.0)
+                .include_y(-1.0)
                 .include_y(1.0)
-                .height(20.0)
+                .height(30.0)
                 .label_formatter(|_, value| format!("Time = {:.2} s", value.x));
 
             plot.show(ui, |plot_ui| {
-                for (loss, color) in &result.loss {
-                    plot_ui.vline(VLine::new(*loss).color(*color))
+                for &(loss, down_loss) in &result.loss {
+                    let (color, s, e) = down_loss
+                        .map(|down_loss| {
+                            if down_loss {
+                                (Color32::from_rgb(95, 145, 62), 1.0, 0.0)
+                            } else {
+                                (Color32::from_rgb(37, 83, 169), -1.0, 0.0)
+                            }
+                        })
+                        .unwrap_or((Color32::from_rgb(193, 85, 85), -1.0, 1.0));
+
+                    plot_ui.line(
+                        Line::new(PlotPoints::from_iter(
+                            [[loss, s], [loss, e]].iter().copied(),
+                        ))
+                        .color(color),
+                    );
+
+                    if down_loss.is_some() {
+                        plot_ui.line(
+                            Line::new(PlotPoints::from_iter(
+                                [[loss, s], [loss, s - s / 5.0]].iter().copied(),
+                            ))
+                            .width(3.0)
+                            .color(color),
+                        );
+                    }
                 }
             });
             ui.label("Packet loss");

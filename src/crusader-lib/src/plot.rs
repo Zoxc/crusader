@@ -470,19 +470,29 @@ fn latency(
     for ping in pings {
         let x = ping.sent.as_secs_f64() - start;
         if ping.latency.and_then(|latency| latency.total).is_none() {
-            let color = if result.raw_result.version >= 2 {
+            let bold_size = 0.1111;
+            let (color, s, e, bold) = if result.raw_result.version >= 2 {
                 if ping.latency.is_none() {
-                    UP_COLOR
+                    (UP_COLOR, 0.0, 0.5, Some(0.0 + bold_size))
                 } else {
-                    DOWN_COLOR
+                    (DOWN_COLOR, 1.0, 0.5, Some(1.0 - bold_size))
                 }
             } else {
-                RGBColor(193, 85, 85)
+                (RGBColor(193, 85, 85), 0.0, 1.0, None)
             };
             chart
                 .plotting_area()
-                .draw(&PathElement::new(vec![(x, 0.0), (x, 1.0)], color))
+                .draw(&PathElement::new(vec![(x, s), (x, e)], color))
                 .unwrap();
+            bold.map(|bold| {
+                chart
+                    .plotting_area()
+                    .draw(&PathElement::new(
+                        vec![(x, s), (x, bold)],
+                        color.stroke_width(2),
+                    ))
+                    .unwrap();
+            });
         }
     }
 
@@ -747,7 +757,7 @@ pub(crate) fn graph(
 
     let root = root.split_vertically(text_height + 10).1;
 
-    let (root, loss) = root.split_vertically(root.relative_to_height(1.0) - 60.0);
+    let (root, loss) = root.split_vertically(root.relative_to_height(1.0) - 70.0);
 
     let mut charts = 1;
 
