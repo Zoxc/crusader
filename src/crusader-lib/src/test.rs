@@ -52,7 +52,7 @@ enum TestState {
 }
 
 pub(crate) fn data() -> Vec<u8> {
-    let mut vec = Vec::with_capacity(512 * 1024);
+    let mut vec = Vec::with_capacity(128 * 1024);
     let mut rng = StdRng::from_seed([
         18, 141, 186, 158, 195, 76, 244, 56, 219, 131, 65, 128, 250, 63, 228, 44, 233, 34, 9, 51,
         13, 72, 230, 131, 223, 240, 124, 77, 103, 238, 103, 186,

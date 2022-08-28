@@ -1,12 +1,13 @@
 use futures::{pin_mut, select, FutureExt};
 use parking_lot::Mutex;
+use socket2::{Domain, Protocol, Socket};
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use std::{sync::Arc, time::Instant};
 use tokio::io::AsyncWriteExt;
-use tokio::net::{TcpListener, TcpStream, UdpSocket};
+use tokio::net::{TcpListener, TcpSocket, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
@@ -57,7 +58,7 @@ struct State {
     dummy_data: Vec<u8>,
     clients: Mutex<Vec<Option<Arc<Client>>>>,
     pong_v6: UnboundedSender<SlotUpdate>,
-    pong_v4: Option<UnboundedSender<SlotUpdate>>,
+    pong_v4: UnboundedSender<SlotUpdate>,
     msg: Box<dyn Fn(&str) + Send + Sync>,
 }
 
@@ -147,20 +148,16 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         tx.await.ok();
 
                         // Update IPv4 pong
-                        let tx = state.pong_v4.as_ref().map(|pong_v4| {
-                            let (reply, tx) = oneshot::channel();
-                            pong_v4
-                                .send(SlotUpdate {
-                                    slot,
-                                    client: Some(client.clone()),
-                                    reply: Some(reply),
-                                })
-                                .ok();
-                            tx
-                        });
-                        if let Some(tx) = tx {
-                            tx.await.ok();
-                        }
+                        let (rx, tx) = oneshot::channel();
+                        state
+                            .pong_v4
+                            .send(SlotUpdate {
+                                slot,
+                                client: Some(client.clone()),
+                                reply: Some(rx),
+                            })
+                            .ok();
+                        tx.await.ok();
 
                         let state = state.clone();
                         _client_dropper = Some(move || {
@@ -172,14 +169,14 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                                     reply: None,
                                 })
                                 .ok();
-                            state.pong_v4.as_ref().map(|rx| {
-                                rx.send(SlotUpdate {
+                            state
+                                .pong_v4
+                                .send(SlotUpdate {
                                     slot,
                                     client: None,
                                     reply: None,
                                 })
-                                .ok()
-                            });
+                                .ok();
                         });
 
                         Some(slot)
@@ -476,12 +473,15 @@ async fn serve_async(
     port: u16,
     msg: Box<dyn Fn(&str) + Send + Sync>,
 ) -> Result<(), Box<dyn Error>> {
-    let socket_v6 =
-        UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port)).await?;
-    let socket_v4 = UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))
-        .await
-        .map_err(|err| (msg)(&format!("Failed to bind IPv4 UDP: {}", err)))
-        .ok();
+    let socket_v6 = Socket::new(Domain::IPV6, socket2::Type::DGRAM, Some(Protocol::UDP))?;
+    socket_v6.set_only_v6(true)?;
+    socket_v6.bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port).into())?;
+    let socket_v6: std::net::UdpSocket = socket_v6.into();
+    socket_v6.set_nonblocking(true)?;
+    let socket_v6 = UdpSocket::from_std(socket_v6)?;
+
+    let socket_v4 =
+        UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port)).await?;
 
     let (pong_ipv6_tx, pong_ipv6_rx) = unbounded_channel();
     let (pong_ipv4_tx, pong_ipv4_rx) = unbounded_channel();
@@ -491,24 +491,25 @@ async fn serve_async(
         dummy_data: crate::test::data(),
         clients: Mutex::new((0..SLOTS).map(|_| None).collect()),
         pong_v6: pong_ipv6_tx,
-        pong_v4: socket_v4.as_ref().map(|_| pong_ipv4_tx),
+        pong_v4: pong_ipv4_tx,
         msg,
     });
 
-    let v6 = TcpListener::bind((Ipv6Addr::UNSPECIFIED, port)).await?;
-    let v4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))
-        .await
-        .map_err(|err| (state.msg)(&format!("Failed to bind IPv4 TCP: {}", err)))
-        .ok();
+    let v6 = Socket::new(Domain::IPV6, socket2::Type::STREAM, Some(Protocol::TCP))?;
+    v6.set_only_v6(true)?;
+    let v6: std::net::TcpStream = v6.into();
+    v6.set_nonblocking(true)?;
+    let v6 = TcpSocket::from_std_stream(v6);
+    v6.bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))?;
+    let v6 = v6.listen(1024)?;
+
+    let v4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).await?;
 
     tokio::spawn(pong(socket_v6, state.clone(), pong_ipv6_rx));
-
-    socket_v4.map(|socket| {
-        tokio::spawn(pong(socket, state.clone(), pong_ipv4_rx));
-    });
+    tokio::spawn(pong(socket_v4, state.clone(), pong_ipv4_rx));
 
     task::spawn(listen(state.clone(), v6));
-    v4.map(|v4| task::spawn(listen(state.clone(), v4)));
+    task::spawn(listen(state.clone(), v4));
 
     (state.msg)("Server running...");
 
