@@ -195,7 +195,9 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         .get(id as usize)
                         .and_then(|client| client.as_ref())
                         .cloned()
-                        .and_then(|client| (client.ip == addr.ip()).then_some(client))
+                        .and_then(|client| {
+                            (client.ip == ip_to_ipv6_mapped(addr.ip())).then_some(client)
+                        })
                         .ok_or("Unable to assoicate client")?,
                 );
             }
