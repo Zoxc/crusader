@@ -34,7 +34,6 @@ use crate::plot::save_graph;
 use crate::protocol::{
     codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
 };
-use crate::serve::CountingCodec;
 
 type Msg = Arc<dyn Fn(&str) + Send + Sync>;
 
@@ -106,6 +105,42 @@ where
     }
 
     Ok(())
+}
+
+pub(crate) async fn read_data(
+    rx: &OwnedReadHalf,
+    buffer: &mut [u8],
+    bytes: &AtomicU64,
+) -> Result<(), Box<dyn Error>> {
+    loop {
+        match rx.readable().await {
+            Ok(()) => (),
+            Err(err) => {
+                if err.kind() == std::io::ErrorKind::ConnectionReset {
+                    return Ok(());
+                } else {
+                    return Err(err.into());
+                }
+            }
+        }
+
+        loop {
+            match rx.try_read(buffer) {
+                Ok(0) => return Ok(()),
+                Ok(n) => {
+                    bytes.fetch_add(n as u64, Ordering::Release);
+                    yield_now().await;
+                }
+                Err(err) => {
+                    if err.kind() == std::io::ErrorKind::WouldBlock {
+                        break;
+                    } else {
+                        return Err(err.into());
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -772,7 +807,9 @@ fn download_loaders(
 
                 let (rx, tx) = stream.into_inner().into_split();
                 let mut tx = FramedWrite::new(tx, codec());
-                let mut rx = FramedRead::with_capacity(rx, CountingCodec, 512 * 1024);
+
+                let mut buffer = Vec::with_capacity(512 * 1024);
+                buffer.extend((0..buffer.capacity()).map(|_| 0));
 
                 wait_for_state(&mut state_rx, state).await;
 
@@ -813,11 +850,7 @@ fn download_loaders(
                     measures
                 });
 
-                while let Some(size) = rx.next().await {
-                    let size = size.unwrap();
-                    bytes.fetch_add(size as u64, Ordering::Release);
-                    yield_now().await;
-                }
+                read_data(&rx, &mut buffer, &bytes).await.unwrap();
 
                 done.store(true, Ordering::Release);
 

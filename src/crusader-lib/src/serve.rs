@@ -1,4 +1,3 @@
-use bytes::BytesMut;
 use futures::{pin_mut, select, FutureExt};
 use parking_lot::Mutex;
 use std::error::Error;
@@ -14,29 +13,12 @@ use tokio::sync::mpsc::{
 use tokio::sync::oneshot;
 use tokio::task::{self, yield_now};
 use tokio::{join, signal, time};
-use tokio_util::codec::{Decoder, FramedRead, FramedWrite};
+use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::protocol::{self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage};
+use crate::test;
 
-use futures::stream::StreamExt;
-use std::{io, thread};
-
-pub struct CountingCodec;
-
-impl Decoder for CountingCodec {
-    type Item = usize;
-    type Error = io::Error;
-
-    fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<usize>, io::Error> {
-        if !buf.is_empty() {
-            let len = buf.len();
-            buf.clear();
-            Ok(Some(len))
-        } else {
-            Ok(None)
-        }
-    }
-}
+use std::thread;
 
 #[derive(Debug)]
 struct SlotUpdate {
@@ -115,6 +97,9 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
         return Ok(());
     }
 
+    let mut buffer = Vec::with_capacity(512 * 1024);
+    buffer.extend((0..buffer.capacity()).map(|_| 0));
+
     let mut client = None;
     let mut receiver = None;
     let mut _client_dropper = None;
@@ -134,7 +119,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         free_slot.map(|(slot, data)| {
                             let (tx_message, rx_message) = unbounded_channel();
 
-                            let (tx_latency, rx_latency) = channel(100);
+                            let (tx_latency, rx_latency) = channel(200);
                             let slot = slot as u64;
                             let new_client = Arc::new(Client {
                                 ip: ip_to_ipv6_mapped(addr.ip()),
@@ -328,8 +313,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             } => {
                 let client = client.ok_or("No associated client")?;
 
-                let mut raw =
-                    FramedRead::with_capacity(stream_rx.into_inner(), CountingCodec, 512 * 1024);
+                let rx = stream_rx.into_inner();
 
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes_ = bytes.clone();
@@ -367,11 +351,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     }
                 });
 
-                while let Some(size) = raw.next().await {
-                    let size = size?;
-                    bytes.fetch_add(size as u64, Ordering::Release);
-                    yield_now().await;
-                }
+                test::read_data(&rx, &mut buffer, &bytes).await?;
 
                 done.store(true, Ordering::Release);
 
