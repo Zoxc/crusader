@@ -451,7 +451,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         })
     });
 
-    config.upload.then(|| {
+    config.both.then(|| {
         raw_streams.push(RawStreamGroup {
             download: false,
             both: true,
