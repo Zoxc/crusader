@@ -178,7 +178,7 @@ pub(crate) async fn read_data(
 
         loop {
             if done_.load(Ordering::Acquire) {
-                println!("Done reading!");
+                println!("Done reading! {:x}", &stream as *const TcpStream as usize);
                 return Ok(());
             }
 
