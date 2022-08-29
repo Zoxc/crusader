@@ -178,6 +178,7 @@ pub(crate) async fn read_data(
 
         loop {
             if done_.load(Ordering::Acquire) {
+                println!("Done reading!");
                 return Ok(());
             }
 
