@@ -15,7 +15,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::join;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpStream, UdpSocket};
@@ -108,25 +108,80 @@ where
     Ok(())
 }
 
-pub(crate) async fn read_data(
-    rx: &OwnedReadHalf,
-    buffer: &mut [u8],
-    bytes: &AtomicU64,
+pub(crate) async fn write_data(
+    mut stream: TcpStream,
+    data: &[u8],
+    duration: Duration,
 ) -> Result<(), Box<dyn Error>> {
+    stream.set_linger(Some(Duration::from_secs(0))).ok();
+
+    let done = Arc::new(AtomicBool::new(false));
+    let done_ = done.clone();
+
+    tokio::spawn(async move {
+        time::sleep(duration).await;
+
+        done.store(true, Ordering::Release);
+    });
+
     loop {
-        match rx.readable().await {
+        match stream.write_all(data).await {
             Ok(()) => (),
             Err(err) => {
-                if err.kind() == std::io::ErrorKind::ConnectionReset {
-                    return Ok(());
+                if err.kind() == std::io::ErrorKind::ConnectionReset
+                    || err.kind() == std::io::ErrorKind::ConnectionAborted
+                {
+                    break;
                 } else {
                     return Err(err.into());
                 }
             }
         }
 
+        if done_.load(Ordering::Acquire) {
+            break;
+        }
+
+        yield_now().await;
+    }
+
+    Ok(())
+}
+
+pub(crate) async fn read_data(
+    stream: TcpStream,
+    buffer: &mut [u8],
+    bytes: &AtomicU64,
+    duration: Duration,
+) -> Result<(), Box<dyn Error>> {
+    stream.set_linger(Some(Duration::from_secs(0))).ok();
+
+    let done = Arc::new(AtomicBool::new(false));
+    let done_ = done.clone();
+
+    tokio::spawn(async move {
+        time::sleep(duration).await;
+
+        done.store(true, Ordering::Release);
+    });
+
+    loop {
+        if let Ok(Err(err)) = time::timeout(Duration::from_millis(50), stream.readable()).await {
+            if err.kind() == std::io::ErrorKind::ConnectionReset
+                || err.kind() == std::io::ErrorKind::ConnectionAborted
+            {
+                return Ok(());
+            } else {
+                return Err(err.into());
+            }
+        }
+
         loop {
-            match rx.try_read(buffer) {
+            if done_.load(Ordering::Acquire) {
+                return Ok(());
+            }
+
+            match stream.try_read(buffer) {
                 Ok(0) => return Ok(()),
                 Ok(n) => {
                     bytes.fetch_add(n as u64, Ordering::Release);
@@ -135,7 +190,9 @@ pub(crate) async fn read_data(
                 Err(err) => {
                     if err.kind() == std::io::ErrorKind::WouldBlock {
                         break;
-                    } else if err.kind() == std::io::ErrorKind::ConnectionReset {
+                    } else if err.kind() == std::io::ErrorKind::ConnectionReset
+                        || err.kind() == std::io::ErrorKind::ConnectionAborted
+                    {
                         return Ok(());
                     } else {
                         return Err(err.into());
@@ -757,43 +814,9 @@ fn upload_loaders(
             .await
             .unwrap();
 
-            let (mut rx, mut tx) = stream.into_inner().into_split();
-
-            tokio::spawn(async move {
-                rx.read_u8().await.ok();
-            });
-
-            let done = Arc::new(AtomicBool::new(false));
-            let done_ = done.clone();
-
-            tokio::spawn(async move {
-                time::sleep(config.load_duration).await;
-
-                done.store(true, Ordering::Release);
-            });
-
-            let write = tokio::spawn(async move {
-                loop {
-                    match tx.write_all(data.as_ref()).await {
-                        Ok(()) => (),
-                        Err(err) => {
-                            if err.kind() == std::io::ErrorKind::ConnectionReset {
-                                break;
-                            } else {
-                                panic!("{:?}", err);
-                            }
-                        }
-                    }
-
-                    if done_.load(Ordering::Acquire) {
-                        break;
-                    }
-
-                    yield_now().await;
-                }
-            });
-
-            write.await.unwrap();
+            write_data(stream.into_inner(), data.as_ref(), config.load_duration)
+                .await
+                .unwrap();
         });
     }
 }
@@ -833,10 +856,7 @@ fn download_loaders(
             let semaphore = semaphore.clone();
 
             tokio::spawn(async move {
-                let stream = loader.await.unwrap();
-
-                let (rx, tx) = stream.into_inner().into_split();
-                let mut tx = FramedWrite::new(tx, codec());
+                let mut stream = loader.await.unwrap();
 
                 let mut buffer = Vec::with_capacity(512 * 1024);
                 buffer.extend((0..buffer.capacity()).map(|_| 0));
@@ -846,7 +866,7 @@ fn download_loaders(
                 time::sleep(config.stream_stagger * i as u32).await;
 
                 send(
-                    &mut tx,
+                    &mut stream,
                     &ClientMessage::LoadFromServer {
                         stream: TestStream {
                             group,
@@ -858,16 +878,13 @@ fn download_loaders(
                 .await
                 .unwrap();
 
+                let stream = stream.into_inner();
+
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes_ = bytes.clone();
 
                 let done = Arc::new(AtomicBool::new(false));
                 let done_ = done.clone();
-
-                tokio::spawn(async move {
-                    time::sleep(config.load_duration).await;
-                    std::mem::drop(tx);
-                });
 
                 let measures = tokio::spawn(async move {
                     let mut measures = Vec::new();
@@ -890,7 +907,9 @@ fn download_loaders(
                     measures
                 });
 
-                read_data(&rx, &mut buffer, &bytes).await.unwrap();
+                read_data(stream, &mut buffer, &bytes, config.load_duration)
+                    .await
+                    .unwrap();
 
                 done.store(true, Ordering::Release);
 

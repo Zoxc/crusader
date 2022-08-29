@@ -6,13 +6,12 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use std::{sync::Arc, time::Instant};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpSocket, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
 use tokio::sync::oneshot;
-use tokio::task::{self, yield_now};
+use tokio::task::{self};
 use tokio::{signal, time};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
@@ -269,45 +268,17 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             } => {
                 let client = client.ok_or("No associated client")?;
 
-                let mut tx = stream_tx.into_inner();
-                let mut rx = stream_rx.into_inner();
+                let stream = stream_tx
+                    .into_inner()
+                    .reunite(stream_rx.into_inner())
+                    .unwrap();
 
-                tokio::spawn(async move {
-                    rx.read_u8().await.ok();
-                });
-
-                let done = Arc::new(AtomicBool::new(false));
-                let done_ = done.clone();
-
-                tokio::spawn(async move {
-                    time::sleep(Duration::from_micros(duration)).await;
-
-                    done.store(true, Ordering::Release);
-                });
-
-                let write = tokio::spawn(async move {
-                    loop {
-                        match tx.write_all(state.dummy_data.as_ref()).await {
-                            Ok(()) => (),
-                            Err(err) => {
-                                if err.kind() == std::io::ErrorKind::ConnectionReset {
-                                    break;
-                                } else {
-                                    return Err(err.to_string());
-                                }
-                            }
-                        }
-
-                        if done_.load(Ordering::Acquire) {
-                            break;
-                        }
-
-                        yield_now().await;
-                    }
-                    Ok::<(), String>(())
-                });
-
-                write.await??;
+                test::write_data(
+                    stream,
+                    state.dummy_data.as_ref(),
+                    Duration::from_micros(duration),
+                )
+                .await?;
 
                 client
                     .tx_message
@@ -325,17 +296,15 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             } => {
                 let client = client.ok_or("No associated client")?;
 
-                let rx = stream_rx.into_inner();
+                let stream = stream_rx
+                    .into_inner()
+                    .reunite(stream_tx.into_inner())
+                    .unwrap();
 
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes_ = bytes.clone();
                 let done = Arc::new(AtomicBool::new(false));
                 let done_ = done.clone();
-
-                tokio::spawn(async move {
-                    time::sleep(Duration::from_micros(duration)).await;
-                    std::mem::drop(stream_tx);
-                });
 
                 tokio::spawn(async move {
                     let mut interval = time::interval(Duration::from_micros(bandwidth_interval));
@@ -368,7 +337,8 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     }
                 });
 
-                test::read_data(&rx, &mut buffer, &bytes).await?;
+                test::read_data(stream, &mut buffer, &bytes, Duration::from_micros(duration))
+                    .await?;
 
                 done.store(true, Ordering::Release);
 
