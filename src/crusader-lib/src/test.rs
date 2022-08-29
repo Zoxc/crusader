@@ -15,7 +15,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::join;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpStream, UdpSocket};
@@ -98,10 +98,11 @@ where
     let server_hello: Hello = receive(rx).await?;
 
     if hello != server_hello {
-        panic!(
+        return Err(format!(
             "Mismatched server hello, got {:?}, expected {:?}",
             server_hello, hello
-        );
+        )
+        .into());
     }
 
     Ok(())
@@ -134,6 +135,8 @@ pub(crate) async fn read_data(
                 Err(err) => {
                     if err.kind() == std::io::ErrorKind::WouldBlock {
                         break;
+                    } else if err.kind() == std::io::ErrorKind::ConnectionReset {
+                        return Ok(());
                     } else {
                         return Err(err.into());
                     }
@@ -261,6 +264,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         download_loaders(
             id,
             server,
+            2,
             config,
             setup_start,
             state_rx.clone(),
@@ -272,6 +276,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         download_loaders(
             id,
             server,
+            3,
             config,
             setup_start,
             state_rx.clone(),
@@ -296,11 +301,10 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
             match reply {
                 ServerMessage::MeasureStreamDone { stream } => {
                     if stream.group == 0 {
-                        &upload_semaphore_
-                    } else {
-                        &both_upload_semaphore_
+                        upload_semaphore_.add_permits(1);
+                    } else if stream.group == 1 {
+                        both_upload_semaphore_.add_permits(1);
                     }
-                    .add_permits(1);
                 }
                 ServerMessage::Measure {
                     stream,
@@ -739,8 +743,6 @@ fn upload_loaders(
 
             time::sleep(config.stream_stagger * i as u32 + stagger_offset).await;
 
-            let stopping = Instant::now() + config.load_duration;
-
             send(
                 &mut stream,
                 &ClientMessage::LoadFromClient {
@@ -748,23 +750,50 @@ fn upload_loaders(
                         group,
                         id: i as u32,
                     },
+                    duration: config.load_duration.as_micros() as u64,
                     bandwidth_interval: config.bandwidth_interval.as_micros() as u64,
                 },
             )
             .await
             .unwrap();
 
-            let mut raw = stream.into_inner();
+            let (mut rx, mut tx) = stream.into_inner().into_split();
 
-            loop {
-                if Instant::now() >= stopping {
-                    break;
+            tokio::spawn(async move {
+                rx.read_u8().await.ok();
+            });
+
+            let done = Arc::new(AtomicBool::new(false));
+            let done_ = done.clone();
+
+            tokio::spawn(async move {
+                time::sleep(config.load_duration).await;
+
+                done.store(true, Ordering::Release);
+            });
+
+            let write = tokio::spawn(async move {
+                loop {
+                    match tx.write_all(data.as_ref()).await {
+                        Ok(()) => (),
+                        Err(err) => {
+                            if err.kind() == std::io::ErrorKind::ConnectionReset {
+                                break;
+                            } else {
+                                panic!("{:?}", err);
+                            }
+                        }
+                    }
+
+                    if done_.load(Ordering::Acquire) {
+                        break;
+                    }
+
+                    yield_now().await;
                 }
+            });
 
-                raw.write_all(data.as_ref()).await.unwrap();
-
-                yield_now().await;
-            }
+            write.await.unwrap();
         });
     }
 }
@@ -787,6 +816,7 @@ async fn wait_on_download_loaders(
 fn download_loaders(
     id: u64,
     server: SocketAddr,
+    group: u32,
     config: Config,
     setup_start: Instant,
     state_rx: watch::Receiver<TestState>,
@@ -815,19 +845,29 @@ fn download_loaders(
 
                 time::sleep(config.stream_stagger * i as u32).await;
 
-                send(&mut tx, &ClientMessage::LoadFromServer).await.unwrap();
-
-                tokio::spawn(async move {
-                    time::sleep(config.load_duration).await;
-
-                    send(&mut tx, &ClientMessage::Done).await.unwrap();
-                });
+                send(
+                    &mut tx,
+                    &ClientMessage::LoadFromServer {
+                        stream: TestStream {
+                            group,
+                            id: i as u32,
+                        },
+                        duration: config.load_duration.as_micros() as u64,
+                    },
+                )
+                .await
+                .unwrap();
 
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes_ = bytes.clone();
 
                 let done = Arc::new(AtomicBool::new(false));
                 let done_ = done.clone();
+
+                tokio::spawn(async move {
+                    time::sleep(config.load_duration).await;
+                    std::mem::drop(tx);
+                });
 
                 let measures = tokio::spawn(async move {
                     let mut measures = Vec::new();

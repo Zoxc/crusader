@@ -8,7 +8,7 @@ use tokio_util::codec::{length_delimited, LengthDelimitedCodec};
 pub const PORT: u16 = 35481;
 
 pub const MAGIC: u64 = 0x5372ab82ae7c59cb;
-pub const VERSION: u64 = 2;
+pub const VERSION: u64 = 3;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct Hello {
@@ -61,9 +61,13 @@ pub enum ClientMessage {
     Done,
     LoadFromClient {
         stream: TestStream,
+        duration: u64,
         bandwidth_interval: u64,
     },
-    LoadFromServer,
+    LoadFromServer {
+        stream: TestStream,
+        duration: u64,
+    },
     GetMeasurements,
     StopMeasurements,
 }
