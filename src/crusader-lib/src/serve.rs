@@ -1,21 +1,25 @@
 use futures::{pin_mut, select, FutureExt};
 use parking_lot::Mutex;
 use socket2::{Domain, Protocol, Socket};
+use std::collections::HashMap;
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
-use std::{sync::Arc, time::Instant};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpSocket, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tokio::task::{self};
-use tokio::{signal, time};
+use tokio::{signal, time, time::Instant};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-use crate::protocol::{self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage};
+use crate::protocol::{
+    self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage, TestStream,
+};
 use crate::test;
 
 use std::thread;
@@ -34,6 +38,8 @@ struct Client {
     tx_latency: Sender<LatencyMeasure>,
     rx_latency: Mutex<Receiver<LatencyMeasure>>,
     overload: AtomicBool,
+    loads: Mutex<HashMap<u32, watch::Sender<Option<Instant>>>>,
+    uploads: Mutex<HashMap<TestStream, oneshot::Sender<()>>>,
 }
 
 impl Client {
@@ -49,6 +55,34 @@ impl Client {
         self.tx_message
             .send(ServerMessage::LatencyMeasures(measures))
             .ok();
+    }
+
+    fn load_waiter(&self, group: u32) -> watch::Receiver<Option<Instant>> {
+        self.loads
+            .lock()
+            .entry(group)
+            .or_insert_with(|| watch::channel(None).0)
+            .subscribe()
+    }
+
+    async fn schedule_loads(
+        &self,
+        state: &State,
+        groups: Vec<u32>,
+        delay: u64,
+    ) -> Result<ServerMessage, Box<dyn Error>> {
+        let time = Instant::now() + Duration::from_micros(delay);
+        {
+            let loads = self.loads.lock();
+            for group in &groups {
+                loads.get(group).ok_or("Unknown group")?.send(Some(time))?;
+            }
+        }
+
+        Ok(ServerMessage::ScheduledLoads {
+            groups,
+            time: time.saturating_duration_since(state.started).as_micros() as u64,
+        })
     }
 }
 
@@ -77,6 +111,8 @@ impl<F: Fn()> Drop for OnDrop<F> {
 }
 
 async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Error>> {
+    stream.set_nodelay(true)?;
+
     let addr = stream.peer_addr()?;
 
     let (rx, tx) = stream.into_split();
@@ -127,6 +163,8 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                                 tx_latency,
                                 rx_latency: Mutex::new(rx_latency),
                                 overload: AtomicBool::new(false),
+                                loads: Mutex::new(HashMap::new()),
+                                uploads: Mutex::new(HashMap::new()),
                             });
                             *data = Some(new_client.clone());
 
@@ -204,6 +242,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 let receiver = receiver.as_mut().ok_or("Not the main client")?;
 
                 let client = client.clone().ok_or("Not the main client")?;
+                let client_ = client.clone();
 
                 let done = Arc::new(AtomicBool::new(false));
                 let done_ = done.clone();
@@ -230,59 +269,95 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         pin_mut!(message);
 
                         select! {
-                            request = request => {
-                                match request? {
-                                    ClientMessage::StopMeasurements => None,
-                                    _ => {
-                                        Err("Closed early")?
-                                    }
-                                }
-                            },
-                            message = message => message,
+                            request = request => Err(request?),
+                            message = message => Ok(message),
                         }
                     };
 
-                    if let Some(message) = message {
-                        send(&mut stream_tx, &message).await?;
-                    } else {
-                        done.store(true, Ordering::Release);
-                        let overload = get_pings.await?;
-
-                        // Send pending messages
-                        while let Ok(message) = receiver.try_recv() {
+                    match message {
+                        Ok(Some(message)) => {
                             send(&mut stream_tx, &message).await?;
                         }
+                        Ok(None) | Err(ClientMessage::StopMeasurements) => {
+                            done.store(true, Ordering::Release);
+                            let overload = get_pings.await?;
 
-                        send(
-                            &mut stream_tx,
-                            &ServerMessage::MeasurementsDone { overload },
-                        )
-                        .await?;
-                        break;
+                            // Send pending messages
+                            while let Ok(message) = receiver.try_recv() {
+                                send(&mut stream_tx, &message).await?;
+                            }
+
+                            send(
+                                &mut stream_tx,
+                                &ServerMessage::MeasurementsDone { overload },
+                            )
+                            .await?;
+                            break;
+                        }
+                        Err(ClientMessage::LoadComplete { stream }) => {
+                            client_
+                                .uploads
+                                .lock()
+                                .remove(&stream)
+                                .ok_or("Expected upload stream")?
+                                .send(())
+                                .map_err(|_| "Unable to notify reader of writer completion")?;
+                        }
+                        Err(ClientMessage::ScheduleLoads { groups, delay }) => {
+                            let reply = client_.schedule_loads(&state, groups, delay).await?;
+                            send(&mut stream_tx, &reply).await?;
+                        }
+                        Err(msg) => {
+                            return Err(
+                                format!("Unexpected message during measurement {:?}", msg).into()
+                            )
+                        }
                     }
                 }
             }
+
             ClientMessage::LoadFromServer {
                 stream: test_stream,
                 duration,
+                delay,
             } => {
                 let client = client.ok_or("No associated client")?;
 
-                let stream = stream_tx
-                    .into_inner()
-                    .reunite(stream_rx.into_inner())
-                    .unwrap();
+                let mut stream_rx = stream_rx.into_inner();
+
+                send(&mut stream_tx, &ServerMessage::WaitingForByte).await?;
+
+                // Wait for a pending read byte
+                loop {
+                    let _ = stream_rx.read(&mut []).await?;
+                    match time::timeout(Duration::from_millis(10), stream_rx.peek(&mut [0])).await {
+                        Ok(Ok(1)) => break,
+                        Err(_) | Ok(Ok(_)) => (),
+                        Ok(Err(err)) => return Err(err.into()),
+                    }
+                }
+
+                let mut waiter = client.load_waiter(test_stream.group);
+
+                send(&mut stream_tx, &ServerMessage::WaitingForLoad).await?;
+
+                let stream = stream_tx.into_inner().reunite(stream_rx).unwrap();
+
+                waiter.changed().await?;
+                let start = waiter.borrow().ok_or("Expected time")? + Duration::from_micros(delay);
+
+                time::sleep_until(start).await;
 
                 test::write_data(
                     stream,
                     state.dummy_data.as_ref(),
-                    Duration::from_micros(duration),
+                    start + Duration::from_micros(duration),
                 )
                 .await?;
 
                 client
                     .tx_message
-                    .send(ServerMessage::MeasureStreamDone {
+                    .send(ServerMessage::LoadComplete {
                         stream: test_stream,
                     })
                     .ok();
@@ -292,19 +367,39 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             ClientMessage::LoadFromClient {
                 stream: test_stream,
                 duration,
+                delay,
                 bandwidth_interval,
             } => {
                 let client = client.ok_or("No associated client")?;
 
-                let stream = stream_rx
+                send(&mut stream_tx, &ServerMessage::WaitingForLoad).await?;
+
+                let reply: ClientMessage = receive(&mut stream_rx).await.unwrap();
+                match reply {
+                    ClientMessage::SendByte => (),
+                    _ => return Err(format!("Unexpected message {:?}", reply).into()),
+                };
+
+                let mut stream = stream_rx
                     .into_inner()
                     .reunite(stream_tx.into_inner())
                     .unwrap();
 
+                stream.write_u8(1).await.unwrap();
+
+                let (reading_done_tx, reading_done_rx) = oneshot::channel();
+
+                client.uploads.lock().insert(test_stream, reading_done_tx);
+
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes_ = bytes.clone();
-                let done = Arc::new(AtomicBool::new(false));
-                let done_ = done.clone();
+                let (done_tx, mut done_rx) = oneshot::channel();
+
+                let mut waiter = client.load_waiter(test_stream.group);
+                waiter.changed().await?;
+                let start = waiter.borrow().ok_or("Expected time")? + Duration::from_micros(delay);
+
+                time::sleep_until(start).await;
 
                 tokio::spawn(async move {
                     let mut interval = time::interval(Duration::from_micros(bandwidth_interval));
@@ -325,11 +420,12 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                             })
                             .ok();
 
-                        if done_.load(Ordering::Acquire) {
+                        if let Ok(timeout) = done_rx.try_recv() {
                             client
                                 .tx_message
                                 .send(ServerMessage::MeasureStreamDone {
                                     stream: test_stream,
+                                    timeout,
                                 })
                                 .ok();
                             break;
@@ -337,20 +433,31 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     }
                 });
 
-                test::read_data(stream, &mut buffer, &bytes, Duration::from_micros(duration))
-                    .await?;
+                let timeout = test::read_data(
+                    stream,
+                    &mut buffer,
+                    bytes,
+                    start + Duration::from_micros(duration),
+                    reading_done_rx,
+                )
+                .await?;
 
-                done.store(true, Ordering::Release);
+                done_tx
+                    .send(timeout)
+                    .map_err(|_| "Unable to signal reading completion")?;
 
                 return Ok(());
-            }
-            ClientMessage::StopMeasurements => {
-                return Err("Unexpected StopMeasurements".into());
             }
             ClientMessage::Done => {
                 (state.msg)(&format!("Serving complete for {}", addr));
 
                 return Ok(());
+            }
+            msg @ (ClientMessage::StopMeasurements
+            | ClientMessage::ScheduleLoads { .. }
+            | ClientMessage::LoadComplete { .. }
+            | ClientMessage::SendByte) => {
+                return Err(format!("Unexpected message {:?}", msg).into());
             }
         };
     }
