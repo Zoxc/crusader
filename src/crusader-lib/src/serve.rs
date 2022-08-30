@@ -293,6 +293,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                             break;
                         }
                         Err(ClientMessage::LoadComplete { stream }) => {
+                            println!("upload done {:?}", stream);
                             client_
                                 .uploads
                                 .lock()

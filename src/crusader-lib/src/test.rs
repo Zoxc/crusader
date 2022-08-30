@@ -425,6 +425,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
                     break;
                 }
                 ServerMessage::LoadComplete { stream } => {
+                    println!("download done {:?}", stream);
                     state
                         .downloads
                         .lock()
@@ -1076,6 +1077,8 @@ fn download_loaders(
                 )
                 .await
                 .unwrap();
+
+                println!("reading done");
 
                 done.store(true, Ordering::Release);
 
