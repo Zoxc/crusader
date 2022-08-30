@@ -969,7 +969,9 @@ fn download_loaders(
                     _ => panic!("Unexpected message {:?}", reply),
                 };
 
-                let stream = stream.into_inner();
+                let mut stream = stream.into_inner();
+
+                stream.write_u8(1).await.unwrap();
 
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes_ = bytes.clone();

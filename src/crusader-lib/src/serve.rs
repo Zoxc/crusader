@@ -7,6 +7,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpSocket, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
@@ -346,10 +347,12 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 send(&mut stream_tx, &ServerMessage::WaitingForLoad).await?;
 
-                let stream = stream_rx
+                let mut stream = stream_rx
                     .into_inner()
                     .reunite(stream_tx.into_inner())
                     .unwrap();
+
+                stream.write_u8(1).await.unwrap();
 
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes_ = bytes.clone();
