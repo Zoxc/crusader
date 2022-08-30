@@ -43,7 +43,7 @@ type Msg = Arc<dyn Fn(&str) + Send + Sync>;
 
 const MEASURE_DELAY: Duration = Duration::from_millis(50);
 
-pub(crate) const LOAD_EXIT_DELAY: Duration = Duration::from_secs(100);
+pub(crate) const LOAD_EXIT_DELAY: Duration = Duration::from_secs(10);
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy, PartialOrd, Ord)]
 enum TestState {
