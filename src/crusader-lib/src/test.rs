@@ -128,6 +128,8 @@ pub(crate) async fn write_data(
     tokio::spawn(async move {
         time::sleep_until(until).await;
 
+        println!("writing should stop");
+
         done.store(true, Ordering::Release);
     });
 
@@ -152,6 +154,8 @@ pub(crate) async fn write_data(
         yield_now().await;
     }
 
+    println!("writing done");
+
     Ok(())
 }
 
@@ -168,6 +172,8 @@ pub(crate) async fn read_data(
 
     tokio::spawn(async move {
         time::sleep_until(until).await;
+
+        println!("reading should stop");
 
         done.store(true, Ordering::Release);
     });

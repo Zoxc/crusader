@@ -404,6 +404,8 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 )
                 .await?;
 
+                println!("reading done");
+
                 done.store(true, Ordering::Release);
 
                 return Ok(());
