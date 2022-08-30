@@ -294,12 +294,16 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         }
                         Err(ClientMessage::LoadComplete { stream }) => {
                             println!("upload done {:?}", stream);
-                            client_
+                            let done = client_
                                 .uploads
                                 .lock()
                                 .get(&stream)
                                 .ok_or("Expected upload stream")?
-                                .store(true, Ordering::Release);
+                                .clone();
+                            tokio::spawn(async move {
+                                time::sleep(test::LOAD_EXIT_DELAY).await;
+                                done.store(true, Ordering::Release);
+                            });
                         }
                         Err(ClientMessage::ScheduleLoads { groups, delay }) => {
                             let reply = client_.schedule_loads(&state, groups, delay).await?;

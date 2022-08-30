@@ -41,6 +41,10 @@ use crate::protocol::{
 
 type Msg = Arc<dyn Fn(&str) + Send + Sync>;
 
+const MEASURE_DELAY: Duration = Duration::from_millis(50);
+
+pub(crate) const LOAD_EXIT_DELAY: Duration = Duration::from_secs(100);
+
 #[derive(PartialEq, Eq, Debug, Clone, Copy, PartialOrd, Ord)]
 enum TestState {
     Setup,
@@ -122,7 +126,7 @@ where
 }
 
 pub(crate) async fn write_data(
-    mut stream: TcpStream,
+    stream: TcpStream,
     data: &[u8],
     until: Instant,
 ) -> Result<(), Box<dyn Error>> {
@@ -140,10 +144,24 @@ pub(crate) async fn write_data(
     });
 
     loop {
-        match stream.write_all(data).await {
-            Ok(()) => (),
+        if let Ok(Err(err)) = time::timeout(Duration::from_millis(50), stream.writable()).await {
+            if err.kind() == std::io::ErrorKind::ConnectionReset
+                || err.kind() == std::io::ErrorKind::ConnectionAborted
+            {
+                break;
+            } else {
+                return Err(err.into());
+            }
+        }
+
+        if done_.load(Ordering::Acquire) {
+            break;
+        }
+        match stream.try_write(data) {
+            Ok(_) => (),
             Err(err) => {
-                if err.kind() == std::io::ErrorKind::ConnectionReset
+                if err.kind() == std::io::ErrorKind::WouldBlock {
+                } else if err.kind() == std::io::ErrorKind::ConnectionReset
                     || err.kind() == std::io::ErrorKind::ConnectionAborted
                 {
                     break;
@@ -151,10 +169,6 @@ pub(crate) async fn write_data(
                     return Err(err.into());
                 }
             }
-        }
-
-        if done_.load(Ordering::Acquire) {
-            break;
         }
 
         yield_now().await;
@@ -426,12 +440,11 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
                 }
                 ServerMessage::LoadComplete { stream } => {
                     println!("download done {:?}", stream);
-                    state
-                        .downloads
-                        .lock()
-                        .get(&stream)
-                        .unwrap()
-                        .store(true, Ordering::Release);
+                    let done = state.downloads.lock().get(&stream).unwrap().clone();
+                    tokio::spawn(async move {
+                        time::sleep(LOAD_EXIT_DELAY).await;
+                        done.store(true, Ordering::Release);
+                    });
                 }
                 ServerMessage::ScheduledLoads { groups: _, time } => {
                     let time = Duration::from_micros(time.wrapping_add(server_time_offset));
@@ -969,8 +982,6 @@ async fn wait_on_download_loaders(
         None => None,
     }
 }
-
-const MEASURE_DELAY: Duration = Duration::from_millis(50);
 
 fn download_loaders(
     state: Arc<State>,
