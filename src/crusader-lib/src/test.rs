@@ -298,8 +298,13 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
 
     let (state_tx, state_rx) = watch::channel((TestState::Setup, setup_start));
 
+    let all_loaders = Arc::new(Semaphore::new(0));
+    let mut loader_count = 0;
+
     if config.upload {
+        loader_count += config.streams;
         upload_loaders(
+            all_loaders.clone(),
             id,
             server,
             0,
@@ -312,7 +317,9 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
     }
 
     if config.both {
+        loader_count += config.streams;
         upload_loaders(
+            all_loaders.clone(),
             id,
             server,
             1,
@@ -325,7 +332,9 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
     }
 
     let download = config.download.then(|| {
+        loader_count += config.streams;
         download_loaders(
+            all_loaders.clone(),
             id,
             server,
             2,
@@ -337,7 +346,9 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
     });
 
     let both_download = config.both.then(|| {
+        loader_count += config.streams;
         download_loaders(
+            all_loaders.clone(),
             id,
             server,
             3,
@@ -349,6 +360,9 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
     });
 
     send(&mut control_tx, &ClientMessage::GetMeasurements).await?;
+
+    // Wait for all loaders to setup
+    let _ = all_loaders.acquire_many(loader_count as u32).await?;
 
     let upload_semaphore = Arc::new(Semaphore::new(0));
     let upload_semaphore_ = upload_semaphore.clone();
@@ -832,6 +846,7 @@ fn setup_loaders(
 }
 
 fn upload_loaders(
+    all_loaders: Arc<Semaphore>,
     id: u64,
     server: SocketAddr,
     group: u32,
@@ -846,6 +861,7 @@ fn upload_loaders(
     for (i, loader) in loaders.into_iter().enumerate() {
         let mut state_rx = state_rx.clone();
         let data = data.clone();
+        let all_loaders = all_loaders.clone();
         tokio::spawn(async move {
             let mut stream = loader.await.unwrap();
 
@@ -870,6 +886,8 @@ fn upload_loaders(
                 ServerMessage::WaitingForLoad => (),
                 _ => panic!("Unexpected message {:?}", reply),
             };
+
+            all_loaders.add_permits(1);
 
             let start = wait_for_state(&mut state_rx, state).await + MEASURE_DELAY + delay;
 
@@ -904,6 +922,7 @@ async fn wait_on_download_loaders(
 const MEASURE_DELAY: Duration = Duration::from_millis(50);
 
 fn download_loaders(
+    all_loaders: Arc<Semaphore>,
     id: u64,
     server: SocketAddr,
     group: u32,
@@ -921,6 +940,7 @@ fn download_loaders(
         .map(|(i, loader)| {
             let mut state_rx = state_rx.clone();
             let semaphore = semaphore.clone();
+            let all_loaders = all_loaders.clone();
 
             tokio::spawn(async move {
                 let mut stream = loader.await.unwrap();
@@ -956,6 +976,8 @@ fn download_loaders(
 
                 let done = Arc::new(AtomicBool::new(false));
                 let done_ = done.clone();
+
+                all_loaders.add_permits(1);
 
                 let start = wait_for_state(&mut state_rx, state).await + delay;
 

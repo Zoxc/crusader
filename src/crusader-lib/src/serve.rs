@@ -60,6 +60,26 @@ impl Client {
             .or_insert_with(|| watch::channel(None).0)
             .subscribe()
     }
+
+    async fn schedule_loads(
+        &self,
+        state: &State,
+        groups: Vec<u32>,
+        delay: u64,
+    ) -> Result<ServerMessage, Box<dyn Error>> {
+        let time = Instant::now() + Duration::from_micros(delay);
+        {
+            let loads = self.loads.lock();
+            for group in &groups {
+                loads.get(group).ok_or("Unknown group")?.send(Some(time))?;
+            }
+        }
+
+        Ok(ServerMessage::ScheduledLoads {
+            groups,
+            time: time.saturating_duration_since(state.started).as_micros() as u64,
+        })
+    }
 }
 
 struct State {
@@ -215,6 +235,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 let receiver = receiver.as_mut().ok_or("Not the main client")?;
 
                 let client = client.clone().ok_or("Not the main client")?;
+                let client_ = client.clone();
 
                 let done = Arc::new(AtomicBool::new(false));
                 let done_ = done.clone();
@@ -241,57 +262,44 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         pin_mut!(message);
 
                         select! {
-                            request = request => {
-                                match request? {
-                                    ClientMessage::StopMeasurements => None,
-                                    _ => {
-                                        Err("Closed early")?
-                                    }
-                                }
-                            },
-                            message = message => message,
+                            request = request => Err(request?),
+                            message = message => Ok(message),
                         }
                     };
 
-                    if let Some(message) = message {
-                        send(&mut stream_tx, &message).await?;
-                    } else {
-                        done.store(true, Ordering::Release);
-                        let overload = get_pings.await?;
-
-                        // Send pending messages
-                        while let Ok(message) = receiver.try_recv() {
+                    match message {
+                        Ok(Some(message)) => {
                             send(&mut stream_tx, &message).await?;
                         }
+                        Ok(None) | Err(ClientMessage::StopMeasurements) => {
+                            done.store(true, Ordering::Release);
+                            let overload = get_pings.await?;
 
-                        send(
-                            &mut stream_tx,
-                            &ServerMessage::MeasurementsDone { overload },
-                        )
-                        .await?;
-                        break;
+                            // Send pending messages
+                            while let Ok(message) = receiver.try_recv() {
+                                send(&mut stream_tx, &message).await?;
+                            }
+
+                            send(
+                                &mut stream_tx,
+                                &ServerMessage::MeasurementsDone { overload },
+                            )
+                            .await?;
+                            break;
+                        }
+                        Err(ClientMessage::ScheduleLoads { groups, delay }) => {
+                            let reply = client_.schedule_loads(&state, groups, delay).await?;
+                            send(&mut stream_tx, &reply).await?;
+                        }
+                        Err(msg) => {
+                            return Err(
+                                format!("Unexpected message during measurement {:?}", msg).into()
+                            )
+                        }
                     }
                 }
             }
-            ClientMessage::ScheduleLoads { groups, delay } => {
-                let time = Instant::now() + Duration::from_micros(delay);
-                let client = client.as_ref().ok_or("No associated client")?;
-                {
-                    let loads = client.loads.lock();
-                    for group in &groups {
-                        loads.get(group).ok_or("Unknown group")?.send(Some(time))?;
-                    }
-                }
 
-                send(
-                    &mut stream_tx,
-                    &ServerMessage::ScheduledLoads {
-                        groups,
-                        time: time.saturating_duration_since(state.started).as_micros() as u64,
-                    },
-                )
-                .await?;
-            }
             ClientMessage::LoadFromServer {
                 stream: test_stream,
                 duration,
@@ -397,13 +405,13 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 return Ok(());
             }
-            ClientMessage::StopMeasurements => {
-                return Err("Unexpected StopMeasurements".into());
-            }
             ClientMessage::Done => {
                 (state.msg)(&format!("Serving complete for {}", addr));
 
                 return Ok(());
+            }
+            msg @ (ClientMessage::StopMeasurements | ClientMessage::ScheduleLoads { .. }) => {
+                return Err(format!("Unexpected message {:?}", msg).into());
             }
         };
     }
