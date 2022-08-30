@@ -2,9 +2,11 @@ use bytes::{Bytes, BytesMut};
 use futures::future::FutureExt;
 use futures::{pin_mut, select, Sink, Stream};
 use futures::{stream, StreamExt};
+use parking_lot::Mutex;
 use rand::prelude::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
@@ -19,7 +21,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::join;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpStream, UdpSocket};
-use tokio::sync::mpsc::channel;
+use tokio::sync::mpsc::{channel, Sender};
 use tokio::sync::{oneshot, watch, Semaphore};
 use tokio::task::{self, yield_now, JoinHandle};
 use tokio::time::Instant;
@@ -56,6 +58,10 @@ enum TestState {
 #[derive(Debug)]
 struct ScheduledLoads {
     time: Instant,
+}
+
+struct State {
+    downloads: Mutex<HashMap<TestStream, Arc<AtomicBool>>>,
 }
 
 pub(crate) fn data() -> Vec<u8> {
@@ -154,6 +160,8 @@ pub(crate) async fn write_data(
         yield_now().await;
     }
 
+    std::mem::drop(stream);
+
     println!("writing done");
 
     Ok(())
@@ -164,10 +172,10 @@ pub(crate) async fn read_data(
     buffer: &mut [u8],
     bytes: &AtomicU64,
     until: Instant,
+    done: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn Error>> {
     stream.set_linger(Some(Duration::from_secs(0))).ok();
 
-    let done = Arc::new(AtomicBool::new(false));
     let done_ = done.clone();
 
     tokio::spawn(async move {
@@ -302,10 +310,16 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
 
     let estimated_duration = load_duration * loads + grace * 2;
 
+    let state = Arc::new(State {
+        downloads: Mutex::new(HashMap::new()),
+    });
+
     let (state_tx, state_rx) = watch::channel((TestState::Setup, setup_start));
 
     let all_loaders = Arc::new(Semaphore::new(0));
     let mut loader_count = 0;
+
+    let (upload_done_tx, mut upload_done_rx) = channel(config.streams as usize);
 
     if config.upload {
         loader_count += config.streams;
@@ -319,6 +333,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
             data.clone(),
             state_rx.clone(),
             TestState::LoadFromClient,
+            upload_done_tx.clone(),
         );
     }
 
@@ -334,12 +349,14 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
             data.clone(),
             state_rx.clone(),
             TestState::LoadFromBoth,
+            upload_done_tx.clone(),
         );
     }
 
     let download = config.download.then(|| {
         loader_count += config.streams;
         download_loaders(
+            state.clone(),
             all_loaders.clone(),
             id,
             server,
@@ -354,6 +371,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
     let both_download = config.both.then(|| {
         loader_count += config.streams;
         download_loaders(
+            state.clone(),
             all_loaders.clone(),
             id,
             server,
@@ -405,6 +423,14 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
                 ServerMessage::MeasurementsDone { overload } => {
                     overload_ = overload;
                     break;
+                }
+                ServerMessage::LoadComplete { stream } => {
+                    state
+                        .downloads
+                        .lock()
+                        .get(&stream)
+                        .unwrap()
+                        .store(true, Ordering::Release);
                 }
                 ServerMessage::ScheduledLoads { groups: _, time } => {
                     let time = Duration::from_micros(time.wrapping_add(server_time_offset));
@@ -484,6 +510,12 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
             .send((TestState::LoadFromClient, load.time))
             .unwrap();
         msg(&format!("Testing upload..."));
+
+        for _ in 0..config.streams {
+            let stream = upload_done_rx.recv().await.ok_or("Expected stream")?;
+            send(&mut control_tx, &ClientMessage::LoadComplete { stream }).await?;
+        }
+
         let _ = upload_semaphore
             .acquire_many(loading_streams)
             .await
@@ -505,6 +537,12 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         let load = scheduled_load_rx.recv().await.unwrap();
         state_tx.send((TestState::LoadFromBoth, load.time)).unwrap();
         msg(&format!("Testing both download and upload..."));
+
+        for _ in 0..config.streams {
+            let stream = upload_done_rx.recv().await.ok_or("Expected stream")?;
+            send(&mut control_tx, &ClientMessage::LoadComplete { stream }).await?;
+        }
+
         let _ = semaphore.acquire_many(loading_streams).await.unwrap();
         let _ = both_upload_semaphore
             .acquire_many(loading_streams)
@@ -861,6 +899,7 @@ fn upload_loaders(
     data: Arc<Vec<u8>>,
     state_rx: watch::Receiver<(TestState, Instant)>,
     state: TestState,
+    done: Sender<TestStream>,
 ) {
     let loaders = setup_loaders(id, server, config.streams);
 
@@ -868,18 +907,21 @@ fn upload_loaders(
         let mut state_rx = state_rx.clone();
         let data = data.clone();
         let all_loaders = all_loaders.clone();
+        let done = done.clone();
         tokio::spawn(async move {
             let mut stream = loader.await.unwrap();
 
             let delay = config.stream_stagger * i as u32 + stagger_offset;
 
+            let test_stream = TestStream {
+                group,
+                id: i as u32,
+            };
+
             send(
                 &mut stream,
                 &ClientMessage::LoadFromClient {
-                    stream: TestStream {
-                        group,
-                        id: i as u32,
-                    },
+                    stream: test_stream,
                     delay: delay.as_micros() as u64,
                     duration: (config.load_duration + MEASURE_DELAY).as_micros() as u64,
                     bandwidth_interval: config.bandwidth_interval.as_micros() as u64,
@@ -906,6 +948,8 @@ fn upload_loaders(
             )
             .await
             .unwrap();
+
+            done.send(test_stream).await.unwrap();
         });
     }
 }
@@ -928,6 +972,7 @@ async fn wait_on_download_loaders(
 const MEASURE_DELAY: Duration = Duration::from_millis(50);
 
 fn download_loaders(
+    state: Arc<State>,
     all_loaders: Arc<Semaphore>,
     id: u64,
     server: SocketAddr,
@@ -935,7 +980,7 @@ fn download_loaders(
     config: Config,
     setup_start: Instant,
     state_rx: watch::Receiver<(TestState, Instant)>,
-    state: TestState,
+    test_state: TestState,
 ) -> (Arc<Semaphore>, Vec<JoinHandle<Vec<(u64, u64)>>>) {
     let semaphore = Arc::new(Semaphore::new(0));
     let loaders = setup_loaders(id, server, config.streams);
@@ -945,6 +990,7 @@ fn download_loaders(
         .enumerate()
         .map(|(i, loader)| {
             let mut state_rx = state_rx.clone();
+            let state = state.clone();
             let semaphore = semaphore.clone();
             let all_loaders = all_loaders.clone();
 
@@ -956,13 +1002,15 @@ fn download_loaders(
 
                 let delay = config.stream_stagger * i as u32;
 
+                let test_stream = TestStream {
+                    group,
+                    id: i as u32,
+                };
+
                 send(
                     &mut stream,
                     &ClientMessage::LoadFromServer {
-                        stream: TestStream {
-                            group,
-                            id: i as u32,
-                        },
+                        stream: test_stream,
                         duration: config.load_duration.as_micros() as u64,
                         delay: (MEASURE_DELAY + delay).as_micros() as u64,
                     },
@@ -979,6 +1027,13 @@ fn download_loaders(
 
                 stream.write_u8(1).await.unwrap();
 
+                let reading_done = Arc::new(AtomicBool::new(false));
+
+                state
+                    .downloads
+                    .lock()
+                    .insert(test_stream, reading_done.clone());
+
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes_ = bytes.clone();
 
@@ -987,7 +1042,7 @@ fn download_loaders(
 
                 all_loaders.add_permits(1);
 
-                let start = wait_for_state(&mut state_rx, state).await + delay;
+                let start = wait_for_state(&mut state_rx, test_state).await + delay;
 
                 time::sleep_until(start).await;
 
@@ -1017,6 +1072,7 @@ fn download_loaders(
                     &mut buffer,
                     &bytes,
                     start + MEASURE_DELAY + config.load_duration,
+                    reading_done,
                 )
                 .await
                 .unwrap();

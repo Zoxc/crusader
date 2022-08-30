@@ -25,7 +25,7 @@ impl Hello {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct TestStream {
     pub group: u32,
     pub id: u32,
@@ -51,6 +51,9 @@ pub enum ServerMessage {
     },
     MeasurementsDone {
         overload: bool,
+    },
+    LoadComplete {
+        stream: TestStream,
     },
     ScheduledLoads {
         groups: Vec<u32>,
@@ -78,6 +81,9 @@ pub enum ClientMessage {
         stream: TestStream,
         duration: u64,
         delay: u64,
+    },
+    LoadComplete {
+        stream: TestStream,
     },
     GetMeasurements,
     StopMeasurements,

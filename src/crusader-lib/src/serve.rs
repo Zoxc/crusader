@@ -17,7 +17,9 @@ use tokio::task::{self};
 use tokio::{signal, time, time::Instant};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-use crate::protocol::{self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage};
+use crate::protocol::{
+    self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage, TestStream,
+};
 use crate::test;
 
 use std::thread;
@@ -37,6 +39,7 @@ struct Client {
     rx_latency: Mutex<Receiver<LatencyMeasure>>,
     overload: AtomicBool,
     loads: Mutex<HashMap<u32, watch::Sender<Option<Instant>>>>,
+    uploads: Mutex<HashMap<TestStream, Arc<AtomicBool>>>,
 }
 
 impl Client {
@@ -159,6 +162,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                                 rx_latency: Mutex::new(rx_latency),
                                 overload: AtomicBool::new(false),
                                 loads: Mutex::new(HashMap::new()),
+                                uploads: Mutex::new(HashMap::new()),
                             });
                             *data = Some(new_client.clone());
 
@@ -288,6 +292,14 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                             .await?;
                             break;
                         }
+                        Err(ClientMessage::LoadComplete { stream }) => {
+                            client_
+                                .uploads
+                                .lock()
+                                .get(&stream)
+                                .ok_or("Expected upload stream")?
+                                .store(true, Ordering::Release);
+                        }
                         Err(ClientMessage::ScheduleLoads { groups, delay }) => {
                             let reply = client_.schedule_loads(&state, groups, delay).await?;
                             send(&mut stream_tx, &reply).await?;
@@ -330,7 +342,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 client
                     .tx_message
-                    .send(ServerMessage::MeasureStreamDone {
+                    .send(ServerMessage::LoadComplete {
                         stream: test_stream,
                     })
                     .ok();
@@ -353,6 +365,13 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     .unwrap();
 
                 stream.write_u8(1).await.unwrap();
+
+                let reading_done = Arc::new(AtomicBool::new(false));
+
+                client
+                    .uploads
+                    .lock()
+                    .insert(test_stream, reading_done.clone());
 
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes_ = bytes.clone();
@@ -401,6 +420,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     &mut buffer,
                     &bytes,
                     start + Duration::from_micros(duration),
+                    reading_done,
                 )
                 .await?;
 
@@ -415,7 +435,9 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 return Ok(());
             }
-            msg @ (ClientMessage::StopMeasurements | ClientMessage::ScheduleLoads { .. }) => {
+            msg @ (ClientMessage::StopMeasurements
+            | ClientMessage::ScheduleLoads { .. }
+            | ClientMessage::LoadComplete { .. }) => {
                 return Err(format!("Unexpected message {:?}", msg).into());
             }
         };
