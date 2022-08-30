@@ -183,7 +183,7 @@ pub(crate) async fn read_data(
 
         println!("reading should stop");
 
-        done.store(true, Ordering::Release);
+        //done.store(true, Ordering::Release);
     });
 
     loop {
@@ -199,7 +199,7 @@ pub(crate) async fn read_data(
 
         loop {
             if done_.load(Ordering::Acquire) {
-                //return Ok(());
+                return Ok(());
             }
 
             match stream.try_read(buffer) {
