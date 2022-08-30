@@ -13,14 +13,16 @@ use std::{
     io::Cursor,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::io::AsyncWriteExt;
 use tokio::join;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpStream, UdpSocket};
+use tokio::sync::mpsc::channel;
 use tokio::sync::{oneshot, watch, Semaphore};
 use tokio::task::{self, yield_now, JoinHandle};
+use tokio::time::Instant;
 use tokio::{
     net::{self},
     time,
@@ -49,6 +51,11 @@ enum TestState {
     Grace4,
     End,
     EndPingRecv,
+}
+
+#[derive(Debug)]
+struct ScheduledLoads {
+    time: Instant,
 }
 
 pub(crate) fn data() -> Vec<u8> {
@@ -111,7 +118,7 @@ where
 pub(crate) async fn write_data(
     mut stream: TcpStream,
     data: &[u8],
-    duration: Duration,
+    until: Instant,
 ) -> Result<(), Box<dyn Error>> {
     stream.set_linger(Some(Duration::from_secs(0))).ok();
 
@@ -119,7 +126,7 @@ pub(crate) async fn write_data(
     let done_ = done.clone();
 
     tokio::spawn(async move {
-        time::sleep(duration).await;
+        time::sleep_until(until).await;
 
         done.store(true, Ordering::Release);
     });
@@ -152,7 +159,7 @@ pub(crate) async fn read_data(
     stream: TcpStream,
     buffer: &mut [u8],
     bytes: &AtomicU64,
-    duration: Duration,
+    until: Instant,
 ) -> Result<(), Box<dyn Error>> {
     stream.set_linger(Some(Duration::from_secs(0))).ok();
 
@@ -160,7 +167,7 @@ pub(crate) async fn read_data(
     let done_ = done.clone();
 
     tokio::spawn(async move {
-        time::sleep(duration).await;
+        time::sleep_until(until).await;
 
         done.store(true, Ordering::Release);
     });
@@ -178,7 +185,6 @@ pub(crate) async fn read_data(
 
         loop {
             if done_.load(Ordering::Acquire) {
-                println!("Done reading! {:x}", &stream as *const TcpStream as usize);
                 return Ok(());
             }
 
@@ -290,7 +296,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
 
     let estimated_duration = load_duration * loads + grace * 2;
 
-    let (state_tx, state_rx) = watch::channel(TestState::Setup);
+    let (state_tx, state_rx) = watch::channel((TestState::Setup, setup_start));
 
     if config.upload {
         upload_loaders(
@@ -349,6 +355,8 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
     let both_upload_semaphore = Arc::new(Semaphore::new(0));
     let both_upload_semaphore_ = both_upload_semaphore.clone();
 
+    let (scheduled_load_tx, mut scheduled_load_rx) = channel(4);
+
     let measures = tokio::spawn(async move {
         let mut bandwidth = Vec::new();
         let mut latencies = Vec::new();
@@ -377,6 +385,15 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
                 ServerMessage::MeasurementsDone { overload } => {
                     overload_ = overload;
                     break;
+                }
+                ServerMessage::ScheduledLoads { groups: _, time } => {
+                    let time = Duration::from_micros(time.wrapping_add(server_time_offset));
+                    scheduled_load_tx
+                        .send(ScheduledLoads {
+                            time: setup_start + time,
+                        })
+                        .await
+                        .unwrap()
                 }
                 _ => panic!("Unexpected message {:?}", reply),
             };
@@ -408,32 +425,65 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
 
     let start = Instant::now();
 
-    state_tx.send(TestState::Grace1).unwrap();
+    state_tx.send((TestState::Grace1, start)).unwrap();
     time::sleep(grace).await;
 
+    let load_delay = (Duration::from_millis(50) + latency).as_micros() as u64;
+
     if let Some((semaphore, _)) = download.as_ref() {
-        state_tx.send(TestState::LoadFromServer).unwrap();
+        send(
+            &mut control_tx,
+            &ClientMessage::ScheduleLoads {
+                groups: vec![2],
+                delay: load_delay,
+            },
+        )
+        .await?;
+        let load = scheduled_load_rx.recv().await.unwrap();
+        state_tx
+            .send((TestState::LoadFromServer, load.time))
+            .unwrap();
         msg(&format!("Testing download..."));
         let _ = semaphore.acquire_many(loading_streams).await.unwrap();
 
-        state_tx.send(TestState::Grace2).unwrap();
+        state_tx.send((TestState::Grace2, Instant::now())).unwrap();
         time::sleep(grace).await;
     }
 
     if config.upload {
-        state_tx.send(TestState::LoadFromClient).unwrap();
+        send(
+            &mut control_tx,
+            &ClientMessage::ScheduleLoads {
+                groups: vec![0],
+                delay: load_delay,
+            },
+        )
+        .await?;
+        let load = scheduled_load_rx.recv().await.unwrap();
+        state_tx
+            .send((TestState::LoadFromClient, load.time))
+            .unwrap();
         msg(&format!("Testing upload..."));
         let _ = upload_semaphore
             .acquire_many(loading_streams)
             .await
             .unwrap();
 
-        state_tx.send(TestState::Grace3).unwrap();
+        state_tx.send((TestState::Grace3, Instant::now())).unwrap();
         time::sleep(grace).await;
     }
 
     if let Some((semaphore, _)) = both_download.as_ref() {
-        state_tx.send(TestState::LoadFromBoth).unwrap();
+        send(
+            &mut control_tx,
+            &ClientMessage::ScheduleLoads {
+                groups: vec![1, 3],
+                delay: load_delay,
+            },
+        )
+        .await?;
+        let load = scheduled_load_rx.recv().await.unwrap();
+        state_tx.send((TestState::LoadFromBoth, load.time)).unwrap();
         msg(&format!("Testing both download and upload..."));
         let _ = semaphore.acquire_many(loading_streams).await.unwrap();
         let _ = both_upload_semaphore
@@ -441,15 +491,17 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
             .await
             .unwrap();
 
-        state_tx.send(TestState::Grace4).unwrap();
+        state_tx.send((TestState::Grace4, Instant::now())).unwrap();
         time::sleep(grace).await;
     }
 
-    state_tx.send(TestState::End).unwrap();
+    state_tx.send((TestState::End, Instant::now())).unwrap();
 
     // Wait for pings to return
     time::sleep(Duration::from_millis(500)).await;
-    state_tx.send(TestState::EndPingRecv).unwrap();
+    state_tx
+        .send((TestState::EndPingRecv, Instant::now()))
+        .unwrap();
 
     let duration = start.elapsed();
 
@@ -786,7 +838,7 @@ fn upload_loaders(
     config: Config,
     stagger_offset: Duration,
     data: Arc<Vec<u8>>,
-    state_rx: watch::Receiver<TestState>,
+    state_rx: watch::Receiver<(TestState, Instant)>,
     state: TestState,
 ) {
     let loaders = setup_loaders(id, server, config.streams);
@@ -797,9 +849,7 @@ fn upload_loaders(
         tokio::spawn(async move {
             let mut stream = loader.await.unwrap();
 
-            wait_for_state(&mut state_rx, state).await;
-
-            time::sleep(config.stream_stagger * i as u32 + stagger_offset).await;
+            let delay = config.stream_stagger * i as u32 + stagger_offset;
 
             send(
                 &mut stream,
@@ -808,16 +858,30 @@ fn upload_loaders(
                         group,
                         id: i as u32,
                     },
-                    duration: config.load_duration.as_micros() as u64,
+                    delay: delay.as_micros() as u64,
+                    duration: (config.load_duration + MEASURE_DELAY).as_micros() as u64,
                     bandwidth_interval: config.bandwidth_interval.as_micros() as u64,
                 },
             )
             .await
             .unwrap();
+            let reply: ServerMessage = receive(&mut stream).await.unwrap();
+            match reply {
+                ServerMessage::WaitingForLoad => (),
+                _ => panic!("Unexpected message {:?}", reply),
+            };
 
-            write_data(stream.into_inner(), data.as_ref(), config.load_duration)
-                .await
-                .unwrap();
+            let start = wait_for_state(&mut state_rx, state).await + MEASURE_DELAY + delay;
+
+            time::sleep_until(start).await;
+
+            write_data(
+                stream.into_inner(),
+                data.as_ref(),
+                start + config.load_duration,
+            )
+            .await
+            .unwrap();
         });
     }
 }
@@ -837,13 +901,15 @@ async fn wait_on_download_loaders(
     }
 }
 
+const MEASURE_DELAY: Duration = Duration::from_millis(50);
+
 fn download_loaders(
     id: u64,
     server: SocketAddr,
     group: u32,
     config: Config,
     setup_start: Instant,
-    state_rx: watch::Receiver<TestState>,
+    state_rx: watch::Receiver<(TestState, Instant)>,
     state: TestState,
 ) -> (Arc<Semaphore>, Vec<JoinHandle<Vec<(u64, u64)>>>) {
     let semaphore = Arc::new(Semaphore::new(0));
@@ -862,9 +928,7 @@ fn download_loaders(
                 let mut buffer = Vec::with_capacity(512 * 1024);
                 buffer.extend((0..buffer.capacity()).map(|_| 0));
 
-                wait_for_state(&mut state_rx, state).await;
-
-                time::sleep(config.stream_stagger * i as u32).await;
+                let delay = config.stream_stagger * i as u32;
 
                 send(
                     &mut stream,
@@ -874,10 +938,16 @@ fn download_loaders(
                             id: i as u32,
                         },
                         duration: config.load_duration.as_micros() as u64,
+                        delay: (MEASURE_DELAY + delay).as_micros() as u64,
                     },
                 )
                 .await
                 .unwrap();
+                let reply: ServerMessage = receive(&mut stream).await.unwrap();
+                match reply {
+                    ServerMessage::WaitingForLoad => (),
+                    _ => panic!("Unexpected message {:?}", reply),
+                };
 
                 let stream = stream.into_inner();
 
@@ -886,6 +956,10 @@ fn download_loaders(
 
                 let done = Arc::new(AtomicBool::new(false));
                 let done_ = done.clone();
+
+                let start = wait_for_state(&mut state_rx, state).await + delay;
+
+                time::sleep_until(start).await;
 
                 let measures = tokio::spawn(async move {
                     let mut measures = Vec::new();
@@ -908,9 +982,14 @@ fn download_loaders(
                     measures
                 });
 
-                read_data(stream, &mut buffer, &bytes, config.load_duration)
-                    .await
-                    .unwrap();
+                read_data(
+                    stream,
+                    &mut buffer,
+                    &bytes,
+                    start + MEASURE_DELAY + config.load_duration,
+                )
+                .await
+                .unwrap();
 
                 done.store(true, Ordering::Release);
 
@@ -923,10 +1002,16 @@ fn download_loaders(
     (semaphore, loaders)
 }
 
-async fn wait_for_state(state_rx: &mut watch::Receiver<TestState>, state: TestState) {
+async fn wait_for_state(
+    state_rx: &mut watch::Receiver<(TestState, Instant)>,
+    state: TestState,
+) -> Instant {
     loop {
-        if *state_rx.borrow_and_update() == state {
-            break;
+        {
+            let current = state_rx.borrow_and_update();
+            if current.0 == state {
+                return current.1;
+            }
         }
         state_rx.changed().await.unwrap();
     }
@@ -935,7 +1020,7 @@ async fn wait_for_state(state_rx: &mut watch::Receiver<TestState>, state: TestSt
 async fn ping_send(
     mut ping_index: u64,
     id: u64,
-    state_rx: watch::Receiver<TestState>,
+    state_rx: watch::Receiver<(TestState, Instant)>,
     setup_start: Instant,
     socket: Arc<UdpSocket>,
     interval: Duration,
@@ -952,7 +1037,7 @@ async fn ping_send(
     loop {
         interval.tick().await;
 
-        if *state_rx.borrow() >= TestState::End {
+        if state_rx.borrow().0 >= TestState::End {
             break;
         }
 
@@ -978,7 +1063,7 @@ async fn ping_send(
 }
 
 async fn ping_recv(
-    mut state_rx: watch::Receiver<TestState>,
+    mut state_rx: watch::Receiver<(TestState, Instant)>,
     setup_start: Instant,
     socket: Arc<UdpSocket>,
     interval: Duration,

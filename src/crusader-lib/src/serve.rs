@@ -1,18 +1,19 @@
 use futures::{pin_mut, select, FutureExt};
 use parking_lot::Mutex;
 use socket2::{Domain, Protocol, Socket};
+use std::collections::HashMap;
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
-use std::{sync::Arc, time::Instant};
 use tokio::net::{TcpListener, TcpSocket, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tokio::task::{self};
-use tokio::{signal, time};
+use tokio::{signal, time, time::Instant};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::protocol::{self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage};
@@ -34,6 +35,7 @@ struct Client {
     tx_latency: Sender<LatencyMeasure>,
     rx_latency: Mutex<Receiver<LatencyMeasure>>,
     overload: AtomicBool,
+    loads: Mutex<HashMap<u32, watch::Sender<Option<Instant>>>>,
 }
 
 impl Client {
@@ -49,6 +51,14 @@ impl Client {
         self.tx_message
             .send(ServerMessage::LatencyMeasures(measures))
             .ok();
+    }
+
+    fn load_waiter(&self, group: u32) -> watch::Receiver<Option<Instant>> {
+        self.loads
+            .lock()
+            .entry(group)
+            .or_insert_with(|| watch::channel(None).0)
+            .subscribe()
     }
 }
 
@@ -127,6 +137,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                                 tx_latency,
                                 rx_latency: Mutex::new(rx_latency),
                                 overload: AtomicBool::new(false),
+                                loads: Mutex::new(HashMap::new()),
                             });
                             *data = Some(new_client.clone());
 
@@ -262,21 +273,49 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     }
                 }
             }
+            ClientMessage::ScheduleLoads { groups, delay } => {
+                let time = Instant::now() + Duration::from_micros(delay);
+                let client = client.as_ref().ok_or("No associated client")?;
+                {
+                    let loads = client.loads.lock();
+                    for group in &groups {
+                        loads.get(group).ok_or("Unknown group")?.send(Some(time))?;
+                    }
+                }
+
+                send(
+                    &mut stream_tx,
+                    &ServerMessage::ScheduledLoads {
+                        groups,
+                        time: time.saturating_duration_since(state.started).as_micros() as u64,
+                    },
+                )
+                .await?;
+            }
             ClientMessage::LoadFromServer {
                 stream: test_stream,
                 duration,
+                delay,
             } => {
                 let client = client.ok_or("No associated client")?;
+
+                send(&mut stream_tx, &ServerMessage::WaitingForLoad).await?;
 
                 let stream = stream_tx
                     .into_inner()
                     .reunite(stream_rx.into_inner())
                     .unwrap();
 
+                let mut waiter = client.load_waiter(test_stream.group);
+                waiter.changed().await?;
+                let start = waiter.borrow().ok_or("Expected time")? + Duration::from_micros(delay);
+
+                time::sleep_until(start).await;
+
                 test::write_data(
                     stream,
                     state.dummy_data.as_ref(),
-                    Duration::from_micros(duration),
+                    start + Duration::from_micros(duration),
                 )
                 .await?;
 
@@ -292,9 +331,12 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             ClientMessage::LoadFromClient {
                 stream: test_stream,
                 duration,
+                delay,
                 bandwidth_interval,
             } => {
                 let client = client.ok_or("No associated client")?;
+
+                send(&mut stream_tx, &ServerMessage::WaitingForLoad).await?;
 
                 let stream = stream_rx
                     .into_inner()
@@ -305,6 +347,12 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 let bytes_ = bytes.clone();
                 let done = Arc::new(AtomicBool::new(false));
                 let done_ = done.clone();
+
+                let mut waiter = client.load_waiter(test_stream.group);
+                waiter.changed().await?;
+                let start = waiter.borrow().ok_or("Expected time")? + Duration::from_micros(delay);
+
+                time::sleep_until(start).await;
 
                 tokio::spawn(async move {
                     let mut interval = time::interval(Duration::from_micros(bandwidth_interval));
@@ -337,8 +385,13 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     }
                 });
 
-                test::read_data(stream, &mut buffer, &bytes, Duration::from_micros(duration))
-                    .await?;
+                test::read_data(
+                    stream,
+                    &mut buffer,
+                    &bytes,
+                    start + Duration::from_micros(duration),
+                )
+                .await?;
 
                 done.store(true, Ordering::Release);
 

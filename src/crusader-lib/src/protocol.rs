@@ -52,6 +52,11 @@ pub enum ServerMessage {
     MeasurementsDone {
         overload: bool,
     },
+    ScheduledLoads {
+        groups: Vec<u32>,
+        time: u64,
+    },
+    WaitingForLoad,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -59,14 +64,20 @@ pub enum ClientMessage {
     NewClient,
     Associate(u64),
     Done,
+    ScheduleLoads {
+        groups: Vec<u32>,
+        delay: u64,
+    },
     LoadFromClient {
         stream: TestStream,
         duration: u64,
+        delay: u64,
         bandwidth_interval: u64,
     },
     LoadFromServer {
         stream: TestStream,
         duration: u64,
+        delay: u64,
     },
     GetMeasurements,
     StopMeasurements,
