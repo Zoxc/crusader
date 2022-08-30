@@ -185,7 +185,7 @@ pub(crate) async fn read_data(
 
         loop {
             if done_.load(Ordering::Acquire) {
-                return Ok(());
+                //return Ok(());
             }
 
             match stream.try_read(buffer) {
