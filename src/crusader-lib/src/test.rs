@@ -175,6 +175,8 @@ pub(crate) async fn write_data(
         yield_now().await;
     }
 
+    //stream.writable().await?;
+
     std::mem::drop(stream);
 
     println!("writing done");

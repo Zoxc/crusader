@@ -325,6 +325,8 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             } => {
                 let client = client.ok_or("No associated client")?;
 
+                // TODO: Wait for the socket to become readable for the dummy byte
+
                 send(&mut stream_tx, &ServerMessage::WaitingForLoad).await?;
 
                 let stream = stream_tx
@@ -429,7 +431,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 )
                 .await?;
 
-                println!("reading done {:?}", test_stream);
+                println!("reading done {:?} timeout:{:?}", test_stream, timeout);
 
                 done_tx
                     .send(timeout)
