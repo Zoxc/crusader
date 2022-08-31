@@ -85,6 +85,7 @@ impl RawResultV0 {
             stream_groups: self.stream_groups.clone(),
             pings: self.pings.iter().map(|ping| ping.to_v1()).collect(),
             server_overload: false,
+            load_termination_timeout: false,
         }
     }
 }
@@ -167,6 +168,8 @@ pub struct RawResult {
     pub generated_by: String,
     pub config: RawConfig,
     pub ipv6: bool,
+    #[serde(default)]
+    pub load_termination_timeout: bool, // Added in V2
     #[serde(default)]
     pub server_overload: bool, // Added in V2
     pub server_latency: Duration,

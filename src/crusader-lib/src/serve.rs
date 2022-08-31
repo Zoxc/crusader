@@ -380,8 +380,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes_ = bytes.clone();
-                let done = Arc::new(AtomicBool::new(false));
-                let done_ = done.clone();
+                let (done_tx, mut done_rx) = oneshot::channel();
 
                 let mut waiter = client.load_waiter(test_stream.group);
                 waiter.changed().await?;
@@ -408,11 +407,12 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                             })
                             .ok();
 
-                        if done_.load(Ordering::Acquire) {
+                        if let Ok(timeout) = done_rx.try_recv() {
                             client
                                 .tx_message
                                 .send(ServerMessage::MeasureStreamDone {
                                     stream: test_stream,
+                                    timeout,
                                 })
                                 .ok();
                             break;
@@ -420,7 +420,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     }
                 });
 
-                test::read_data(
+                let timeout = test::read_data(
                     stream,
                     &mut buffer,
                     &bytes,
@@ -429,9 +429,11 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 )
                 .await?;
 
-                println!("reading done");
+                println!("reading done {:?}", test_stream);
 
-                done.store(true, Ordering::Release);
+                done_tx
+                    .send(timeout)
+                    .map_err(|_| "Unable to signal reading completion")?;
 
                 return Ok(());
             }

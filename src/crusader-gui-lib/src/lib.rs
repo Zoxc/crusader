@@ -699,6 +699,11 @@ impl Tester {
             ui.separator();
         }
 
+        if result.result.raw_result.load_termination_timeout {
+            ui.label("Warning: Load termination timed out. There may be residual untracked traffic in the background.");
+            ui.separator();
+        }
+
         ui.allocate_space(vec2(1.0, 15.0));
 
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {

@@ -43,7 +43,7 @@ type Msg = Arc<dyn Fn(&str) + Send + Sync>;
 
 const MEASURE_DELAY: Duration = Duration::from_millis(50);
 
-pub(crate) const LOAD_EXIT_DELAY: Duration = Duration::from_secs(10);
+pub(crate) const LOAD_EXIT_DELAY: Duration = Duration::from_secs(20);
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy, PartialOrd, Ord)]
 enum TestState {
@@ -66,6 +66,7 @@ struct ScheduledLoads {
 
 struct State {
     downloads: Mutex<HashMap<TestStream, Arc<AtomicBool>>>,
+    timeout: AtomicBool,
 }
 
 pub(crate) fn data() -> Vec<u8> {
@@ -185,27 +186,26 @@ pub(crate) async fn read_data(
     stream: TcpStream,
     buffer: &mut [u8],
     bytes: &AtomicU64,
-    until: Instant,
+    _until: Instant,
     done: Arc<AtomicBool>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<bool, Box<dyn Error>> {
     stream.set_linger(Some(Duration::from_secs(0))).ok();
 
     let done_ = done.clone();
 
-    tokio::spawn(async move {
-        time::sleep_until(until).await;
-
-        println!("reading should stop");
-
-        //done.store(true, Ordering::Release);
-    });
+    /*
+       tokio::spawn(async move {
+           time::sleep_until(until).await;
+            done.store(true, Ordering::Release);
+       });
+    */
 
     loop {
         if let Ok(Err(err)) = time::timeout(Duration::from_millis(50), stream.readable()).await {
             if err.kind() == std::io::ErrorKind::ConnectionReset
                 || err.kind() == std::io::ErrorKind::ConnectionAborted
             {
-                return Ok(());
+                return Ok(false);
             } else {
                 return Err(err.into());
             }
@@ -213,11 +213,11 @@ pub(crate) async fn read_data(
 
         loop {
             if done_.load(Ordering::Acquire) {
-                return Ok(());
+                return Ok(true);
             }
 
             match stream.try_read(buffer) {
-                Ok(0) => return Ok(()),
+                Ok(0) => return Ok(false),
                 Ok(n) => {
                     bytes.fetch_add(n as u64, Ordering::Release);
                     yield_now().await;
@@ -228,7 +228,7 @@ pub(crate) async fn read_data(
                     } else if err.kind() == std::io::ErrorKind::ConnectionReset
                         || err.kind() == std::io::ErrorKind::ConnectionAborted
                     {
-                        return Ok(());
+                        return Ok(false);
                     } else {
                         return Err(err.into());
                     }
@@ -326,6 +326,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
 
     let state = Arc::new(State {
         downloads: Mutex::new(HashMap::new()),
+        timeout: AtomicBool::new(false),
     });
 
     let (state_tx, state_rx) = watch::channel((TestState::Setup, setup_start));
@@ -409,6 +410,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
 
     let (scheduled_load_tx, mut scheduled_load_rx) = channel(4);
 
+    let state_ = state.clone();
     let measures = tokio::spawn(async move {
         let mut bandwidth = Vec::new();
         let mut latencies = Vec::new();
@@ -417,7 +419,11 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         loop {
             let reply: ServerMessage = receive(&mut control_rx).await.unwrap();
             match reply {
-                ServerMessage::MeasureStreamDone { stream } => {
+                ServerMessage::MeasureStreamDone { stream, timeout } => {
+                    if timeout {
+                        state_.timeout.store(true, Ordering::SeqCst);
+                    }
+
                     if stream.group == 0 {
                         upload_semaphore_.add_permits(1);
                     } else if stream.group == 1 {
@@ -440,7 +446,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
                 }
                 ServerMessage::LoadComplete { stream } => {
                     println!("download done {:?}", stream);
-                    let done = state.downloads.lock().get(&stream).unwrap().clone();
+                    let done = state_.downloads.lock().get(&stream).unwrap().clone();
                     tokio::spawn(async move {
                         time::sleep(LOAD_EXIT_DELAY).await;
                         done.store(true, Ordering::Release);
@@ -529,11 +535,13 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
             let stream = upload_done_rx.recv().await.ok_or("Expected stream")?;
             send(&mut control_tx, &ClientMessage::LoadComplete { stream }).await?;
         }
+        println!("Upload loaders done");
 
         let _ = upload_semaphore
             .acquire_many(loading_streams)
             .await
             .unwrap();
+        println!("Upload readers done");
 
         state_tx.send((TestState::Grace3, Instant::now())).unwrap();
         time::sleep(grace).await;
@@ -694,6 +702,14 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         ));
     }
 
+    let load_termination_timeout = state.timeout.load(Ordering::SeqCst);
+
+    if load_termination_timeout {
+        msg(&format!(
+            "Warning: Load termination timed out. There may be residual untracked traffic in the background."
+        ));
+    }
+
     let start = start.duration_since(setup_start);
 
     let raw_result = RawResult {
@@ -701,6 +717,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         generated_by: format!("Crusader {}", env!("CARGO_PKG_VERSION")),
         config: raw_config,
         ipv6: server.is_ipv6(),
+        load_termination_timeout,
         server_overload,
         server_latency: latency,
         start,
@@ -1079,7 +1096,7 @@ fn download_loaders(
                     measures
                 });
 
-                read_data(
+                let timeout = read_data(
                     stream,
                     &mut buffer,
                     &bytes,
@@ -1088,6 +1105,10 @@ fn download_loaders(
                 )
                 .await
                 .unwrap();
+
+                if timeout {
+                    state.timeout.store(true, Ordering::SeqCst);
+                }
 
                 println!("reading done");
 

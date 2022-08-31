@@ -48,6 +48,7 @@ pub enum ServerMessage {
     },
     MeasureStreamDone {
         stream: TestStream,
+        timeout: bool,
     },
     MeasurementsDone {
         overload: bool,
