@@ -7,7 +7,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpSocket, TcpStream, UdpSocket};
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
@@ -111,6 +111,8 @@ impl<F: Fn()> Drop for OnDrop<F> {
 }
 
 async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Error>> {
+    stream.set_nodelay(true)?;
+
     let addr = stream.peer_addr()?;
 
     let (rx, tx) = stream.into_split();
@@ -322,16 +324,42 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             } => {
                 let client = client.ok_or("No associated client")?;
 
-                // TODO: Wait for the socket to become readable for the dummy byte
+                let mut stream_rx = stream_rx.into_inner();
+
+                stream_rx.readable().await?;
+
+                println!("sending WaitingForByte");
+
+                send(&mut stream_tx, &ServerMessage::WaitingForByte).await?;
+
+                println!("waiting for readable");
+
+                stream_rx.readable().await?;
+
+                println!("waiting for byte");
+
+                println!("waiting for byte peek {:?}", stream_rx.peek(&mut [0]).await);
+                stream_rx.read_u8().await?;
+
+                println!("waiting for byte2");
+                stream_rx.read_u8().await?;
+
+                println!("waiting for byte3");
+                loop {
+                    println!("wait {:?}", stream_rx.peek(&mut [0]).await);
+                }
+
+                // Wait for a pending byte
+                while stream_rx.peek(&mut [0]).await? != 1 {}
+
+                println!("got byte");
+
+                let mut waiter = client.load_waiter(test_stream.group);
 
                 send(&mut stream_tx, &ServerMessage::WaitingForLoad).await?;
 
-                let stream = stream_tx
-                    .into_inner()
-                    .reunite(stream_rx.into_inner())
-                    .unwrap();
+                let stream = stream_tx.into_inner().reunite(stream_rx).unwrap();
 
-                let mut waiter = client.load_waiter(test_stream.group);
                 waiter.changed().await?;
                 let start = waiter.borrow().ok_or("Expected time")? + Duration::from_micros(delay);
 

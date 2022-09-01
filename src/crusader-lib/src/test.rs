@@ -130,6 +130,7 @@ pub(crate) async fn write_data(
     data: &[u8],
     until: Instant,
 ) -> Result<(), Box<dyn Error>> {
+    stream.set_nodelay(false).ok();
     stream.set_linger(Some(Duration::from_secs(0))).ok();
 
     let done = Arc::new(AtomicBool::new(false));
@@ -185,17 +186,23 @@ pub(crate) async fn read_data(
     stream: TcpStream,
     buffer: &mut [u8],
     bytes: Arc<AtomicU64>,
-    _until: Instant,
+    until: Instant,
     writer_done: oneshot::Receiver<()>,
 ) -> Result<bool, Box<dyn Error>> {
     stream.set_linger(Some(Duration::from_secs(0))).ok();
 
     let reading_done = Arc::new(AtomicBool::new(false));
 
+    // Set `reading_done` to true 2 minutes after the load should terminate.
+    let reading_done_ = reading_done.clone();
+    tokio::spawn(async move {
+        time::sleep_until(until + Duration::from_secs(120)).await;
+        reading_done_.store(true, Ordering::Release);
+    });
+
+    // Set `reading_done` to true after 5 seconds of not receiving data.
     let reading_done_ = reading_done.clone();
     let bytes_ = bytes.clone();
-
-    // Set `reading_done` to true after 2 seconds of not receiving data.
     tokio::spawn(async move {
         writer_done.await.ok();
 
@@ -216,7 +223,7 @@ pub(crate) async fn read_data(
             } else {
                 i += 1;
 
-                if i > 20 {
+                if i > 50 {
                     reading_done_.store(true, Ordering::Release);
                     break;
                 }
@@ -292,6 +299,7 @@ pub struct Config {
 
 async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult, Box<dyn Error>> {
     let control = net::TcpStream::connect((server, config.port)).await?;
+    control.set_nodelay(true)?;
 
     let server = control.peer_addr()?;
 
@@ -519,7 +527,7 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         estimated_duration,
     ));
 
-    time::sleep(Duration::from_millis(100)).await;
+    time::sleep(Duration::from_millis(50)).await;
 
     let start = Instant::now();
 
@@ -940,6 +948,7 @@ fn setup_loaders(
                 let stream = TcpStream::connect(server)
                     .await
                     .expect("unable to bind TCP socket");
+                stream.set_nodelay(true).unwrap();
                 let mut stream = Framed::new(stream, codec());
                 hello_combined(&mut stream).await.unwrap();
                 send(&mut stream, &ClientMessage::Associate(id))
@@ -1078,15 +1087,28 @@ fn download_loaders(
                 )
                 .await
                 .unwrap();
+
+                let reply: ServerMessage = receive(&mut stream).await.unwrap();
+                match reply {
+                    ServerMessage::WaitingForByte => (),
+                    _ => panic!("Unexpected message {:?}", reply),
+                };
+
+                println!("sending byte");
+
+                stream.get_mut().write_u8(1).await.unwrap();
+
+                println!("sent byte");
+
                 let reply: ServerMessage = receive(&mut stream).await.unwrap();
                 match reply {
                     ServerMessage::WaitingForLoad => (),
                     _ => panic!("Unexpected message {:?}", reply),
                 };
 
-                let mut stream = stream.into_inner();
+                println!("got WaitingForLoad");
 
-                stream.write_u8(1).await.unwrap();
+                let stream = stream.into_inner();
 
                 let (reading_done_tx, reading_done_rx) = oneshot::channel();
 

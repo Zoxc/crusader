@@ -61,6 +61,7 @@ pub enum ServerMessage {
         time: u64,
     },
     WaitingForLoad,
+    WaitingForByte,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
