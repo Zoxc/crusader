@@ -581,7 +581,7 @@ dependencies = [
 
 [[package]]
 name = "crusader-lib"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "bincode",
  "bytes",
@@ -593,6 +593,7 @@ dependencies = [
  "rmp-serde",
  "serde",
  "snap",
+ "socket2",
  "tokio",
  "tokio-util",
 ]
@@ -2214,9 +2215,9 @@ checksum = "45456094d1983e2ee2a18fdfebce3189fa451699d0502cb8e3b49dba5ba41451"
 
 [[package]]
 name = "socket2"
-version = "0.4.4"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66d72b759436ae32898a2af0a14218dbf55efde3feeb170eb623637db85ee1e0"
+checksum = "02e2d2db9033d13a1567121ddd7a095ee144db4e1ca1b1bda3419bc0da294ebd"
 dependencies = [
  "libc",
  "winapi",
