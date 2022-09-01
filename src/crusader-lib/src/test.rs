@@ -138,9 +138,6 @@ pub(crate) async fn write_data(
 
     tokio::spawn(async move {
         time::sleep_until(until).await;
-
-        println!("writing should stop");
-
         done.store(true, Ordering::Release);
     });
 
@@ -176,8 +173,6 @@ pub(crate) async fn write_data(
     }
 
     std::mem::drop(stream);
-
-    println!("writing done");
 
     Ok(())
 }
@@ -483,7 +478,6 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
                     break;
                 }
                 ServerMessage::LoadComplete { stream } => {
-                    println!("download done {:?}", stream);
                     state_
                         .downloads
                         .lock()
@@ -575,13 +569,11 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
             let stream = upload_done_rx.recv().await.ok_or("Expected stream")?;
             send(&mut control_tx, &ClientMessage::LoadComplete { stream }).await?;
         }
-        println!("Upload loaders done");
 
         let _ = upload_semaphore
             .acquire_many(loading_streams)
             .await
             .unwrap();
-        println!("Upload readers done");
 
         state_tx.send((TestState::Grace3, Instant::now())).unwrap();
         time::sleep(grace).await;
@@ -1109,19 +1101,13 @@ fn download_loaders(
                     _ => panic!("Unexpected message {:?}", reply),
                 };
 
-                println!("sending byte");
-
                 stream.get_mut().write_u8(1).await.unwrap();
-
-                println!("sent byte");
 
                 let reply: ServerMessage = receive(&mut stream).await.unwrap();
                 match reply {
                     ServerMessage::WaitingForLoad => (),
                     _ => panic!("Unexpected message {:?}", reply),
                 };
-
-                println!("got WaitingForLoad");
 
                 let stream = stream.into_inner();
 
@@ -1175,8 +1161,6 @@ fn download_loaders(
                 if timeout {
                     state.timeout.store(true, Ordering::SeqCst);
                 }
-
-                println!("reading done");
 
                 done.store(true, Ordering::Release);
 

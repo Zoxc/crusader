@@ -295,7 +295,6 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                             break;
                         }
                         Err(ClientMessage::LoadComplete { stream }) => {
-                            println!("upload done {:?}", stream);
                             client_
                                 .uploads
                                 .lock()
@@ -326,10 +325,6 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 let mut stream_rx = stream_rx.into_inner();
 
-                stream_rx.readable().await?;
-
-                println!("sending WaitingForByte");
-
                 send(&mut stream_tx, &ServerMessage::WaitingForByte).await?;
 
                 // Wait for a pending read byte
@@ -341,8 +336,6 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         Ok(Err(err)) => return Err(err.into()),
                     }
                 }
-
-                println!("got byte");
 
                 let mut waiter = client.load_waiter(test_stream.group);
 
@@ -448,8 +441,6 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     reading_done_rx,
                 )
                 .await?;
-
-                println!("reading done {:?} timeout:{:?}", test_stream, timeout);
 
                 done_tx
                     .send(timeout)
