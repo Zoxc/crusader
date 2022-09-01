@@ -39,7 +39,7 @@ struct Client {
     rx_latency: Mutex<Receiver<LatencyMeasure>>,
     overload: AtomicBool,
     loads: Mutex<HashMap<u32, watch::Sender<Option<Instant>>>>,
-    uploads: Mutex<HashMap<TestStream, Arc<AtomicBool>>>,
+    uploads: Mutex<HashMap<TestStream, oneshot::Sender<()>>>,
 }
 
 impl Client {
@@ -297,12 +297,11 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                             let done = client_
                                 .uploads
                                 .lock()
-                                .get(&stream)
-                                .ok_or("Expected upload stream")?
-                                .clone();
+                                .remove(&stream)
+                                .ok_or("Expected upload stream")?;
                             tokio::spawn(async move {
                                 time::sleep(test::LOAD_EXIT_DELAY).await;
-                                done.store(true, Ordering::Release);
+                                done.send(()).ok();
                             });
                         }
                         Err(ClientMessage::ScheduleLoads { groups, delay }) => {
@@ -373,12 +372,9 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 stream.write_u8(1).await.unwrap();
 
-                let reading_done = Arc::new(AtomicBool::new(false));
+                let (reading_done_tx, reading_done_rx) = oneshot::channel();
 
-                client
-                    .uploads
-                    .lock()
-                    .insert(test_stream, reading_done.clone());
+                client.uploads.lock().insert(test_stream, reading_done_tx);
 
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes_ = bytes.clone();
@@ -425,9 +421,9 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 let timeout = test::read_data(
                     stream,
                     &mut buffer,
-                    &bytes,
+                    bytes,
                     start + Duration::from_micros(duration),
-                    reading_done,
+                    reading_done_rx,
                 )
                 .await?;
 

@@ -38,6 +38,7 @@ use crate::plot::save_graph;
 use crate::protocol::{
     codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
 };
+use crate::serve::OnDrop;
 
 type Msg = Arc<dyn Fn(&str) + Send + Sync>;
 
@@ -65,7 +66,7 @@ struct ScheduledLoads {
 }
 
 struct State {
-    downloads: Mutex<HashMap<TestStream, Arc<AtomicBool>>>,
+    downloads: Mutex<HashMap<TestStream, oneshot::Sender<()>>>,
     timeout: AtomicBool,
 }
 
@@ -187,20 +188,51 @@ pub(crate) async fn write_data(
 pub(crate) async fn read_data(
     stream: TcpStream,
     buffer: &mut [u8],
-    bytes: &AtomicU64,
+    bytes: Arc<AtomicU64>,
     _until: Instant,
-    done: Arc<AtomicBool>,
+    writer_done: oneshot::Receiver<()>,
 ) -> Result<bool, Box<dyn Error>> {
     stream.set_linger(Some(Duration::from_secs(0))).ok();
 
-    let done_ = done.clone();
+    let reading_done = Arc::new(AtomicBool::new(false));
 
-    /*
-       tokio::spawn(async move {
-           time::sleep_until(until).await;
-            done.store(true, Ordering::Release);
-       });
-    */
+    let reading_done_ = reading_done.clone();
+    let bytes_ = bytes.clone();
+
+    // Set `reading_done` to true after 2 seconds of not receiving data.
+    tokio::spawn(async move {
+        writer_done.await.ok();
+
+        let mut current = bytes_.load(Ordering::Acquire);
+        let mut i = 0;
+        loop {
+            time::sleep(Duration::from_millis(100)).await;
+
+            if reading_done_.load(Ordering::Acquire) {
+                break;
+            }
+
+            let now = bytes_.load(Ordering::Acquire);
+
+            if now != current {
+                i = 0;
+                current = now;
+            } else {
+                i += 1;
+
+                if i > 20 {
+                    reading_done_.store(true, Ordering::Release);
+                    break;
+                }
+            }
+        }
+    });
+
+    // Set `reading_done` to true on exit to terminate the spawned task.
+    let reading_done_ = reading_done.clone();
+    let _on_drop = OnDrop(|| {
+        reading_done_.store(true, Ordering::Release);
+    });
 
     loop {
         if let Ok(Err(err)) = time::timeout(Duration::from_millis(50), stream.readable()).await {
@@ -214,7 +246,7 @@ pub(crate) async fn read_data(
         }
 
         loop {
-            if done_.load(Ordering::Acquire) {
+            if reading_done.load(Ordering::Acquire) {
                 return Ok(true);
             }
 
@@ -448,10 +480,10 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
                 }
                 ServerMessage::LoadComplete { stream } => {
                     println!("download done {:?}", stream);
-                    let done = state_.downloads.lock().get(&stream).unwrap().clone();
+                    let done = state_.downloads.lock().remove(&stream).unwrap();
                     tokio::spawn(async move {
                         time::sleep(LOAD_EXIT_DELAY).await;
-                        done.store(true, Ordering::Release);
+                        done.send(()).ok();
                     });
                 }
                 ServerMessage::ScheduledLoads { groups: _, time } => {
@@ -1058,12 +1090,9 @@ fn download_loaders(
 
                 stream.write_u8(1).await.unwrap();
 
-                let reading_done = Arc::new(AtomicBool::new(false));
+                let (reading_done_tx, reading_done_rx) = oneshot::channel();
 
-                state
-                    .downloads
-                    .lock()
-                    .insert(test_stream, reading_done.clone());
+                state.downloads.lock().insert(test_stream, reading_done_tx);
 
                 let bytes = Arc::new(AtomicU64::new(0));
                 let bytes_ = bytes.clone();
@@ -1101,9 +1130,9 @@ fn download_loaders(
                 let timeout = read_data(
                     stream,
                     &mut buffer,
-                    &bytes,
+                    bytes,
                     start + MEASURE_DELAY + config.load_duration,
-                    reading_done,
+                    reading_done_rx,
                 )
                 .await
                 .unwrap();
