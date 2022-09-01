@@ -17,7 +17,8 @@ To do a test run:
 ```sh
 crusader test <server-host>
 ```
-This produces an graph output file named `plot.png`.
+This produces an plot image like:
+<img src="media/plot.png">
 
 
 ## Graphical interface
