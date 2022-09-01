@@ -87,6 +87,7 @@ pub enum ClientMessage {
     LoadComplete {
         stream: TestStream,
     },
+    SendByte,
     GetMeasurements,
     StopMeasurements,
 }

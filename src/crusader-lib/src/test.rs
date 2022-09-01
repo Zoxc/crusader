@@ -17,7 +17,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::join;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpStream, UdpSocket};
@@ -1006,6 +1006,21 @@ fn upload_loaders(
                 ServerMessage::WaitingForLoad => (),
                 _ => panic!("Unexpected message {:?}", reply),
             };
+
+            send(&mut stream, &ClientMessage::SendByte).await.unwrap();
+
+            // Wait for a pending read byte
+            {
+                let mut stream_rx = stream.get_mut().split().0;
+                loop {
+                    stream_rx.read(&mut []).await.unwrap();
+                    match time::timeout(Duration::from_millis(10), stream_rx.peek(&mut [0])).await {
+                        Ok(Ok(1)) => break,
+                        Err(_) | Ok(Ok(_)) => (),
+                        Ok(Err(err)) => panic!("{:?}", err),
+                    }
+                }
+            }
 
             all_loaders.add_permits(1);
 

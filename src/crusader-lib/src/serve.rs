@@ -332,25 +332,15 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 send(&mut stream_tx, &ServerMessage::WaitingForByte).await?;
 
-                println!("waiting for readable");
-
-                stream_rx.readable().await?;
-
-                println!("waiting for byte");
-
-                println!("waiting for byte peek {:?}", stream_rx.peek(&mut [0]).await);
-                stream_rx.read_u8().await?;
-
-                println!("waiting for byte2");
-                stream_rx.read_u8().await?;
-
-                println!("waiting for byte3");
+                // Wait for a pending read byte
                 loop {
-                    println!("wait {:?}", stream_rx.peek(&mut [0]).await);
+                    stream_rx.read(&mut []).await?;
+                    match time::timeout(Duration::from_millis(10), stream_rx.peek(&mut [0])).await {
+                        Ok(Ok(1)) => break,
+                        Err(_) | Ok(Ok(_)) => (),
+                        Ok(Err(err)) => return Err(err.into()),
+                    }
                 }
-
-                // Wait for a pending byte
-                while stream_rx.peek(&mut [0]).await? != 1 {}
 
                 println!("got byte");
 
@@ -390,6 +380,12 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 let client = client.ok_or("No associated client")?;
 
                 send(&mut stream_tx, &ServerMessage::WaitingForLoad).await?;
+
+                let reply: ClientMessage = receive(&mut stream_rx).await.unwrap();
+                match reply {
+                    ClientMessage::SendByte => (),
+                    _ => return Err(format!("Unexpected message {:?}", reply).into()),
+                };
 
                 let mut stream = stream_rx
                     .into_inner()
@@ -468,7 +464,8 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             }
             msg @ (ClientMessage::StopMeasurements
             | ClientMessage::ScheduleLoads { .. }
-            | ClientMessage::LoadComplete { .. }) => {
+            | ClientMessage::LoadComplete { .. }
+            | ClientMessage::SendByte) => {
                 return Err(format!("Unexpected message {:?}", msg).into());
             }
         };
