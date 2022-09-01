@@ -77,15 +77,16 @@ struct TomlSettings {
     client: Option<Settings>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct Settings {
     pub server: String,
     pub download: bool,
     pub upload: bool,
     pub both: bool,
     pub streams: u64,
-    pub load_duration: u64,
-    pub grace_duration: u64,
+    pub load_duration: f64,
+    pub grace_duration: f64,
+    pub stream_stagger: f64,
     pub latency_sample_rate: u64,
     pub bandwidth_sample_rate: u64,
 }
@@ -130,17 +131,18 @@ impl Settings {
 
                         table
                             .get("load_duration")
-                            .and_then(|value| {
-                                value.as_integer().and_then(|value| value.try_into().ok())
-                            })
+                            .and_then(|value| value.as_float())
                             .map(|value| settings.load_duration = value);
 
                         table
                             .get("grace_duration")
-                            .and_then(|value| {
-                                value.as_integer().and_then(|value| value.try_into().ok())
-                            })
+                            .and_then(|value| value.as_float())
                             .map(|value| settings.grace_duration = value);
+
+                        table
+                            .get("stream_stagger")
+                            .and_then(|value| value.as_float())
+                            .map(|value| settings.stream_stagger = value);
 
                         table
                             .get("latency_sample_rate")
@@ -171,8 +173,9 @@ impl Default for Settings {
             upload: true,
             both: true,
             streams: 16,
-            load_duration: 5,
-            grace_duration: 1,
+            load_duration: 5.0,
+            grace_duration: 1.0,
+            stream_stagger: 0.0,
             latency_sample_rate: 5,
             bandwidth_sample_rate: 20,
         }
@@ -183,6 +186,7 @@ pub struct Tester {
     tab: Tab,
     settings: Settings,
     settings_path: Option<PathBuf>,
+    saved_settings: Settings,
     server_state: ServerState,
     server: Option<Server>,
     client_state: ClientState,
@@ -304,6 +308,8 @@ pub fn handle_bytes(data: &[(u64, f64)], start: f64) -> Vec<(f64, f64)> {
 
 impl Drop for Tester {
     fn drop(&mut self) {
+        self.save_settings();
+
         // Stop client
         self.client.as_mut().map(|client| {
             mem::take(&mut client.abort).map(|abort| {
@@ -323,25 +329,18 @@ impl Drop for Tester {
                 done.blocking_recv().ok();
             });
         });
-
-        // Store settings
-        self.settings_path.as_deref().map(|path| {
-            toml::ser::to_string_pretty(&TomlSettings {
-                client: Some(self.settings.clone()),
-            })
-            .map(|data| fs::write(path, data.as_bytes()))
-            .ok();
-        });
     }
 }
 
 impl Tester {
     pub fn new(settings_path: Option<PathBuf>) -> Tester {
+        let settings = settings_path
+            .as_deref()
+            .map_or(Settings::default(), Settings::from_path);
         Tester {
             tab: Tab::Client,
-            settings: settings_path
-                .as_deref()
-                .map_or(Settings::default(), Settings::from_path),
+            saved_settings: settings.clone(),
+            settings,
             settings_path,
             client_state: ClientState::Stopped,
             client: None,
@@ -377,13 +376,26 @@ impl Tester {
         self.result_saved = Some(name);
     }
 
+    fn save_settings(&mut self) {
+        if self.settings != self.saved_settings {
+            self.settings_path.as_deref().map(|path| {
+                toml::ser::to_string_pretty(&TomlSettings {
+                    client: Some(self.settings.clone()),
+                })
+                .map(|data| fs::write(path, data.as_bytes()))
+                .ok();
+            });
+            self.saved_settings = self.settings.clone();
+        }
+    }
+
     fn config(&self) -> Config {
         Config {
             port: protocol::PORT,
-            stream_stagger: Duration::from_secs(0),
             streams: self.settings.streams,
-            grace_duration: Duration::from_secs(self.settings.grace_duration),
-            load_duration: Duration::from_secs(self.settings.load_duration),
+            grace_duration: Duration::from_secs_f64(self.settings.grace_duration),
+            load_duration: Duration::from_secs_f64(self.settings.load_duration),
+            stream_stagger: Duration::from_secs_f64(self.settings.stream_stagger),
             download: self.settings.download,
             upload: self.settings.upload,
             both: self.settings.both,
@@ -393,6 +405,7 @@ impl Tester {
     }
 
     fn start_client(&mut self, ctx: &egui::Context) {
+        self.save_settings();
         self.client_state = ClientState::Running;
         self.msgs.clear();
         self.msg_scrolled = 0;
@@ -508,7 +521,7 @@ impl Tester {
                             ui.label("Load duration: ");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.load_duration)
-                                    .clamp_range(1..=1000)
+                                    .clamp_range(0..=1000)
                                     .speed(0.05),
                             );
                             ui.label("seconds");
@@ -516,7 +529,15 @@ impl Tester {
                             ui.label("Grace duration: ");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.grace_duration)
-                                    .clamp_range(1..=1000)
+                                    .clamp_range(0..=1000)
+                                    .speed(0.05),
+                            );
+                            ui.label("seconds");
+                            ui.end_row();
+                            ui.label("Stream stagger: ");
+                            ui.add(
+                                egui::DragValue::new(&mut self.settings.stream_stagger)
+                                    .clamp_range(0..=1000)
                                     .speed(0.05),
                             );
                             ui.label("seconds");
@@ -550,13 +571,14 @@ impl Tester {
                             );
                             ui.label("");
                             ui.allocate_space(vec2(1.0, 1.0));
-                            ui.label("Latency sample rate:");
+
+                            ui.label("Stream stagger: ");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.latency_sample_rate)
-                                    .clamp_range(1..=1000)
+                                egui::DragValue::new(&mut self.settings.stream_stagger)
+                                    .clamp_range(0..=1000)
                                     .speed(0.05),
                             );
-                            ui.label("milliseconds");
+                            ui.label("seconds");
                             ui.end_row();
 
                             ui.checkbox(&mut self.settings.upload, "Upload");
@@ -564,14 +586,15 @@ impl Tester {
                             ui.label("Load duration: ");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.load_duration)
-                                    .clamp_range(1..=1000)
+                                    .clamp_range(0..=1000)
                                     .speed(0.05),
                             );
                             ui.label("seconds");
                             ui.label("");
-                            ui.label("Bandwidth sample rate:");
+
+                            ui.label("Latency sample rate:");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.bandwidth_sample_rate)
+                                egui::DragValue::new(&mut self.settings.latency_sample_rate)
                                     .clamp_range(1..=1000)
                                     .speed(0.05),
                             );
@@ -583,10 +606,18 @@ impl Tester {
                             ui.label("Grace duration: ");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.grace_duration)
-                                    .clamp_range(1..=1000)
+                                    .clamp_range(0..=1000)
                                     .speed(0.05),
                             );
                             ui.label("seconds");
+                            ui.label("");
+                            ui.label("Bandwidth sample rate:");
+                            ui.add(
+                                egui::DragValue::new(&mut self.settings.bandwidth_sample_rate)
+                                    .clamp_range(1..=1000)
+                                    .speed(0.05),
+                            );
+                            ui.label("milliseconds");
                             ui.end_row();
                         });
                     }
