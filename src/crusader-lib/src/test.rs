@@ -44,8 +44,6 @@ type Msg = Arc<dyn Fn(&str) + Send + Sync>;
 
 const MEASURE_DELAY: Duration = Duration::from_millis(50);
 
-pub(crate) const LOAD_EXIT_DELAY: Duration = Duration::from_secs(20);
-
 #[derive(PartialEq, Eq, Debug, Clone, Copy, PartialOrd, Ord)]
 enum TestState {
     Setup,
@@ -175,8 +173,6 @@ pub(crate) async fn write_data(
 
         yield_now().await;
     }
-
-    //stream.writable().await?;
 
     std::mem::drop(stream);
 
@@ -480,11 +476,13 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
                 }
                 ServerMessage::LoadComplete { stream } => {
                     println!("download done {:?}", stream);
-                    let done = state_.downloads.lock().remove(&stream).unwrap();
-                    tokio::spawn(async move {
-                        time::sleep(LOAD_EXIT_DELAY).await;
-                        done.send(()).ok();
-                    });
+                    state_
+                        .downloads
+                        .lock()
+                        .remove(&stream)
+                        .unwrap()
+                        .send(())
+                        .unwrap();
                 }
                 ServerMessage::ScheduledLoads { groups: _, time } => {
                     let time = Duration::from_micros(time.wrapping_add(server_time_offset));

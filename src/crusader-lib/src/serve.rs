@@ -294,15 +294,13 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         }
                         Err(ClientMessage::LoadComplete { stream }) => {
                             println!("upload done {:?}", stream);
-                            let done = client_
+                            client_
                                 .uploads
                                 .lock()
                                 .remove(&stream)
-                                .ok_or("Expected upload stream")?;
-                            tokio::spawn(async move {
-                                time::sleep(test::LOAD_EXIT_DELAY).await;
-                                done.send(()).ok();
-                            });
+                                .ok_or("Expected upload stream")?
+                                .send(())
+                                .map_err(|_| "Unable to notify reader of writer completion")?;
                         }
                         Err(ClientMessage::ScheduleLoads { groups, delay }) => {
                             let reply = client_.schedule_loads(&state, groups, delay).await?;
