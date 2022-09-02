@@ -1,5 +1,5 @@
 $ErrorActionPreference = "Stop"
-cargo ndk -t arm64-v8a -o app/src/main/jniLibs/ -- build
+cargo ndk -t arm64-v8a -o app/src/main/jniLibs/ -- build --release
 if ($lastexitcode -ne 0) {
     throw "Error"
 }
