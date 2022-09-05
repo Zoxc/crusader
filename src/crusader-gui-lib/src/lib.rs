@@ -787,10 +787,8 @@ impl Tester {
             ui.label("Packet loss");
 
             // Latency
-
-            let plot = Plot::new("ping")
+            let mut plot = Plot::new("ping")
                 .legend(Legend::default())
-                .height(ui.available_height() / 2.0)
                 .link_axis(self.axis.clone())
                 .link_cursor(self.cursor.clone())
                 .include_x(0.0)
@@ -800,6 +798,10 @@ impl Tester {
                 .label_formatter(|_, value| {
                     format!("Latency = {:.2} ms\nTime = {:.2} s", value.y, value.x)
                 });
+
+            if result.result.raw_result.streams() > 0 {
+                plot = plot.height(ui.available_height() / 2.0)
+            }
 
             plot.show(ui, |plot_ui| {
                 if result.result.raw_result.version >= 1 {
@@ -827,47 +829,49 @@ impl Tester {
             });
             ui.label("Latency");
 
-            // Bandwidth
-            let plot = Plot::new("result")
-                .legend(Legend::default())
-                .link_axis(self.axis.clone())
-                .link_cursor(self.cursor.clone())
-                .set_margin_fraction(Vec2 { x: 0.2, y: 0.0 })
-                .include_x(0.0)
-                .include_x(duration)
-                .include_y(0.0)
-                .include_y(result.bandwidth_max * 1.1)
-                .label_formatter(|_, value| {
-                    format!("Bandwidth = {:.2} Mbps\nTime = {:.2} s", value.y, value.x)
+            if result.result.raw_result.streams() > 0 {
+                // Bandwidth
+                let plot = Plot::new("result")
+                    .legend(Legend::default())
+                    .link_axis(self.axis.clone())
+                    .link_cursor(self.cursor.clone())
+                    .set_margin_fraction(Vec2 { x: 0.2, y: 0.0 })
+                    .include_x(0.0)
+                    .include_x(duration)
+                    .include_y(0.0)
+                    .include_y(result.bandwidth_max * 1.1)
+                    .label_formatter(|_, value| {
+                        format!("Bandwidth = {:.2} Mbps\nTime = {:.2} s", value.y, value.x)
+                    });
+
+                plot.show(ui, |plot_ui| {
+                    if result.result.raw_result.download() {
+                        let download = result.download.iter().map(|v| [v.0 as f64, v.1]);
+                        let download = Line::new(PlotPoints::from_iter(download))
+                            .color(Color32::from_rgb(95, 145, 62))
+                            .name("Download");
+
+                        plot_ui.line(download);
+                    }
+                    if result.result.raw_result.upload() {
+                        let upload = result.upload.iter().map(|v| [v.0 as f64, v.1]);
+                        let upload = Line::new(PlotPoints::from_iter(upload))
+                            .color(Color32::from_rgb(37, 83, 169))
+                            .name("Upload");
+
+                        plot_ui.line(upload);
+                    }
+                    if result.result.raw_result.both() {
+                        let both = result.both.iter().map(|v| [v.0 as f64, v.1]);
+                        let both = Line::new(PlotPoints::from_iter(both))
+                            .color(Color32::from_rgb(149, 96, 153))
+                            .name("Both");
+
+                        plot_ui.line(both);
+                    }
                 });
-
-            plot.show(ui, |plot_ui| {
-                if result.result.raw_result.download() {
-                    let download = result.download.iter().map(|v| [v.0 as f64, v.1]);
-                    let download = Line::new(PlotPoints::from_iter(download))
-                        .color(Color32::from_rgb(95, 145, 62))
-                        .name("Download");
-
-                    plot_ui.line(download);
-                }
-                if result.result.raw_result.upload() {
-                    let upload = result.upload.iter().map(|v| [v.0 as f64, v.1]);
-                    let upload = Line::new(PlotPoints::from_iter(upload))
-                        .color(Color32::from_rgb(37, 83, 169))
-                        .name("Upload");
-
-                    plot_ui.line(upload);
-                }
-                if result.result.raw_result.both() {
-                    let both = result.both.iter().map(|v| [v.0 as f64, v.1]);
-                    let both = Line::new(PlotPoints::from_iter(both))
-                        .color(Color32::from_rgb(149, 96, 153))
-                        .name("Both");
-
-                    plot_ui.line(both);
-                }
-            });
-            ui.label("Bandwidth");
+                ui.label("Bandwidth");
+            }
         });
     }
 

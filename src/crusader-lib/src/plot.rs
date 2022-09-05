@@ -761,18 +761,20 @@ pub(crate) fn graph(
 
     let mut charts = 1;
 
-    if config.split_bandwidth {
-        if result.raw_result.download() || result.raw_result.both() {
+    if result.raw_result.streams() > 0 {
+        if config.split_bandwidth {
+            if result.raw_result.download() || result.raw_result.both() {
+                charts += 1
+            }
+            if result.raw_result.upload() || result.raw_result.both() {
+                charts += 1
+            }
+        } else {
             charts += 1
         }
-        if result.raw_result.upload() || result.raw_result.both() {
+        if config.transferred {
             charts += 1
         }
-    } else {
-        charts += 1
-    }
-    if config.transferred {
-        charts += 1
     }
 
     let areas = root.split_evenly((charts, 1));
@@ -782,24 +784,26 @@ pub(crate) fn graph(
 
     let mut chart_index = 0;
 
-    if config.split_bandwidth {
-        if result.raw_result.download() || result.raw_result.both() {
-            plot_split_bandwidth(true, result, start, duration, &areas[chart_index]);
+    if result.raw_result.streams() > 0 {
+        if config.split_bandwidth {
+            if result.raw_result.download() || result.raw_result.both() {
+                plot_split_bandwidth(true, result, start, duration, &areas[chart_index]);
+                chart_index += 1;
+            }
+            if result.raw_result.upload() || result.raw_result.both() {
+                plot_split_bandwidth(false, result, start, duration, &areas[chart_index]);
+                chart_index += 1;
+            }
+        } else {
+            plot_bandwidth(bandwidth, start, duration, &areas[chart_index]);
             chart_index += 1;
         }
-        if result.raw_result.upload() || result.raw_result.both() {
-            plot_split_bandwidth(false, result, start, duration, &areas[chart_index]);
-            chart_index += 1;
-        }
-    } else {
-        plot_bandwidth(bandwidth, start, duration, &areas[chart_index]);
-        chart_index += 1;
     }
 
     latency(result, pings, start, duration, &areas[chart_index], &loss);
     chart_index += 1;
 
-    if config.transferred {
+    if result.raw_result.streams() > 0 && config.transferred {
         bytes_transferred(bandwidth, start, duration, &areas[chart_index]);
         #[allow(unused_assignments)]
         {

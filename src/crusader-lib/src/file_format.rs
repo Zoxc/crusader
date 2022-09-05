@@ -183,9 +183,8 @@ impl RawResult {
     pub fn streams(&self) -> u64 {
         self.stream_groups
             .first()
-            .unwrap()
-            .streams
-            .len()
+            .map(|group| group.streams.len())
+            .unwrap_or_default()
             .try_into()
             .unwrap()
     }
