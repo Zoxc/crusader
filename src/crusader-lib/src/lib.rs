@@ -8,6 +8,7 @@
 )]
 
 pub mod file_format;
+pub mod latency;
 pub mod plot;
 pub mod protocol;
 pub mod serve;

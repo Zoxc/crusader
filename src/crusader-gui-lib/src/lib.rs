@@ -14,6 +14,7 @@ use std::{
 
 use crusader_lib::{
     file_format::RawResult,
+    latency,
     plot::{self, float_max, to_rates},
     protocol, serve,
     test::{self, Config, PlotConfig},
@@ -65,20 +66,40 @@ enum ClientState {
     Running,
 }
 
+struct Latency {
+    done: Option<oneshot::Receiver<Option<Result<(), String>>>>,
+    abort: Option<oneshot::Sender<()>>,
+}
+
 #[derive(PartialEq, Eq)]
 enum Tab {
     Client,
     Server,
+    Latency,
     Result,
 }
 
-#[derive(Serialize, Deserialize)]
-struct TomlSettings {
-    client: Option<Settings>,
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[serde(default)]
+pub struct LatencyMonitorSettings {
+    pub server: String,
+    pub history: f64,
+    pub latency_sample_rate: u64,
+}
+
+impl Default for LatencyMonitorSettings {
+    fn default() -> Self {
+        Self {
+            server: "localhost".to_owned(),
+            history: 60.0,
+            latency_sample_rate: 5,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
-pub struct Settings {
+#[serde(default)]
+pub struct ClientSettings {
     pub server: String,
     pub download: bool,
     pub upload: bool,
@@ -91,81 +112,7 @@ pub struct Settings {
     pub bandwidth_sample_rate: u64,
 }
 
-impl Settings {
-    fn from_path(path: &Path) -> Self {
-        fs::read_to_string(path)
-            .ok()
-            .and_then(|data| toml::from_str(&data).ok())
-            .and_then(|toml: toml::Value| {
-                toml.get("client")
-                    .and_then(|table| table.as_table())
-                    .map(|table| {
-                        let mut settings = Settings::default();
-
-                        table
-                            .get("server")
-                            .and_then(|value| value.as_str())
-                            .map(|value| settings.server = value.to_string());
-
-                        table
-                            .get("download")
-                            .and_then(|value| value.as_bool())
-                            .map(|value| settings.download = value);
-
-                        table
-                            .get("upload")
-                            .and_then(|value| value.as_bool())
-                            .map(|value| settings.upload = value);
-
-                        table
-                            .get("both")
-                            .and_then(|value| value.as_bool())
-                            .map(|value| settings.both = value);
-
-                        table
-                            .get("streams")
-                            .and_then(|value| {
-                                value.as_integer().and_then(|value| value.try_into().ok())
-                            })
-                            .map(|value| settings.streams = value);
-
-                        table
-                            .get("load_duration")
-                            .and_then(|value| value.as_float())
-                            .map(|value| settings.load_duration = value);
-
-                        table
-                            .get("grace_duration")
-                            .and_then(|value| value.as_float())
-                            .map(|value| settings.grace_duration = value);
-
-                        table
-                            .get("stream_stagger")
-                            .and_then(|value| value.as_float())
-                            .map(|value| settings.stream_stagger = value);
-
-                        table
-                            .get("latency_sample_rate")
-                            .and_then(|value| {
-                                value.as_integer().and_then(|value| value.try_into().ok())
-                            })
-                            .map(|value| settings.latency_sample_rate = value);
-
-                        table
-                            .get("bandwidth_sample_rate")
-                            .and_then(|value| {
-                                value.as_integer().and_then(|value| value.try_into().ok())
-                            })
-                            .map(|value| settings.bandwidth_sample_rate = value);
-
-                        settings
-                    })
-            })
-            .unwrap_or_default()
-    }
-}
-
-impl Default for Settings {
+impl Default for ClientSettings {
     fn default() -> Self {
         Self {
             server: "localhost".to_owned(),
@@ -179,6 +126,22 @@ impl Default for Settings {
             latency_sample_rate: 5,
             bandwidth_sample_rate: 20,
         }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Default)]
+#[serde(default)]
+pub struct Settings {
+    pub client: ClientSettings,
+    pub latency_monitor: LatencyMonitorSettings,
+}
+
+impl Settings {
+    fn from_path(path: &Path) -> Self {
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|data| toml::from_str(&data).ok())
+            .unwrap_or_default()
     }
 }
 
@@ -202,6 +165,12 @@ pub struct Tester {
     pub file_loader: Option<Box<dyn Fn(&mut Tester)>>,
     pub plot_saver: Option<Box<dyn Fn(&plot::TestResult)>>,
     pub raw_saver: Option<Box<dyn Fn(&RawResult)>>,
+
+    latency_state: ClientState,
+    latency: Option<Latency>,
+    latency_data: Arc<latency::Data>,
+    latency_stop: Duration,
+    latency_error: Option<String>,
 }
 
 pub struct TestResult {
@@ -329,6 +298,16 @@ impl Drop for Tester {
                 done.blocking_recv().ok();
             });
         });
+
+        // Stop latency
+        self.latency.as_mut().map(|latency| {
+            mem::take(&mut latency.abort).map(|abort| {
+                abort.send(()).unwrap();
+            });
+            mem::take(&mut latency.done).map(|done| {
+                done.blocking_recv().ok();
+            });
+        });
     }
 }
 
@@ -357,6 +336,11 @@ impl Tester {
             file_loader: None,
             raw_saver: None,
             plot_saver: None,
+            latency_state: ClientState::Stopped,
+            latency: None,
+            latency_data: Arc::new(latency::Data::new(0, Arc::new(|| {}))),
+            latency_stop: Duration::from_secs(0),
+            latency_error: None,
         }
     }
 
@@ -379,11 +363,9 @@ impl Tester {
     fn save_settings(&mut self) {
         if self.settings != self.saved_settings {
             self.settings_path.as_deref().map(|path| {
-                toml::ser::to_string_pretty(&TomlSettings {
-                    client: Some(self.settings.clone()),
-                })
-                .map(|data| fs::write(path, data.as_bytes()))
-                .ok();
+                toml::ser::to_string_pretty(&self.settings)
+                    .map(|data| fs::write(path, data.as_bytes()))
+                    .ok();
             });
             self.saved_settings = self.settings.clone();
         }
@@ -392,21 +374,20 @@ impl Tester {
     fn config(&self) -> Config {
         Config {
             port: protocol::PORT,
-            streams: self.settings.streams,
-            grace_duration: Duration::from_secs_f64(self.settings.grace_duration),
-            load_duration: Duration::from_secs_f64(self.settings.load_duration),
-            stream_stagger: Duration::from_secs_f64(self.settings.stream_stagger),
-            download: self.settings.download,
-            upload: self.settings.upload,
-            both: self.settings.both,
-            ping_interval: Duration::from_millis(self.settings.latency_sample_rate),
-            bandwidth_interval: Duration::from_millis(self.settings.bandwidth_sample_rate),
+            streams: self.settings.client.streams,
+            grace_duration: Duration::from_secs_f64(self.settings.client.grace_duration),
+            load_duration: Duration::from_secs_f64(self.settings.client.load_duration),
+            stream_stagger: Duration::from_secs_f64(self.settings.client.stream_stagger),
+            download: self.settings.client.download,
+            upload: self.settings.client.upload,
+            both: self.settings.client.both,
+            ping_interval: Duration::from_millis(self.settings.client.latency_sample_rate),
+            bandwidth_interval: Duration::from_millis(self.settings.client.bandwidth_sample_rate),
         }
     }
 
     fn start_client(&mut self, ctx: &egui::Context) {
         self.save_settings();
-        self.client_state = ClientState::Running;
         self.msgs.clear();
         self.msg_scrolled = 0;
 
@@ -418,7 +399,7 @@ impl Tester {
 
         let abort = test::test_callback(
             self.config(),
-            &self.settings.server,
+            &self.settings.client.server,
             Arc::new(move |msg| {
                 tx.send(msg.to_string()).unwrap();
                 ctx.request_repaint();
@@ -472,7 +453,7 @@ impl Tester {
         ui.horizontal_wrapped(|ui| {
             ui.add_enabled_ui(active, |ui| {
                 ui.label("Server address:");
-                ui.add(TextEdit::singleline(&mut self.settings.server));
+                ui.add(TextEdit::singleline(&mut self.settings.client.server));
             });
 
             match self.client_state {
@@ -504,23 +485,23 @@ impl Tester {
                 ui.add_enabled_ui(active, |ui| {
                     if compact {
                         ui.horizontal_wrapped(|ui| {
-                            ui.checkbox(&mut self.settings.download, "Download");
+                            ui.checkbox(&mut self.settings.client.download, "Download");
                             ui.add_space(10.0);
-                            ui.checkbox(&mut self.settings.upload, "Upload");
+                            ui.checkbox(&mut self.settings.client.upload, "Upload");
                             ui.add_space(10.0);
-                            ui.checkbox(&mut self.settings.both, "Both");
+                            ui.checkbox(&mut self.settings.client.both, "Both");
                         });
                         Grid::new("settings-compact").show(ui, |ui| {
                             ui.label("Streams: ");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.streams)
+                                egui::DragValue::new(&mut self.settings.client.streams)
                                     .clamp_range(1..=1000)
                                     .speed(0.05),
                             );
                             ui.end_row();
                             ui.label("Load duration: ");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.load_duration)
+                                egui::DragValue::new(&mut self.settings.client.load_duration)
                                     .clamp_range(0..=1000)
                                     .speed(0.05),
                             );
@@ -528,7 +509,7 @@ impl Tester {
                             ui.end_row();
                             ui.label("Grace duration: ");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.grace_duration)
+                                egui::DragValue::new(&mut self.settings.client.grace_duration)
                                     .clamp_range(0..=1000)
                                     .speed(0.05),
                             );
@@ -536,7 +517,7 @@ impl Tester {
                             ui.end_row();
                             ui.label("Stream stagger: ");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.stream_stagger)
+                                egui::DragValue::new(&mut self.settings.client.stream_stagger)
                                     .clamp_range(0..=1000)
                                     .speed(0.05),
                             );
@@ -544,7 +525,7 @@ impl Tester {
                             ui.end_row();
                             ui.label("Latency sample rate:");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.latency_sample_rate)
+                                egui::DragValue::new(&mut self.settings.client.latency_sample_rate)
                                     .clamp_range(1..=1000)
                                     .speed(0.05),
                             );
@@ -552,20 +533,22 @@ impl Tester {
                             ui.end_row();
                             ui.label("Bandwidth sample rate:");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.bandwidth_sample_rate)
-                                    .clamp_range(1..=1000)
-                                    .speed(0.05),
+                                egui::DragValue::new(
+                                    &mut self.settings.client.bandwidth_sample_rate,
+                                )
+                                .clamp_range(1..=1000)
+                                .speed(0.05),
                             );
                             ui.label("milliseconds");
                             ui.end_row();
                         });
                     } else {
                         Grid::new("settings").show(ui, |ui| {
-                            ui.checkbox(&mut self.settings.download, "Download");
+                            ui.checkbox(&mut self.settings.client.download, "Download");
                             ui.allocate_space(vec2(1.0, 1.0));
                             ui.label("Streams: ");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.streams)
+                                egui::DragValue::new(&mut self.settings.client.streams)
                                     .clamp_range(1..=1000)
                                     .speed(0.05),
                             );
@@ -574,18 +557,18 @@ impl Tester {
 
                             ui.label("Stream stagger: ");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.stream_stagger)
+                                egui::DragValue::new(&mut self.settings.client.stream_stagger)
                                     .clamp_range(0..=1000)
                                     .speed(0.05),
                             );
                             ui.label("seconds");
                             ui.end_row();
 
-                            ui.checkbox(&mut self.settings.upload, "Upload");
+                            ui.checkbox(&mut self.settings.client.upload, "Upload");
                             ui.label("");
                             ui.label("Load duration: ");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.load_duration)
+                                egui::DragValue::new(&mut self.settings.client.load_duration)
                                     .clamp_range(0..=1000)
                                     .speed(0.05),
                             );
@@ -594,18 +577,18 @@ impl Tester {
 
                             ui.label("Latency sample rate:");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.latency_sample_rate)
+                                egui::DragValue::new(&mut self.settings.client.latency_sample_rate)
                                     .clamp_range(1..=1000)
                                     .speed(0.05),
                             );
                             ui.label("milliseconds");
                             ui.end_row();
 
-                            ui.checkbox(&mut self.settings.both, "Both");
+                            ui.checkbox(&mut self.settings.client.both, "Both");
                             ui.label("");
                             ui.label("Grace duration: ");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.grace_duration)
+                                egui::DragValue::new(&mut self.settings.client.grace_duration)
                                     .clamp_range(0..=1000)
                                     .speed(0.05),
                             );
@@ -613,9 +596,11 @@ impl Tester {
                             ui.label("");
                             ui.label("Bandwidth sample rate:");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.bandwidth_sample_rate)
-                                    .clamp_range(1..=1000)
-                                    .speed(0.05),
+                                egui::DragValue::new(
+                                    &mut self.settings.client.bandwidth_sample_rate,
+                                )
+                                .clamp_range(1..=1000)
+                                .speed(0.05),
                             );
                             ui.label("milliseconds");
                             ui.end_row();
@@ -996,11 +981,268 @@ impl Tester {
         }
     }
 
+    fn start_latency(&mut self, ctx: &egui::Context) {
+        self.save_settings();
+
+        let (signal_done, done) = oneshot::channel();
+
+        let ctx_ = ctx.clone();
+        let data = Arc::new(latency::Data::new(
+            ((self.settings.latency_monitor.history * 1000.0)
+                / self.settings.latency_monitor.latency_sample_rate as f64)
+                .round() as usize,
+            Arc::new(move || {
+                ctx_.request_repaint();
+            }),
+        ));
+
+        let ctx_ = ctx.clone();
+        let abort = latency::test_callback(
+            latency::Config {
+                port: protocol::PORT,
+                ping_interval: Duration::from_millis(
+                    self.settings.latency_monitor.latency_sample_rate,
+                ),
+            },
+            &self.settings.latency_monitor.server,
+            data.clone(),
+            Box::new(move |result| {
+                signal_done.send(result).map_err(|_| ()).unwrap();
+                ctx_.request_repaint();
+            }),
+        );
+
+        self.latency = Some(Latency {
+            done: Some(done),
+            abort: Some(abort),
+        });
+        self.latency_state = ClientState::Running;
+        self.latency_data = data;
+        self.latency_error = None;
+    }
+
+    fn latency(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        let active = self.latency_state == ClientState::Stopped;
+
+        if self.latency_state == ClientState::Stopped {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Server address:");
+                ui.add(TextEdit::singleline(
+                    &mut self.settings.latency_monitor.server,
+                ));
+
+                match self.latency_state {
+                    ClientState::Running | ClientState::Stopping => {}
+                    ClientState::Stopped => {
+                        if ui.button("Start test").clicked() {
+                            self.start_latency(ctx)
+                        }
+                    }
+                }
+            });
+
+            ui.separator();
+
+            Grid::new("latency-settings-compact").show(ui, |ui| {
+                ui.label("History: ");
+                ui.add(
+                    egui::DragValue::new(&mut self.settings.latency_monitor.history)
+                        .clamp_range(0..=1000)
+                        .speed(0.05),
+                );
+                ui.label("seconds");
+                ui.end_row();
+                ui.label("Latency sample rate:");
+                ui.add(
+                    egui::DragValue::new(&mut self.settings.latency_monitor.latency_sample_rate)
+                        .clamp_range(1..=1000)
+                        .speed(0.05),
+                );
+                ui.label("milliseconds");
+            });
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            match self.latency_state {
+                ClientState::Running => {
+                    if ui.button("Stop test").clicked() {
+                        let latency = self.latency.as_mut().unwrap();
+                        mem::take(&mut latency.abort).unwrap().send(()).unwrap();
+                        self.latency_state = ClientState::Stopping;
+                    }
+                }
+                ClientState::Stopping => {
+                    ui.add_enabled_ui(false, |ui| {
+                        let _ = ui.button("Stopping test..");
+                    });
+                }
+                ClientState::Stopped => {}
+            }
+
+            if !active {
+                let state = *self.latency_data.state.lock();
+
+                let state = match state {
+                    latency::State::Connecting => "Connecting..",
+                    latency::State::Monitoring => "",
+                    latency::State::Syncing => "Synchronizing clocks..",
+                };
+                ui.label(state);
+
+                let latency = self.latency.as_mut().unwrap();
+
+                if let Ok(result) = latency.done.as_mut().unwrap().try_recv() {
+                    self.latency_error = match result {
+                        Some(Ok(())) => None,
+                        Some(Err(error)) => Some(format!("Error: {error}")),
+                        None => Some("Aborted...".to_owned()),
+                    };
+                    self.latency_stop = self.latency_data.start.elapsed();
+                    self.latency = None;
+                    self.latency_state = ClientState::Stopped;
+                }
+            }
+        });
+
+        ui.separator();
+
+        if let Some(error) = self.latency_error.as_ref() {
+            ui.label(format!("Error: {}", error));
+            ui.separator();
+        }
+
+        self.latency_data(ctx, ui);
+    }
+
+    fn latency_data(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        ui.allocate_space(vec2(1.0, 15.0));
+
+        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+            let duration = 60.0 * 1.1;
+
+            let points = self.latency_data.points.blocking_lock().clone();
+
+            let now = if self.latency_state == ClientState::Running {
+                ctx.request_repaint();
+                self.latency_data.start.elapsed()
+            } else {
+                self.latency_stop
+            }
+            .as_secs_f64();
+
+            // Packet loss
+            let plot = Plot::new("latency-loss")
+                .legend(Legend::default())
+                .show_axes([false, false])
+                .link_axis(self.axis.clone())
+                .link_cursor(self.cursor.clone())
+                .center_y_axis(true)
+                .include_x(-duration)
+                .include_x(0.0)
+                .include_y(-1.0)
+                .include_y(1.0)
+                .height(30.0)
+                .label_formatter(|_, value| format!("Time = {:.2} s", value.x));
+
+            plot.show(ui, |plot_ui| {
+                let loss = points
+                    .iter()
+                    .filter(|point| !point.pending && point.total.is_none());
+
+                for point in loss {
+                    let loss = point.sent.as_secs_f64() - now;
+
+                    let (color, s, e) = if point.up.is_some() {
+                        (Color32::from_rgb(95, 145, 62), 1.0, 0.0)
+                    } else {
+                        (Color32::from_rgb(37, 83, 169), -1.0, 0.0)
+                    };
+
+                    plot_ui.line(
+                        Line::new(PlotPoints::from_iter(
+                            [[loss, s], [loss, e]].iter().copied(),
+                        ))
+                        .color(color),
+                    );
+
+                    plot_ui.line(
+                        Line::new(PlotPoints::from_iter(
+                            [[loss, s], [loss, s - s / 5.0]].iter().copied(),
+                        ))
+                        .width(3.0)
+                        .color(color),
+                    );
+                }
+            });
+            ui.label("Packet loss");
+
+            let latency_max = points
+                .iter()
+                .filter_map(|point| point.total)
+                .max()
+                .unwrap_or(Duration::from_millis(10))
+                .as_secs_f64()
+                * 1000.0;
+
+            // Latency
+            let plot = Plot::new("latency-ping")
+                .legend(Legend::default())
+                .link_axis(self.axis.clone())
+                .link_cursor(self.cursor.clone())
+                .include_x(-duration)
+                .include_x(0.0)
+                .include_x(duration * 0.15)
+                .include_y(0.0)
+                .include_y(latency_max * 1.1)
+                .label_formatter(|_, value| {
+                    format!("Latency = {:.2} ms\nTime = {:.2} s", value.y, value.x)
+                });
+
+            plot.show(ui, |plot_ui| {
+                let latency = points.iter().filter_map(|point| {
+                    point
+                        .up
+                        .map(|up| [point.sent.as_secs_f64() - now, 1000.0 * up.as_secs_f64()])
+                });
+                let latency = Line::new(PlotPoints::from_iter(latency))
+                    .color(Color32::from_rgb(37, 83, 169))
+                    .name("Up");
+
+                plot_ui.line(latency);
+
+                let latency = points.iter().filter_map(|point| {
+                    point
+                        .up
+                        .and_then(|up| point.total.map(|total| total.saturating_sub(up)))
+                        .map(|down| [point.sent.as_secs_f64() - now, 1000.0 * down.as_secs_f64()])
+                });
+                let latency = Line::new(PlotPoints::from_iter(latency))
+                    .color(Color32::from_rgb(95, 145, 62))
+                    .name("Down");
+
+                plot_ui.line(latency);
+
+                let latency = points.iter().filter_map(|point| {
+                    point
+                        .total
+                        .map(|total| [point.sent.as_secs_f64() - now, 1000.0 * total.as_secs_f64()])
+                });
+                let latency = Line::new(PlotPoints::from_iter(latency))
+                    .color(Color32::from_rgb(50, 50, 50))
+                    .name("Total");
+
+                plot_ui.line(latency);
+            });
+            ui.label("Latency");
+        });
+    }
+
     pub fn show(&mut self, ctx: &egui::Context, ui: &mut Ui) {
         let compact = ui.available_width() < 620.0;
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Client, "Client");
             ui.selectable_value(&mut self.tab, Tab::Server, "Server");
+            ui.selectable_value(&mut self.tab, Tab::Latency, "Latency");
             ui.selectable_value(&mut self.tab, Tab::Result, "Result");
         });
         ui.separator();
@@ -1008,6 +1250,7 @@ impl Tester {
         match self.tab {
             Tab::Client => self.client(ctx, ui, compact),
             Tab::Server => self.server(ctx, ui),
+            Tab::Latency => self.latency(ctx, ui),
             Tab::Result => self.result(ctx, ui),
         }
     }

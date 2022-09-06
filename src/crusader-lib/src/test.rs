@@ -101,7 +101,11 @@ where
     Ok(())
 }
 
-async fn hello<T: Sink<Bytes> + Unpin, R: Stream<Item = Result<BytesMut, RE>> + Unpin, RE>(
+pub(crate) async fn hello<
+    T: Sink<Bytes> + Unpin,
+    R: Stream<Item = Result<BytesMut, RE>> + Unpin,
+    RE,
+>(
     tx: &mut T,
     rx: &mut R,
 ) -> Result<(), Box<dyn Error>>
