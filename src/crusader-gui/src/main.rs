@@ -7,9 +7,8 @@
 
 use std::sync::Arc;
 
-use crusader_gui_lib::{Settings, Tester};
+use crusader_gui_lib::Tester;
 use eframe::{egui, emath::vec2, Theme};
-use serde::{Deserialize, Serialize};
 
 fn main() {
     let mut options = eframe::NativeOptions::default();
@@ -34,11 +33,6 @@ fn main() {
             })
         }),
     );
-}
-
-#[derive(Serialize, Deserialize)]
-struct TomlSettings {
-    client: Option<Settings>,
 }
 
 struct App {

@@ -537,10 +537,6 @@ dependencies = [
  "crusader-gui-lib",
  "crusader-lib",
  "eframe",
- "rfd",
- "serde",
- "tokio",
- "toml",
 ]
 
 [[package]]
@@ -679,7 +675,7 @@ checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 [[package]]
 name = "eframe"
 version = "0.19.0"
-source = "git+https://github.com/Zoxc/egui.git?branch=crusader#1bd048c704bee3df28485fa7bd8bf0d2760e7126"
+source = "git+https://github.com/Zoxc/egui.git?branch=crusader#eb62d0268d9061fd28f2daa7f33a81ac356c3522"
 dependencies = [
  "bytemuck",
  "egui",
@@ -700,7 +696,7 @@ dependencies = [
 [[package]]
 name = "egui"
 version = "0.19.0"
-source = "git+https://github.com/Zoxc/egui.git?branch=crusader#1bd048c704bee3df28485fa7bd8bf0d2760e7126"
+source = "git+https://github.com/Zoxc/egui.git?branch=crusader#eb62d0268d9061fd28f2daa7f33a81ac356c3522"
 dependencies = [
  "ahash",
  "epaint",
@@ -711,7 +707,7 @@ dependencies = [
 [[package]]
 name = "egui-winit"
 version = "0.19.0"
-source = "git+https://github.com/Zoxc/egui.git?branch=crusader#1bd048c704bee3df28485fa7bd8bf0d2760e7126"
+source = "git+https://github.com/Zoxc/egui.git?branch=crusader#eb62d0268d9061fd28f2daa7f33a81ac356c3522"
 dependencies = [
  "arboard",
  "egui",
@@ -725,7 +721,7 @@ dependencies = [
 [[package]]
 name = "egui_glow"
 version = "0.19.0"
-source = "git+https://github.com/Zoxc/egui.git?branch=crusader#1bd048c704bee3df28485fa7bd8bf0d2760e7126"
+source = "git+https://github.com/Zoxc/egui.git?branch=crusader#eb62d0268d9061fd28f2daa7f33a81ac356c3522"
 dependencies = [
  "bytemuck",
  "egui",
@@ -739,7 +735,7 @@ dependencies = [
 [[package]]
 name = "emath"
 version = "0.19.0"
-source = "git+https://github.com/Zoxc/egui.git?branch=crusader#1bd048c704bee3df28485fa7bd8bf0d2760e7126"
+source = "git+https://github.com/Zoxc/egui.git?branch=crusader#eb62d0268d9061fd28f2daa7f33a81ac356c3522"
 dependencies = [
  "bytemuck",
 ]
@@ -768,7 +764,7 @@ dependencies = [
 [[package]]
 name = "epaint"
 version = "0.19.0"
-source = "git+https://github.com/Zoxc/egui.git?branch=crusader#1bd048c704bee3df28485fa7bd8bf0d2760e7126"
+source = "git+https://github.com/Zoxc/egui.git?branch=crusader#eb62d0268d9061fd28f2daa7f33a81ac356c3522"
 dependencies = [
  "ab_glyph",
  "ahash",

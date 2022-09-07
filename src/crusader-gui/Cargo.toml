@@ -6,10 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-toml = "0.5.9"
-serde = { version = "1.0.137", features = ["derive"] }
 crusader-lib = { path = "../crusader-lib" }
 crusader-gui-lib = { path = "../crusader-gui-lib" }
-tokio = { version = "1.18.2", features = ["full"] }
 eframe = { git = "https://github.com/Zoxc/egui.git", branch = "crusader" }
-rfd = { version = "0.10.0", default-features = false, features = ["xdg-portal"] }

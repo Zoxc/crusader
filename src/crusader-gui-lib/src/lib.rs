@@ -25,7 +25,7 @@ use eframe::{
         plot::{Legend, Line, LinkedAxisGroup, LinkedCursorsGroup, Plot, PlotPoints},
         Grid, Layout, ScrollArea, TextEdit, TextStyle, Ui,
     },
-    emath::{vec2, Align, Vec2},
+    emath::{vec2, Align},
     epaint::Color32,
 };
 
@@ -154,6 +154,7 @@ pub struct Tester {
     server: Option<Server>,
     client_state: ClientState,
     client: Option<Client>,
+    result_plot_reset: bool,
     result: Option<TestResult>,
     result_saved: Option<String>,
     raw_result: Option<RawResult>,
@@ -166,11 +167,14 @@ pub struct Tester {
     pub plot_saver: Option<Box<dyn Fn(&plot::TestResult)>>,
     pub raw_saver: Option<Box<dyn Fn(&RawResult)>>,
 
+    latency_axis: LinkedAxisGroup,
+    latency_cursor: LinkedCursorsGroup,
     latency_state: ClientState,
     latency: Option<Latency>,
     latency_data: Arc<latency::Data>,
     latency_stop: Duration,
     latency_error: Option<String>,
+    latency_plot_reset: bool,
 }
 
 pub struct TestResult {
@@ -325,6 +329,7 @@ impl Tester {
             client: None,
             result: None,
             result_saved: None,
+            result_plot_reset: false,
             raw_result: None,
             raw_result_saved: None,
             msgs: Vec::new(),
@@ -336,11 +341,14 @@ impl Tester {
             file_loader: None,
             raw_saver: None,
             plot_saver: None,
+            latency_axis: LinkedAxisGroup::x(),
+            latency_cursor: LinkedCursorsGroup::x(),
             latency_state: ClientState::Stopped,
             latency: None,
             latency_data: Arc::new(latency::Data::new(0, Arc::new(|| {}))),
             latency_stop: Duration::from_secs(0),
             latency_error: None,
+            latency_plot_reset: false,
         }
     }
 
@@ -348,6 +356,7 @@ impl Tester {
         let result = raw.to_test_result();
         self.result = Some(TestResult::new(result));
         self.result_saved = None;
+        self.result_plot_reset = true;
         self.raw_result = Some(raw);
         self.raw_result_saved = Some(name);
     }
@@ -418,6 +427,7 @@ impl Tester {
         self.client_state = ClientState::Running;
         self.result = None;
         self.result_saved = None;
+        self.result_plot_reset = true;
         self.raw_result = None;
         self.raw_result_saved = None;
     }
@@ -623,6 +633,7 @@ impl Tester {
                             Some(Ok(result)) => {
                                 self.msgs.push("Test complete.".to_owned());
                                 self.result = Some(TestResult::new(result.to_test_result()));
+                                self.result_plot_reset = true;
                                 self.raw_result = Some(result);
                                 if self.tab == Tab::Client {
                                     self.tab = Tab::Result;
@@ -723,21 +734,29 @@ impl Tester {
         ui.allocate_space(vec2(1.0, 15.0));
 
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+            let reset = mem::take(&mut self.result_plot_reset);
+
             let duration = result.result.duration.as_secs_f64() * 1.1;
 
             // Packet loss
-            let plot = Plot::new("loss")
+            let mut plot = Plot::new("loss")
                 .legend(Legend::default())
                 .show_axes([false, false])
                 .link_axis(self.axis.clone())
                 .link_cursor(self.cursor.clone())
                 .center_y_axis(true)
+                .allow_zoom(false)
+                .allow_boxed_zoom(false)
                 .include_x(0.0)
                 .include_x(duration)
                 .include_y(-1.0)
                 .include_y(1.0)
                 .height(30.0)
                 .label_formatter(|_, value| format!("Time = {:.2} s", value.x));
+
+            if reset {
+                plot = plot.reset();
+            }
 
             plot.show(ui, |plot_ui| {
                 for &(loss, down_loss) in &result.loss {
@@ -784,6 +803,10 @@ impl Tester {
                     format!("Latency = {:.2} ms\nTime = {:.2} s", value.y, value.x)
                 });
 
+            if reset {
+                plot = plot.reset();
+            }
+
             if result.result.raw_result.streams() > 0 {
                 plot = plot.height(ui.available_height() / 2.0)
             }
@@ -816,11 +839,10 @@ impl Tester {
 
             if result.result.raw_result.streams() > 0 {
                 // Bandwidth
-                let plot = Plot::new("result")
+                let mut plot = Plot::new("result")
                     .legend(Legend::default())
                     .link_axis(self.axis.clone())
                     .link_cursor(self.cursor.clone())
-                    .set_margin_fraction(Vec2 { x: 0.2, y: 0.0 })
                     .include_x(0.0)
                     .include_x(duration)
                     .include_y(0.0)
@@ -828,6 +850,10 @@ impl Tester {
                     .label_formatter(|_, value| {
                         format!("Bandwidth = {:.2} Mbps\nTime = {:.2} s", value.y, value.x)
                     });
+
+                if reset {
+                    plot = plot.reset();
+                }
 
                 plot.show(ui, |plot_ui| {
                     if result.result.raw_result.download() {
@@ -1019,6 +1045,7 @@ impl Tester {
         self.latency_state = ClientState::Running;
         self.latency_data = data;
         self.latency_error = None;
+        self.latency_plot_reset = true;
     }
 
     fn latency(&mut self, ctx: &egui::Context, ui: &mut Ui) {
@@ -1062,24 +1089,24 @@ impl Tester {
             });
         }
 
-        ui.horizontal_wrapped(|ui| {
-            match self.latency_state {
-                ClientState::Running => {
-                    if ui.button("Stop test").clicked() {
-                        let latency = self.latency.as_mut().unwrap();
-                        mem::take(&mut latency.abort).unwrap().send(()).unwrap();
-                        self.latency_state = ClientState::Stopping;
+        if !active {
+            ui.horizontal_wrapped(|ui| {
+                match self.latency_state {
+                    ClientState::Running => {
+                        if ui.button("Stop test").clicked() {
+                            let latency = self.latency.as_mut().unwrap();
+                            mem::take(&mut latency.abort).unwrap().send(()).unwrap();
+                            self.latency_state = ClientState::Stopping;
+                        }
                     }
+                    ClientState::Stopping => {
+                        ui.add_enabled_ui(false, |ui| {
+                            let _ = ui.button("Stopping test..");
+                        });
+                    }
+                    ClientState::Stopped => {}
                 }
-                ClientState::Stopping => {
-                    ui.add_enabled_ui(false, |ui| {
-                        let _ = ui.button("Stopping test..");
-                    });
-                }
-                ClientState::Stopped => {}
-            }
 
-            if !active {
                 let state = *self.latency_data.state.lock();
 
                 let state = match state {
@@ -1101,8 +1128,8 @@ impl Tester {
                     self.latency = None;
                     self.latency_state = ClientState::Stopped;
                 }
-            }
-        });
+            });
+        }
 
         ui.separator();
 
@@ -1118,7 +1145,7 @@ impl Tester {
         ui.allocate_space(vec2(1.0, 15.0));
 
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-            let duration = 60.0 * 1.1;
+            let duration = self.settings.latency_monitor.history;
 
             let points = self.latency_data.points.blocking_lock().clone();
 
@@ -1130,19 +1157,28 @@ impl Tester {
             }
             .as_secs_f64();
 
+            let reset = mem::take(&mut self.latency_plot_reset);
+
             // Packet loss
-            let plot = Plot::new("latency-loss")
+            let mut plot = Plot::new("latency-loss")
                 .legend(Legend::default())
                 .show_axes([false, false])
-                .link_axis(self.axis.clone())
-                .link_cursor(self.cursor.clone())
+                .link_axis(self.latency_axis.clone())
+                .link_cursor(self.latency_cursor.clone())
                 .center_y_axis(true)
+                .allow_zoom(false)
+                .allow_boxed_zoom(false)
                 .include_x(-duration)
                 .include_x(0.0)
+                .include_x(duration * 0.15)
                 .include_y(-1.0)
                 .include_y(1.0)
                 .height(30.0)
                 .label_formatter(|_, value| format!("Time = {:.2} s", value.x));
+
+            if reset {
+                plot = plot.reset();
+            }
 
             plot.show(ui, |plot_ui| {
                 let loss = points
@@ -1176,27 +1212,24 @@ impl Tester {
             });
             ui.label("Packet loss");
 
-            let latency_max = points
-                .iter()
-                .filter_map(|point| point.total)
-                .max()
-                .unwrap_or(Duration::from_millis(10))
-                .as_secs_f64()
-                * 1000.0;
-
             // Latency
-            let plot = Plot::new("latency-ping")
+            let mut plot = Plot::new("latency-ping")
                 .legend(Legend::default())
-                .link_axis(self.axis.clone())
-                .link_cursor(self.cursor.clone())
+                .link_axis(self.latency_axis.clone())
+                .link_cursor(self.latency_cursor.clone())
                 .include_x(-duration)
                 .include_x(0.0)
                 .include_x(duration * 0.15)
                 .include_y(0.0)
-                .include_y(latency_max * 1.1)
+                .include_y(10.0)
+                .auto_bounds_y()
                 .label_formatter(|_, value| {
                     format!("Latency = {:.2} ms\nTime = {:.2} s", value.y, value.x)
                 });
+
+            if reset {
+                plot = plot.reset();
+            }
 
             plot.show(ui, |plot_ui| {
                 let latency = points.iter().filter_map(|point| {
