@@ -10,7 +10,7 @@ both running Crusader:
 a **server** that listens for connections, and
 a **client** that initiates the test.
 
-Client and server talk on TCP and UDP port 35481.
+Client and server talk (only) on TCP and UDP port 35481.
 
 ## Current Status
 
@@ -18,12 +18,11 @@ The current version of Crusader is 0.0.9.
 
 ## Setup
 
-To build all binaries:
+To build all binaries, use the commands below. Executables are placed in `src/target/release`
 
 ```sh
 cd src
 cargo build --release
-# executables are placed in src/target/release
 ```
 
 ## Crusader Server
@@ -43,21 +42,27 @@ cd src/target/release
 ./crusader test <server-ip>
 ```
 
-The client produces a `.png` file showing charts (below)
+
+The Crusader client creates three bursts of traffic
+(by default, five seconds each):
+download only, upload only, then bi-directional traffic.
+Each burst is separated by several seconds of idle time.
+
+**Output:** The client produces a `.png` file showing charts (below)
 as well as a `.crr` file with the raw data.
-The top plot shows:
 
-* Download traffic rates for five seconds
-* Upload traffic rates for five seconds
-* Bi-directional traffic rates for five seconds.
-Note that the purple plot is the instantaneous
+* The top plot shows the bursts of traffic:
+green is download, blue is upload, and
+the purple line is the instantaneous
 sum of the download plus upload.
-* A quiet band before and between each burst of traffic
 
-The lower plot shows the corresponding latency.
-_(What could be said about the significance of the green and blue latency plots?)_
+* The next plot shows the corresponding latency.
+Blue is the (uni-directional) time from the client to the server.
+Green shows the time from the server to the client (one direction).
+Black shows the sum from the client to the server 
+and back (bi-directional).
 
-At the very bottom, green and blue marks show
+* The bottom plot has green and blue marks that show
 places where packet loss occurred.
 
 <img src="media/plot.png">
