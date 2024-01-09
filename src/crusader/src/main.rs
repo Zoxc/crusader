@@ -74,6 +74,8 @@ enum Commands {
 }
 
 fn main() {
+    env_logger::init();
+
     let cli = Cli::parse();
 
     crusader_lib::plot::register_fonts();

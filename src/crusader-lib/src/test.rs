@@ -1192,6 +1192,19 @@ async fn wait_for_state(
     }
 }
 
+pub(crate) fn udp_handle(result: std::io::Result<()>) -> std::io::Result<()> {
+    match result {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            if e.raw_os_error() == Some(libc::ENOBUFS) {
+                Ok(())
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
 async fn ping_send(
     mut ping_index: u64,
     id: u64,
@@ -1229,7 +1242,7 @@ async fn ping_send(
         bincode::serialize_into(&mut cursor, &ping).unwrap();
         let buf = &cursor.get_ref()[0..(cursor.position() as usize)];
 
-        socket.send(buf).await.expect("unable to udp ping");
+        udp_handle(socket.send(buf).await.map(|_| ())).expect("unable to udp ping");
 
         storage.push(current);
     }

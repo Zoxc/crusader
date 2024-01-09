@@ -1,5 +1,6 @@
 [workspace]
 members = ["crusader", "crusader-lib", "crusader-gui-lib", "crusader-gui"]
+resolver = "1"
 
 [profile.dev]
 panic = "abort"

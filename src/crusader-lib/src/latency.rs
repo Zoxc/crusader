@@ -23,7 +23,7 @@ use tokio::{
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 use crate::protocol::{codec, receive, send, ClientMessage, Ping, ServerMessage};
-use crate::test::hello;
+use crate::test::{hello, udp_handle};
 
 type UpdateFn = Arc<dyn Fn() + Send + Sync>;
 
@@ -438,7 +438,7 @@ async fn ping_send(
         bincode::serialize_into(&mut cursor, &ping).unwrap();
         let buf = &cursor.get_ref()[0..(cursor.position() as usize)];
 
-        socket.send(buf).await.expect("unable to udp ping");
+        udp_handle(socket.send(buf).await.map(|_| ())).expect("unable to udp ping");
 
         event_tx
             .send(Event {
