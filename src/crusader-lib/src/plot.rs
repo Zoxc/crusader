@@ -225,7 +225,7 @@ pub fn to_rates(stream: &[(u64, f64)]) -> Vec<(u64, f64)> {
             let rate = if i > 0 {
                 let bytes = stream[i].1 - stream[i - 1].1;
                 let duration = Duration::from_micros(stream[i].0 - stream[i - 1].0);
-                let mbits = (bytes as f64 * 8.0) / (1000.0 * 1000.0);
+                let mbits = (bytes * 8.0) / (1000.0 * 1000.0);
                 mbits / duration.as_secs_f64()
             } else {
                 0.0
@@ -368,9 +368,9 @@ fn legends<'a, 'b: 'a>(
 
     chart
         .configure_series_labels()
-        .background_style(&WHITE.mix(0.8))
+        .background_style(WHITE.mix(0.8))
         .label_font(font)
-        .border_style(&BLACK)
+        .border_style(BLACK)
         .draw()
         .unwrap();
 }
@@ -389,7 +389,7 @@ fn latency(
         .filter_map(|latency| latency.total)
         .max()
         .unwrap_or(Duration::from_millis(100))
-        .as_secs_f64() as f64
+        .as_secs_f64()
         * 1000.0;
 
     let max_latency = max_latency * 1.05;

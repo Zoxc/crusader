@@ -813,14 +813,14 @@ impl Tester {
 
             plot.show(ui, |plot_ui| {
                 if result.result.raw_result.version >= 1 {
-                    let latency = result.up_latency.iter().map(|v| [v.0 as f64, v.1]);
+                    let latency = result.up_latency.iter().map(|v| [v.0, v.1]);
                     let latency = Line::new(PlotPoints::from_iter(latency))
                         .color(Color32::from_rgb(37, 83, 169))
                         .name("Up");
 
                     plot_ui.line(latency);
 
-                    let latency = result.down_latency.iter().map(|v| [v.0 as f64, v.1]);
+                    let latency = result.down_latency.iter().map(|v| [v.0, v.1]);
                     let latency = Line::new(PlotPoints::from_iter(latency))
                         .color(Color32::from_rgb(95, 145, 62))
                         .name("Down");
@@ -828,7 +828,7 @@ impl Tester {
                     plot_ui.line(latency);
                 }
 
-                let latency = result.latency.iter().map(|v| [v.0 as f64, v.1]);
+                let latency = result.latency.iter().map(|v| [v.0, v.1]);
                 let latency = Line::new(PlotPoints::from_iter(latency))
                     .color(Color32::from_rgb(50, 50, 50))
                     .name("Total");
@@ -857,7 +857,7 @@ impl Tester {
 
                 plot.show(ui, |plot_ui| {
                     if result.result.raw_result.download() {
-                        let download = result.download.iter().map(|v| [v.0 as f64, v.1]);
+                        let download = result.download.iter().map(|v| [v.0, v.1]);
                         let download = Line::new(PlotPoints::from_iter(download))
                             .color(Color32::from_rgb(95, 145, 62))
                             .name("Download");
@@ -865,7 +865,7 @@ impl Tester {
                         plot_ui.line(download);
                     }
                     if result.result.raw_result.upload() {
-                        let upload = result.upload.iter().map(|v| [v.0 as f64, v.1]);
+                        let upload = result.upload.iter().map(|v| [v.0, v.1]);
                         let upload = Line::new(PlotPoints::from_iter(upload))
                             .color(Color32::from_rgb(37, 83, 169))
                             .name("Upload");
@@ -873,7 +873,7 @@ impl Tester {
                         plot_ui.line(upload);
                     }
                     if result.result.raw_result.both() {
-                        let both = result.both.iter().map(|v| [v.0 as f64, v.1]);
+                        let both = result.both.iter().map(|v| [v.0, v.1]);
                         let both = Line::new(PlotPoints::from_iter(both))
                             .color(Color32::from_rgb(149, 96, 153))
                             .name("Both");
