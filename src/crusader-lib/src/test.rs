@@ -280,6 +280,7 @@ pub struct PlotConfig {
     pub transferred: bool,
     pub width: Option<u64>,
     pub height: Option<u64>,
+    pub title: Option<String>,
 }
 
 #[derive(Copy, Clone)]

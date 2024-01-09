@@ -22,6 +22,8 @@ struct PlotArgs {
     plot_width: Option<u64>,
     #[clap(long)]
     plot_height: Option<u64>,
+    #[clap(long)]
+    plot_title: Option<String>,
 }
 
 impl PlotArgs {
@@ -31,6 +33,7 @@ impl PlotArgs {
             split_bandwidth: self.plot_split_bandwidth,
             width: self.plot_width,
             height: self.plot_height,
+            title: self.plot_title.clone(),
         }
     }
 }

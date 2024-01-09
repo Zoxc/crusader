@@ -682,6 +682,8 @@ pub(crate) fn graph(
 ) {
     let width = config.width.unwrap_or(1280) as u32;
 
+    let title = config.title.as_deref().unwrap_or("Latency under load");
+
     let root =
         BitMapBackend::new(path, (width, config.height.unwrap_or(720) as u32)).into_drawing_area();
 
@@ -698,7 +700,7 @@ pub(crate) fn graph(
     let center = text_height / 2 + 10;
 
     root.draw_text(
-        "Latency under load",
+        title,
         &style.pos(Pos::new(HPos::Center, VPos::Center)),
         (width as i32 / 2, center),
     )
