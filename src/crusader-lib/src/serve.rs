@@ -21,7 +21,7 @@ use crate::peer::run_peer;
 use crate::protocol::{
     self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage, TestStream,
 };
-use crate::test;
+use crate::{test, with_time, LIB_VERSION};
 
 use std::thread;
 
@@ -634,7 +634,7 @@ async fn serve_async(
     task::spawn(listen(state.clone(), v6));
     task::spawn(listen(state.clone(), v4));
 
-    (state.msg)("Server running...");
+    (state.msg)(&format!("Server version {} running...", LIB_VERSION));
 
     Ok(())
 }
@@ -672,12 +672,12 @@ pub fn serve(port: u16) {
             port,
             Box::new(|msg: &str| {
                 let msg = msg.to_owned();
-                task::spawn_blocking(move || println!("{msg}"));
+                task::spawn_blocking(move || println!("{}", with_time(&msg)));
             }),
         )
         .await
         .unwrap();
         signal::ctrl_c().await.unwrap();
-        println!("Server aborting...");
+        println!("{}", with_time("Server aborting..."));
     });
 }

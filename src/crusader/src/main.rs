@@ -4,8 +4,8 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use clap_num::si_number;
 use crusader_lib::file_format::RawResult;
-use crusader_lib::protocol;
 use crusader_lib::test::{Config, PlotConfig};
+use crusader_lib::{protocol, with_time};
 
 #[derive(Parser)]
 struct Cli {
@@ -141,7 +141,7 @@ fn main() {
                     .and_then(|name| name.to_str())
                     .unwrap_or("plot"),
             );
-            println!("Saved plot as {}", file);
+            println!("{}", with_time(&format!("Saved plot as {}", file)));
         }
     }
 }

@@ -40,6 +40,7 @@ use crate::protocol::{
     codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
 };
 use crate::serve::OnDrop;
+use crate::{with_time, LIB_VERSION};
 
 pub(crate) type Msg = Arc<dyn Fn(&str) + Send + Sync>;
 
@@ -306,6 +307,8 @@ async fn test_async(
     latency_peer_server: Option<&str>,
     msg: Msg,
 ) -> Result<RawResult, Box<dyn Error>> {
+    msg(&format!("Client version {} running", LIB_VERSION));
+
     let control = net::TcpStream::connect((server, config.port)).await?;
     control.set_nodelay(true)?;
 
@@ -793,7 +796,7 @@ async fn test_async(
 
     let raw_result = RawResult {
         version: RawHeader::default().version,
-        generated_by: format!("Crusader {}", env!("CARGO_PKG_VERSION")),
+        generated_by: format!("Crusader {}", LIB_VERSION),
         config: raw_config,
         ipv6: server.is_ipv6(),
         load_termination_timeout,
@@ -1361,14 +1364,14 @@ pub fn test(config: Config, plot: PlotConfig, host: &str, latency_peer_server: O
             config,
             host,
             latency_peer_server,
-            Arc::new(|msg| println!("{msg}")),
+            Arc::new(|msg| println!("{}", with_time(msg))),
         ))
         .unwrap();
-    println!("Writing data...");
+    println!("{}", with_time("Writing data..."));
     let raw = save_raw(&result, "data");
-    println!("Saved raw data as {}", raw);
+    println!("{}", with_time(&format!("Saved raw data as {}", raw)));
     let file = save_graph(&plot, &result.to_test_result(), "plot");
-    println!("Saved plot as {}", file);
+    println!("{}", with_time(&format!("Saved plot as {}", file)));
 }
 
 pub fn test_callback(

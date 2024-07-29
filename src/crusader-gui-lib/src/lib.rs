@@ -18,6 +18,7 @@ use crusader_lib::{
     plot::{self, float_max, to_rates},
     protocol, serve,
     test::{self, Config, PlotConfig},
+    with_time,
 };
 use eframe::{
     egui::{
@@ -431,7 +432,7 @@ impl Tester {
                 && self.settings.client.latency_peer)
                 .then_some(&self.settings.client.latency_peer_server),
             Arc::new(move |msg| {
-                tx.send(msg.to_string()).unwrap();
+                tx.send(with_time(msg)).unwrap();
                 ctx.request_repaint();
             }),
             Box::new(move |result| {
@@ -975,7 +976,7 @@ impl Tester {
                     let stop = serve::serve_until(
                         protocol::PORT,
                         Box::new(move |msg| {
-                            tx.send(msg.to_string()).unwrap();
+                            tx.send(with_time(msg)).unwrap();
                             ctx.request_repaint();
                         }),
                         Box::new(move |result| {
