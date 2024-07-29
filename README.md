@@ -12,10 +12,6 @@ a **client** that initiates the test.
 
 Client and server talk (only) on TCP and UDP port 35481.
 
-## Current Status
-
-The current version of Crusader is 0.0.9.
-
 ## Setup
 
 To build all binaries, use the commands below. Executables are placed in `src/target/release`
