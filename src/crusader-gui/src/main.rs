@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use crusader_gui_lib::Tester;
+use crusader_lib::LIB_VERSION;
 use eframe::{egui, emath::vec2, Theme};
 
 fn main() {
@@ -25,7 +26,7 @@ fn main() {
         .map(|exe| exe.with_extension("toml"));
 
     eframe::run_native(
-        "Crusader Network Tester",
+        &format!("Crusader Network Tester {}", LIB_VERSION),
         options,
         Box::new(move |_cc| {
             Box::new(App {
