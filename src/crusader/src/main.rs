@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use clap_num::si_number;
 use crusader_lib::file_format::RawResult;
 use crusader_lib::protocol;
 use crusader_lib::test::{Config, PlotConfig};
@@ -18,6 +19,10 @@ struct PlotArgs {
     plot_transferred: bool,
     #[clap(long)]
     plot_split_bandwidth: bool,
+    #[clap(long, value_parser=si_number::<u64>, value_name = "BPS")]
+    plot_max_bandwidth: Option<u64>,
+    #[clap(long, value_name = "MILLISECONDS")]
+    plot_max_latency: Option<u64>,
     #[clap(long)]
     plot_width: Option<u64>,
     #[clap(long)]
@@ -31,6 +36,8 @@ impl PlotArgs {
         PlotConfig {
             transferred: self.plot_transferred,
             split_bandwidth: self.plot_split_bandwidth,
+            max_bandwidth: self.plot_max_bandwidth,
+            max_latency: self.plot_max_latency,
             width: self.plot_width,
             height: self.plot_height,
             title: self.plot_title.clone(),

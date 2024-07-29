@@ -1793,8 +1793,9 @@ checksum = "1df8c4ec4b0627e53bdf214615ad287367e482558cf84b109250b37464dc03ae"
 
 [[package]]
 name = "plotters"
-version = "0.3.3"
-source = "git+https://github.com/Zoxc/plotters.git?branch=ab#ceb179bb1719b31920b156710a45c9ec8fe8757c"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a15b6eccb8484002195a3e44fe65a4ce8e93a625797a063735536fd59cb01cf3"
 dependencies = [
  "ab_glyph",
  "num-traits",
@@ -1807,13 +1808,15 @@ dependencies = [
 
 [[package]]
 name = "plotters-backend"
-version = "0.3.4"
-source = "git+https://github.com/Zoxc/plotters.git?branch=ab#ceb179bb1719b31920b156710a45c9ec8fe8757c"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "414cec62c6634ae900ea1c56128dfe87cf63e7caece0852ec76aba307cebadb7"
 
 [[package]]
 name = "plotters-bitmap"
-version = "0.3.3"
-source = "git+https://github.com/Zoxc/plotters.git?branch=ab#ceb179bb1719b31920b156710a45c9ec8fe8757c"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7e7f6fb8302456d7c264a94dada86f76d76e1a03e2294ee86ca7da92983b0a6"
 dependencies = [
  "image",
  "plotters-backend",

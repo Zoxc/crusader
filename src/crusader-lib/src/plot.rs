@@ -15,9 +15,13 @@ const UP_COLOR: RGBColor = RGBColor(37, 83, 169);
 const DOWN_COLOR: RGBColor = RGBColor(95, 145, 62);
 
 pub fn register_fonts() {
-    register_font("sans-serif", include_bytes!("../Ubuntu-Light.ttf"))
-        .map_err(|_| ())
-        .unwrap();
+    register_font(
+        "sans-serif",
+        FontStyle::Normal,
+        include_bytes!("../Ubuntu-Light.ttf"),
+    )
+    .map_err(|_| ())
+    .unwrap();
 }
 
 impl RawResult {
@@ -376,6 +380,7 @@ fn legends<'a, 'b: 'a>(
 }
 
 fn latency(
+    config: &PlotConfig,
     result: &TestResult,
     pings: &[RawPing],
     start: f64,
@@ -392,7 +397,13 @@ fn latency(
         .as_secs_f64()
         * 1000.0;
 
-    let max_latency = max_latency * 1.05;
+    let mut max_latency = max_latency * 1.05;
+
+    if let Some(max) = config.max_latency.map(|l| l as f64) {
+        if max > max_latency {
+            max_latency = max;
+        }
+    }
 
     // Latency
 
@@ -503,6 +514,7 @@ fn latency(
 }
 
 fn plot_split_bandwidth(
+    config: &PlotConfig,
     download: bool,
     result: &TestResult,
     start: f64,
@@ -533,7 +545,13 @@ fn plot_split_bandwidth(
             .map(|e| e.1),
     );
 
-    let max_bandwidth = max_bandwidth * 1.05;
+    let mut max_bandwidth = max_bandwidth * 1.05;
+
+    if let Some(max) = config.max_bandwidth.map(|l| l as f64 / (1000.0 * 1000.0)) {
+        if max > max_bandwidth {
+            max_bandwidth = max;
+        }
+    }
 
     let mut chart = new_chart(
         duration,
@@ -585,6 +603,7 @@ fn plot_split_bandwidth(
 }
 
 fn plot_bandwidth(
+    config: &PlotConfig,
     bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
     start: f64,
     duration: f64,
@@ -592,7 +611,13 @@ fn plot_bandwidth(
 ) {
     let max_bandwidth = float_max(bandwidth.iter().flat_map(|list| list.2.iter()).map(|e| e.1));
 
-    let max_bandwidth = max_bandwidth * 1.05;
+    let mut max_bandwidth = max_bandwidth * 1.05;
+
+    if let Some(max) = config.max_bandwidth.map(|l| l as f64 / (1000.0 * 1000.0)) {
+        if max > max_bandwidth {
+            max_bandwidth = max;
+        }
+    }
 
     let mut chart = new_chart(
         duration,
@@ -789,20 +814,28 @@ pub(crate) fn graph(
     if result.raw_result.streams() > 0 {
         if config.split_bandwidth {
             if result.raw_result.download() || result.raw_result.both() {
-                plot_split_bandwidth(true, result, start, duration, &areas[chart_index]);
+                plot_split_bandwidth(config, true, result, start, duration, &areas[chart_index]);
                 chart_index += 1;
             }
             if result.raw_result.upload() || result.raw_result.both() {
-                plot_split_bandwidth(false, result, start, duration, &areas[chart_index]);
+                plot_split_bandwidth(config, false, result, start, duration, &areas[chart_index]);
                 chart_index += 1;
             }
         } else {
-            plot_bandwidth(bandwidth, start, duration, &areas[chart_index]);
+            plot_bandwidth(config, bandwidth, start, duration, &areas[chart_index]);
             chart_index += 1;
         }
     }
 
-    latency(result, pings, start, duration, &areas[chart_index], &loss);
+    latency(
+        config,
+        result,
+        pings,
+        start,
+        duration,
+        &areas[chart_index],
+        &loss,
+    );
     chart_index += 1;
 
     if result.raw_result.streams() > 0 && config.transferred {
