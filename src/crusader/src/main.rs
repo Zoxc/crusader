@@ -75,6 +75,8 @@ enum Commands {
         bandwidth_sample_rate: u64,
         #[clap(flatten)]
         plot: PlotArgs,
+        #[clap(long)]
+        latency_peer: Option<String>,
     },
     Plot {
         data: PathBuf,
@@ -104,6 +106,7 @@ fn main() {
             stream_stagger,
             grace_duration,
             load_duration,
+            ref latency_peer,
         } => {
             let mut config = Config {
                 port,
@@ -124,7 +127,7 @@ fn main() {
                 config.both = both;
             }
 
-            crusader_lib::test::test(config, plot.config(), server);
+            crusader_lib::test::test(config, plot.config(), server, latency_peer.as_deref());
         }
         Commands::Serve { port } => {
             crusader_lib::serve::serve(*port);

@@ -17,6 +17,7 @@ use tokio::task::{self};
 use tokio::{signal, time, time::Instant};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
+use crate::peer::run_peer;
 use crate::protocol::{
     self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage, TestStream,
 };
@@ -86,13 +87,13 @@ impl Client {
     }
 }
 
-struct State {
+pub(crate) struct State {
     started: Instant,
     dummy_data: Vec<u8>,
     clients: Mutex<Vec<Option<Arc<Client>>>>,
     pong_v6: UnboundedSender<SlotUpdate>,
     pong_v4: UnboundedSender<SlotUpdate>,
-    msg: Box<dyn Fn(&str) + Send + Sync>,
+    pub(crate) msg: Box<dyn Fn(&str) + Send + Sync>,
 }
 
 fn ip_to_ipv6_mapped(ip: IpAddr) -> Ipv6Addr {
@@ -143,6 +144,29 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
     loop {
         let request: ClientMessage = receive(&mut stream_rx).await?;
         match request {
+            ClientMessage::NewPeer {
+                server,
+                port,
+                ping_interval,
+                estimated_duration,
+            } => {
+                (state.msg)(&format!(
+                    "Serving as peer for {}, version {}",
+                    addr, hello.version
+                ));
+
+                run_peer(
+                    state,
+                    Ipv6Addr::from(server).to_canonical(),
+                    port,
+                    Duration::from_millis(ping_interval),
+                    Duration::from_millis(estimated_duration as u64),
+                    &mut stream_rx,
+                    &mut stream_tx,
+                )
+                .await?;
+                return Ok(());
+            }
             ClientMessage::NewClient => {
                 (state.msg)(&format!("Serving {}, version {}", addr, hello.version));
 
@@ -456,7 +480,9 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             msg @ (ClientMessage::StopMeasurements
             | ClientMessage::ScheduleLoads { .. }
             | ClientMessage::LoadComplete { .. }
-            | ClientMessage::SendByte) => {
+            | ClientMessage::SendByte
+            | ClientMessage::PeerStart
+            | ClientMessage::PeerStop) => {
                 return Err(format!("Unexpected message {:?}", msg).into());
             }
         };

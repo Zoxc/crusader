@@ -13,7 +13,7 @@ use std::{
 };
 
 use crusader_lib::{
-    file_format::RawResult,
+    file_format::{RawPing, RawResult},
     latency,
     plot::{self, float_max, to_rates},
     protocol, serve,
@@ -110,6 +110,8 @@ pub struct ClientSettings {
     pub stream_stagger: f64,
     pub latency_sample_rate: u64,
     pub bandwidth_sample_rate: u64,
+    pub latency_peer: bool,
+    pub latency_peer_server: String,
 }
 
 impl Default for ClientSettings {
@@ -125,6 +127,8 @@ impl Default for ClientSettings {
             stream_stagger: 0.0,
             latency_sample_rate: 5,
             bandwidth_sample_rate: 20,
+            latency_peer: false,
+            latency_peer_server: String::new(),
         }
     }
 }
@@ -177,28 +181,17 @@ pub struct Tester {
     latency_plot_reset: bool,
 }
 
-pub struct TestResult {
-    result: plot::TestResult,
-    download: Vec<(f64, f64)>,
-    upload: Vec<(f64, f64)>,
-    both: Vec<(f64, f64)>,
-    latency: Vec<(f64, f64)>,
-    latency_max: f64,
-    up_latency: Vec<(f64, f64)>,
-    down_latency: Vec<(f64, f64)>,
+pub struct LatencyResult {
+    total: Vec<(f64, f64)>,
+    max: f64,
+    up: Vec<(f64, f64)>,
+    down: Vec<(f64, f64)>,
     loss: Vec<(f64, Option<bool>)>,
-    bandwidth_max: f64,
 }
-
-impl TestResult {
-    fn new(result: plot::TestResult) -> Self {
+impl LatencyResult {
+    fn new(result: &plot::TestResult, pings: &[RawPing]) -> Self {
         let start = result.start.as_secs_f64();
-        let download = handle_bytes(&result.combined_download_bytes, start);
-        let upload = handle_bytes(&result.combined_upload_bytes, start);
-        let both = handle_bytes(result.both_bytes.as_deref().unwrap_or(&[]), start);
-
-        let latency: Vec<_> = result
-            .pings
+        let total: Vec<_> = pings
             .iter()
             .filter(|p| p.sent >= result.start)
             .filter_map(|p| {
@@ -210,8 +203,7 @@ impl TestResult {
             })
             .collect();
 
-        let up_latency: Vec<_> = result
-            .pings
+        let up: Vec<_> = pings
             .iter()
             .filter(|p| p.sent >= result.start)
             .filter_map(|p| {
@@ -224,8 +216,7 @@ impl TestResult {
             })
             .collect();
 
-        let down_latency: Vec<_> = result
-            .pings
+        let down: Vec<_> = pings
             .iter()
             .filter(|p| p.sent >= result.start)
             .filter_map(|p| {
@@ -237,8 +228,7 @@ impl TestResult {
             })
             .collect();
 
-        let loss = result
-            .pings
+        let loss = pings
             .iter()
             .filter(|p| p.sent >= result.start)
             .filter_map(|ping| {
@@ -251,23 +241,51 @@ impl TestResult {
                 }
             })
             .collect();
+        let max = float_max(total.iter().map(|v| v.1));
+        LatencyResult {
+            total,
+            up,
+            down,
+            loss,
+            max,
+        }
+    }
+}
+
+pub struct TestResult {
+    result: plot::TestResult,
+    download: Vec<(f64, f64)>,
+    upload: Vec<(f64, f64)>,
+    both: Vec<(f64, f64)>,
+    local_latency: LatencyResult,
+    peer_latency: Option<LatencyResult>,
+    bandwidth_max: f64,
+}
+
+impl TestResult {
+    fn new(result: plot::TestResult) -> Self {
+        let start = result.start.as_secs_f64();
+        let download = handle_bytes(&result.combined_download_bytes, start);
+        let upload = handle_bytes(&result.combined_upload_bytes, start);
+        let both = handle_bytes(result.both_bytes.as_deref().unwrap_or(&[]), start);
+
         let download_max = float_max(download.iter().map(|v| v.1));
         let upload_max = float_max(upload.iter().map(|v| v.1));
         let both_max = float_max(both.iter().map(|v| v.1));
         let bandwidth_max = float_max([download_max, upload_max, both_max].into_iter());
-        let latency_max = float_max(latency.iter().map(|v| v.1));
 
         TestResult {
-            result,
             download,
             upload,
             both,
-            latency,
-            up_latency,
-            down_latency,
-            loss,
             bandwidth_max,
-            latency_max,
+            local_latency: LatencyResult::new(&result, &result.pings),
+            peer_latency: result
+                .raw_result
+                .peer_pings
+                .as_ref()
+                .map(|pings| LatencyResult::new(&result, pings)),
+            result,
         }
     }
 }
@@ -409,6 +427,9 @@ impl Tester {
         let abort = test::test_callback(
             self.config(),
             &self.settings.client.server,
+            (!self.settings.client.latency_peer_server.trim().is_empty()
+                && self.settings.client.latency_peer)
+                .then_some(&self.settings.client.latency_peer_server),
             Arc::new(move |msg| {
                 tx.send(msg.to_string()).unwrap();
                 ctx.request_repaint();
@@ -616,6 +637,17 @@ impl Tester {
                             ui.end_row();
                         });
                     }
+
+                    ui.separator();
+
+                    ui.horizontal_wrapped(|ui| {
+                        ui.checkbox(&mut self.settings.client.latency_peer, "Latency peer:");
+                        ui.add_enabled_ui(self.settings.client.latency_peer, |ui| {
+                            ui.add(TextEdit::singleline(
+                                &mut self.settings.client.latency_peer_server,
+                            ));
+                        });
+                    });
                 });
 
                 if self.client_state == ClientState::Running
@@ -663,6 +695,121 @@ impl Tester {
                     }
                 }
             });
+    }
+
+    fn latency_and_loss(&mut self, ui: &mut Ui, reset: bool, peer: bool, height: f32, plots: u8) {
+        let result = self.result.as_ref().unwrap();
+
+        let data = if peer {
+            result.peer_latency.as_ref().unwrap()
+        } else {
+            &result.local_latency
+        };
+
+        let duration = result.result.duration.as_secs_f64() * 1.1;
+
+        // Packet loss
+        let mut plot = Plot::new((peer, "loss"))
+            .legend(Legend::default())
+            .show_axes([false, false])
+            .link_axis(self.axis.clone())
+            .link_cursor(self.cursor.clone())
+            .center_y_axis(true)
+            .allow_zoom(false)
+            .allow_boxed_zoom(false)
+            .include_x(0.0)
+            .include_x(duration)
+            .include_y(-1.0)
+            .include_y(1.0)
+            .height(30.0)
+            .label_formatter(|_, value| format!("Time = {:.2} s", value.x));
+
+        if reset {
+            plot = plot.reset();
+        }
+
+        plot.show(ui, |plot_ui| {
+            for &(loss, down_loss) in &data.loss {
+                let (color, s, e) = down_loss
+                    .map(|down_loss| {
+                        if down_loss {
+                            (Color32::from_rgb(95, 145, 62), 1.0, 0.0)
+                        } else {
+                            (Color32::from_rgb(37, 83, 169), -1.0, 0.0)
+                        }
+                    })
+                    .unwrap_or((Color32::from_rgb(193, 85, 85), -1.0, 1.0));
+
+                plot_ui.line(
+                    Line::new(PlotPoints::from_iter(
+                        [[loss, s], [loss, e]].iter().copied(),
+                    ))
+                    .color(color),
+                );
+
+                if down_loss.is_some() {
+                    plot_ui.line(
+                        Line::new(PlotPoints::from_iter(
+                            [[loss, s], [loss, s - s / 5.0]].iter().copied(),
+                        ))
+                        .width(3.0)
+                        .color(color),
+                    );
+                }
+            }
+        });
+        ui.label(if peer {
+            "Peer packet loss"
+        } else {
+            "Packet loss"
+        });
+
+        // Latency
+        let mut plot = Plot::new((peer, "ping"))
+            .legend(Legend::default())
+            .link_axis(self.axis.clone())
+            .link_cursor(self.cursor.clone())
+            .include_x(0.0)
+            .include_x(duration)
+            .include_y(0.0)
+            .include_y(data.max * 1.1)
+            .label_formatter(|_, value| {
+                format!("Latency = {:.2} ms\nTime = {:.2} s", value.y, value.x)
+            });
+
+        if reset {
+            plot = plot.reset();
+        }
+
+        if plots > 1 {
+            plot = plot.height(height / (plots as f32) - 63.0)
+        }
+
+        plot.show(ui, |plot_ui| {
+            if result.result.raw_result.version >= 1 {
+                let latency = data.up.iter().map(|v| [v.0, v.1]);
+                let latency = Line::new(PlotPoints::from_iter(latency))
+                    .color(Color32::from_rgb(37, 83, 169))
+                    .name("Up");
+
+                plot_ui.line(latency);
+
+                let latency = data.down.iter().map(|v| [v.0, v.1]);
+                let latency = Line::new(PlotPoints::from_iter(latency))
+                    .color(Color32::from_rgb(95, 145, 62))
+                    .name("Down");
+
+                plot_ui.line(latency);
+            }
+
+            let latency = data.total.iter().map(|v| [v.0, v.1]);
+            let latency = Line::new(PlotPoints::from_iter(latency))
+                .color(Color32::from_rgb(50, 50, 50))
+                .name("Total");
+
+            plot_ui.line(latency);
+        });
+        ui.label(if peer { "Peer latency" } else { "Latency" });
     }
 
     fn result(&mut self, _ctx: &egui::Context, ui: &mut Ui) {
@@ -736,106 +883,23 @@ impl Tester {
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
             let reset = mem::take(&mut self.result_plot_reset);
 
+            let result = self.result.as_ref().unwrap();
+
+            let height = ui.available_height();
+
+            let plots = 1
+                + (result.result.raw_result.streams() > 0) as u8
+                + result.peer_latency.is_some() as u8;
+
+            if result.peer_latency.is_some() {
+                self.latency_and_loss(ui, reset, true, height, plots);
+            }
+
+            self.latency_and_loss(ui, reset, false, height, plots);
+
+            let result = self.result.as_ref().unwrap();
+
             let duration = result.result.duration.as_secs_f64() * 1.1;
-
-            // Packet loss
-            let mut plot = Plot::new("loss")
-                .legend(Legend::default())
-                .show_axes([false, false])
-                .link_axis(self.axis.clone())
-                .link_cursor(self.cursor.clone())
-                .center_y_axis(true)
-                .allow_zoom(false)
-                .allow_boxed_zoom(false)
-                .include_x(0.0)
-                .include_x(duration)
-                .include_y(-1.0)
-                .include_y(1.0)
-                .height(30.0)
-                .label_formatter(|_, value| format!("Time = {:.2} s", value.x));
-
-            if reset {
-                plot = plot.reset();
-            }
-
-            plot.show(ui, |plot_ui| {
-                for &(loss, down_loss) in &result.loss {
-                    let (color, s, e) = down_loss
-                        .map(|down_loss| {
-                            if down_loss {
-                                (Color32::from_rgb(95, 145, 62), 1.0, 0.0)
-                            } else {
-                                (Color32::from_rgb(37, 83, 169), -1.0, 0.0)
-                            }
-                        })
-                        .unwrap_or((Color32::from_rgb(193, 85, 85), -1.0, 1.0));
-
-                    plot_ui.line(
-                        Line::new(PlotPoints::from_iter(
-                            [[loss, s], [loss, e]].iter().copied(),
-                        ))
-                        .color(color),
-                    );
-
-                    if down_loss.is_some() {
-                        plot_ui.line(
-                            Line::new(PlotPoints::from_iter(
-                                [[loss, s], [loss, s - s / 5.0]].iter().copied(),
-                            ))
-                            .width(3.0)
-                            .color(color),
-                        );
-                    }
-                }
-            });
-            ui.label("Packet loss");
-
-            // Latency
-            let mut plot = Plot::new("ping")
-                .legend(Legend::default())
-                .link_axis(self.axis.clone())
-                .link_cursor(self.cursor.clone())
-                .include_x(0.0)
-                .include_x(duration)
-                .include_y(0.0)
-                .include_y(result.latency_max * 1.1)
-                .label_formatter(|_, value| {
-                    format!("Latency = {:.2} ms\nTime = {:.2} s", value.y, value.x)
-                });
-
-            if reset {
-                plot = plot.reset();
-            }
-
-            if result.result.raw_result.streams() > 0 {
-                plot = plot.height(ui.available_height() / 2.0)
-            }
-
-            plot.show(ui, |plot_ui| {
-                if result.result.raw_result.version >= 1 {
-                    let latency = result.up_latency.iter().map(|v| [v.0, v.1]);
-                    let latency = Line::new(PlotPoints::from_iter(latency))
-                        .color(Color32::from_rgb(37, 83, 169))
-                        .name("Up");
-
-                    plot_ui.line(latency);
-
-                    let latency = result.down_latency.iter().map(|v| [v.0, v.1]);
-                    let latency = Line::new(PlotPoints::from_iter(latency))
-                        .color(Color32::from_rgb(95, 145, 62))
-                        .name("Down");
-
-                    plot_ui.line(latency);
-                }
-
-                let latency = result.latency.iter().map(|v| [v.0, v.1]);
-                let latency = Line::new(PlotPoints::from_iter(latency))
-                    .color(Color32::from_rgb(50, 50, 50))
-                    .name("Total");
-
-                plot_ui.line(latency);
-            });
-            ui.label("Latency");
 
             if result.result.raw_result.streams() > 0 {
                 // Bandwidth

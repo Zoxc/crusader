@@ -5,6 +5,8 @@ use futures::{Sink, SinkExt, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio_util::codec::{length_delimited, LengthDelimitedCodec};
 
+use crate::file_format::RawLatency;
+
 pub const PORT: u16 = 35481;
 
 pub const MAGIC: u64 = 0x5372ab82ae7c59cb;
@@ -33,8 +35,14 @@ pub struct TestStream {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LatencyMeasure {
-    pub time: u64,
+    pub time: u64, // In microseconds and in server time
     pub index: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PeerLatency {
+    pub sent: u64, // In microseconds and in server time
+    pub latency: Option<RawLatency>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -62,6 +70,15 @@ pub enum ServerMessage {
     },
     WaitingForLoad,
     WaitingForByte,
+    NewPeer,
+    PeerReady {
+        server_latency: u64,
+    },
+    PeerStarted,
+    PeerDone {
+        overload: bool,
+        latencies: Vec<PeerLatency>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -90,6 +107,14 @@ pub enum ClientMessage {
     SendByte,
     GetMeasurements,
     StopMeasurements,
+    NewPeer {
+        server: [u8; 16],
+        port: u16,
+        ping_interval: u64,
+        estimated_duration: u128,
+    },
+    PeerStart,
+    PeerStop,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

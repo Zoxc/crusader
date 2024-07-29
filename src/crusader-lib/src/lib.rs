@@ -9,6 +9,7 @@
 
 pub mod file_format;
 pub mod latency;
+mod peer;
 pub mod plot;
 pub mod protocol;
 pub mod serve;

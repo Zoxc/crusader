@@ -34,18 +34,19 @@ use tokio_util::codec::{Framed, FramedRead, FramedWrite, LengthDelimitedCodec};
 use crate::file_format::{
     RawConfig, RawHeader, RawLatency, RawPing, RawPoint, RawResult, RawStream, RawStreamGroup,
 };
+use crate::peer::connect_to_peer;
 use crate::plot::save_graph;
 use crate::protocol::{
     codec, receive, send, ClientMessage, Hello, Ping, ServerMessage, TestStream,
 };
 use crate::serve::OnDrop;
 
-type Msg = Arc<dyn Fn(&str) + Send + Sync>;
+pub(crate) type Msg = Arc<dyn Fn(&str) + Send + Sync>;
 
 const MEASURE_DELAY: Duration = Duration::from_millis(50);
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy, PartialOrd, Ord)]
-enum TestState {
+pub(crate) enum TestState {
     Setup,
     Grace1,
     LoadFromClient,
@@ -299,7 +300,12 @@ pub struct Config {
     pub bandwidth_interval: Duration,
 }
 
-async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult, Box<dyn Error>> {
+async fn test_async(
+    config: Config,
+    server: &str,
+    latency_peer_server: Option<&str>,
+    msg: Msg,
+) -> Result<RawResult, Box<dyn Error>> {
     let control = net::TcpStream::connect((server, config.port)).await?;
     control.set_nodelay(true)?;
 
@@ -322,6 +328,22 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         ServerMessage::NewClient(Some(id)) => id,
         ServerMessage::NewClient(None) => return Err("Server was unable to create client".into()),
         _ => return Err(format!("Unexpected message {:?}", reply).into()),
+    };
+
+    let loading_streams: u32 = config.streams.try_into().unwrap();
+
+    let grace = config.grace_duration;
+    let load_duration = config.load_duration;
+    let ping_interval = config.ping_interval;
+
+    let loads = config.both as u32 + config.download as u32 + config.upload as u32;
+
+    let estimated_duration = load_duration * loads + grace * 2;
+
+    let mut peer = if let Some(peer) = latency_peer_server {
+        Some(connect_to_peer(config, server, peer, estimated_duration, msg.clone()).await?)
+    } else {
+        None
     };
 
     let local_udp = if server.is_ipv6() {
@@ -353,16 +375,6 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
     let udp_socket2 = udp_socket.clone();
 
     let data = Arc::new(data());
-
-    let loading_streams: u32 = config.streams.try_into().unwrap();
-
-    let grace = config.grace_duration;
-    let load_duration = config.load_duration;
-    let ping_interval = config.ping_interval;
-
-    let loads = config.both as u32 + config.download as u32 + config.upload as u32;
-
-    let estimated_duration = load_duration * loads + grace * 2;
 
     let state = Arc::new(State {
         downloads: Mutex::new(HashMap::new()),
@@ -509,6 +521,10 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         (latencies, bandwidth, overload_)
     });
 
+    if let Some(peer) = peer.as_mut() {
+        peer.start().await?;
+    }
+
     let ping_start_index = ping_index;
     let ping_send = tokio::spawn(ping_send(
         ping_index,
@@ -616,11 +632,21 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
 
     state_tx.send((TestState::End, Instant::now())).unwrap();
 
+    if let Some(peer) = peer.as_mut() {
+        peer.stop().await?;
+    }
+
     // Wait for pings to return
     time::sleep(Duration::from_millis(500)).await;
     state_tx
         .send((TestState::EndPingRecv, Instant::now()))
         .unwrap();
+
+    let peer = if let Some(peer) = peer {
+        Some(peer.complete().await?)
+    } else {
+        None
+    };
 
     let duration = start.elapsed();
 
@@ -631,6 +657,20 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
     let mut pongs = ping_recv.await?;
 
     let (mut latencies, bandwidth, server_overload) = measures.await?;
+
+    let server_overload = server_overload || peer.as_ref().map(|p| p.0).unwrap_or_default();
+
+    let peer_latencies = peer.map(|(_, latencies)| {
+        latencies
+            .into_iter()
+            .enumerate()
+            .map(|(i, p)| RawPing {
+                index: i as u64,
+                sent: Duration::from_micros(p.sent.wrapping_add(server_time_offset)),
+                latency: p.latency,
+            })
+            .collect::<Vec<_>>()
+    });
 
     let download_bytes = wait_on_download_loaders(download).await;
     let both_download_bytes = wait_on_download_loaders(both_download).await;
@@ -763,12 +803,13 @@ async fn test_async(config: Config, server: &str, msg: Msg) -> Result<RawResult,
         duration,
         stream_groups: raw_streams,
         pings,
+        peer_pings: peer_latencies,
     };
 
     Ok(raw_result)
 }
 
-async fn measure_latency(
+pub(crate) async fn measure_latency(
     id: u64,
     ping_index: &mut u64,
     mut control_tx: &mut FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
@@ -1208,7 +1249,7 @@ pub(crate) fn udp_handle(result: std::io::Result<()>) -> std::io::Result<()> {
     }
 }
 
-async fn ping_send(
+pub(crate) async fn ping_send(
     mut ping_index: u64,
     id: u64,
     state_rx: watch::Receiver<(TestState, Instant)>,
@@ -1253,7 +1294,7 @@ async fn ping_send(
     storage
 }
 
-async fn ping_recv(
+pub(crate) async fn ping_recv(
     mut state_rx: watch::Receiver<(TestState, Instant)>,
     setup_start: Instant,
     socket: Arc<UdpSocket>,
@@ -1313,10 +1354,15 @@ pub(crate) fn unique(name: &str, ext: &str) -> String {
     }
 }
 
-pub fn test(config: Config, plot: PlotConfig, host: &str) {
+pub fn test(config: Config, plot: PlotConfig, host: &str, latency_peer_server: Option<&str>) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let result = rt
-        .block_on(test_async(config, host, Arc::new(|msg| println!("{msg}"))))
+        .block_on(test_async(
+            config,
+            host,
+            latency_peer_server,
+            Arc::new(|msg| println!("{msg}")),
+        ))
         .unwrap();
     println!("Writing data...");
     let raw = save_raw(&result, "data");
@@ -1328,17 +1374,19 @@ pub fn test(config: Config, plot: PlotConfig, host: &str) {
 pub fn test_callback(
     config: Config,
     host: &str,
+    latency_peer_server: Option<&str>,
     msg: Arc<dyn Fn(&str) + Send + Sync>,
     done: Box<dyn FnOnce(Option<Result<RawResult, String>>) + Send>,
 ) -> oneshot::Sender<()> {
     let (tx, rx) = oneshot::channel();
     let host = host.to_string();
+    let latency_peer_server = latency_peer_server.map(|host| host.to_string());
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
 
         done(rt.block_on(async move {
             let mut result = task::spawn(async move {
-                test_async(config, &host, msg)
+                test_async(config, &host, latency_peer_server.as_deref(), msg)
                     .await
                     .map_err(|error| error.to_string())
             })

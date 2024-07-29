@@ -379,15 +379,26 @@ fn legends<'a, 'b: 'a>(
         .unwrap();
 }
 
-fn latency(
+fn latency<'a>(
     config: &PlotConfig,
     result: &TestResult,
     pings: &[RawPing],
     start: f64,
     duration: f64,
-    area: &DrawingArea<BitMapBackend, Shift>,
-    packet_loss_area: &DrawingArea<BitMapBackend, Shift>,
+    area: &DrawingArea<BitMapBackend<'a>, Shift>,
+    packet_loss_area: Option<&DrawingArea<BitMapBackend<'a>, Shift>>,
+    peer: bool,
 ) {
+    let new_area;
+    let new_packet_loss_area;
+    let (packet_loss_area, area) = if let Some(packet_loss_area) = packet_loss_area {
+        (packet_loss_area, area)
+    } else {
+        (new_area, new_packet_loss_area) =
+            area.split_vertically(area.relative_to_height(1.0) - 70.0);
+        (&new_packet_loss_area, &new_area)
+    };
+
     let max_latency = pings
         .iter()
         .filter_map(|d| d.latency)
@@ -407,7 +418,18 @@ fn latency(
 
     // Latency
 
-    let mut chart = new_chart(duration, None, max_latency, "Latency (ms)", None, area);
+    let mut chart = new_chart(
+        duration,
+        None,
+        max_latency,
+        if peer {
+            "Peer latency (ms)"
+        } else {
+            "Latency (ms)"
+        },
+        None,
+        area,
+    );
 
     let mut draw_latency =
         |color: RGBColor, name: &str, get_latency: fn(&RawLatency) -> Option<Duration>| {
@@ -473,7 +495,7 @@ fn latency(
         duration,
         Some(30),
         1.0,
-        "Packet loss",
+        if peer { "Peer loss" } else { "Packet loss" },
         Some("Elapsed time (seconds)"),
         packet_loss_area,
     );
@@ -707,10 +729,18 @@ pub(crate) fn graph(
 ) {
     let width = config.width.unwrap_or(1280) as u32;
 
+    let peer_latency = result.raw_result.peer_pings.is_some();
+
+    let mut def_height = 720;
+
+    if peer_latency {
+        def_height += 380;
+    }
+
     let title = config.title.as_deref().unwrap_or("Latency under load");
 
-    let root =
-        BitMapBackend::new(path, (width, config.height.unwrap_or(720) as u32)).into_drawing_area();
+    let root = BitMapBackend::new(path, (width, config.height.unwrap_or(def_height) as u32))
+        .into_drawing_area();
 
     root.fill(&WHITE).unwrap();
 
@@ -782,11 +812,21 @@ pub(crate) fn graph(
         .unwrap();
     }
 
-    let root = root.split_vertically(text_height + 10).1;
+    let mut root = root.split_vertically(text_height + 10).1;
 
-    let (root, loss) = root.split_vertically(root.relative_to_height(1.0) - 70.0);
+    let loss = if !peer_latency {
+        let loss;
+        (root, loss) = root.split_vertically(root.relative_to_height(1.0) - 70.0);
+        Some(loss)
+    } else {
+        None
+    };
 
     let mut charts = 1;
+
+    if peer_latency {
+        charts += 1;
+    }
 
     if result.raw_result.streams() > 0 {
         if config.split_bandwidth {
@@ -834,9 +874,24 @@ pub(crate) fn graph(
         start,
         duration,
         &areas[chart_index],
-        &loss,
+        loss.as_ref(),
+        false,
     );
     chart_index += 1;
+
+    if let Some(peer_pings) = result.raw_result.peer_pings.as_ref() {
+        latency(
+            config,
+            result,
+            peer_pings,
+            start,
+            duration,
+            &areas[chart_index],
+            None,
+            true,
+        );
+        chart_index += 1;
+    }
 
     if result.raw_result.streams() > 0 && config.transferred {
         bytes_transferred(bandwidth, start, duration, &areas[chart_index]);

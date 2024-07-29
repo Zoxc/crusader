@@ -86,6 +86,7 @@ impl RawResultV0 {
             pings: self.pings.iter().map(|ping| ping.to_v1()).collect(),
             server_overload: false,
             load_termination_timeout: false,
+            peer_pings: None,
         }
     }
 }
@@ -117,7 +118,7 @@ pub struct RawStreamGroup {
     pub streams: Vec<RawStream>,
 }
 
-#[derive(Serialize, Deserialize, Copy, Clone)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug)]
 pub struct RawLatency {
     // Changed from Duration to Option<Duration> in v2.
     pub total: Option<Duration>,
@@ -130,7 +131,7 @@ impl RawLatency {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RawPing {
     pub index: u64,
     pub sent: Duration,
@@ -177,6 +178,8 @@ pub struct RawResult {
     pub duration: Duration,
     pub stream_groups: Vec<RawStreamGroup>,
     pub pings: Vec<RawPing>,
+    #[serde(default)]
+    pub peer_pings: Option<Vec<RawPing>>, // Added in V2
 }
 
 impl RawResult {
