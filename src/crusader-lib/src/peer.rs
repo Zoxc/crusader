@@ -1,3 +1,4 @@
+use anyhow::bail;
 use std::{
     error::Error,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -182,7 +183,7 @@ pub async fn run_peer(
         let overload_;
 
         loop {
-            let reply: ServerMessage = receive(&mut control_rx).await.unwrap();
+            let reply: ServerMessage = receive(&mut control_rx).await?;
             match reply {
                 ServerMessage::LatencyMeasures(measures) => {
                     latencies.extend(measures.into_iter());
@@ -191,11 +192,11 @@ pub async fn run_peer(
                     overload_ = overload;
                     break;
                 }
-                _ => panic!("Unexpected message {:?}", reply),
+                _ => bail!("Unexpected message {:?}", reply),
             };
         }
 
-        (latencies, overload_)
+        Ok((latencies, overload_))
     });
 
     send(
@@ -240,14 +241,12 @@ pub async fn run_peer(
         _ => return Err(format!("Unexpected message {:?}", reply).into()),
     };
 
-    state_tx.send((TestState::End, Instant::now())).unwrap();
+    state_tx.send((TestState::End, Instant::now())).ok();
 
     // Wait for pings to return
     time::sleep(Duration::from_millis(500)).await;
 
-    state_tx
-        .send((TestState::EndPingRecv, Instant::now()))
-        .unwrap();
+    state_tx.send((TestState::EndPingRecv, Instant::now())).ok();
 
     let pings_sent = ping_send.await?;
     send(&mut control_tx, &ClientMessage::StopMeasurements).await?;
@@ -255,7 +254,7 @@ pub async fn run_peer(
 
     let mut pongs = ping_recv.await?;
 
-    let (mut latencies, server_overload) = measures.await?;
+    let (mut latencies, server_overload) = measures.await??;
 
     latencies.sort_by_key(|d| d.index);
     pongs.sort_by_key(|d| d.0.index);

@@ -22,6 +22,7 @@ use tokio::join;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::watch::error::RecvError;
 use tokio::sync::{oneshot, watch, Semaphore};
 use tokio::task::{self, yield_now, JoinHandle};
 use tokio::time::Instant;
@@ -86,7 +87,7 @@ async fn hello_combined<S: Sink<Bytes> + Stream<Item = Result<BytesMut, S::Error
     stream: &mut S,
 ) -> Result<(), Box<dyn Error>>
 where
-    S::Error: Error + 'static,
+    S::Error: Error + Send + Sync + 'static,
 {
     let hello = Hello::new();
 
@@ -112,8 +113,8 @@ pub(crate) async fn hello<
     rx: &mut R,
 ) -> Result<(), Box<dyn Error>>
 where
-    T::Error: Error + 'static,
-    RE: Error + 'static,
+    T::Error: Error + Send + Sync + 'static,
+    RE: Error + Send + Sync + 'static,
 {
     let hello = Hello::new();
 
@@ -840,11 +841,11 @@ pub(crate) async fn measure_latency(
                     latencies.extend(measures.into_iter());
                 }
                 ServerMessage::MeasurementsDone { .. } => break,
-                _ => panic!("Unexpected message {:?}", reply),
+                _ => return Err(format!("Unexpected message {:?}", reply)),
             };
         }
 
-        (latencies, control_rx)
+        Ok((latencies, control_rx))
     });
 
     let udp_socket = Arc::new(net::UdpSocket::bind(local_udp).await?);
@@ -868,11 +869,11 @@ pub(crate) async fn measure_latency(
 
     send(&mut control_tx, &ClientMessage::StopMeasurements).await?;
 
-    let (mut latencies, control_rx) = latencies.await?;
+    let (mut latencies, control_rx) = latencies.await??;
 
-    let (sent, new_ping_index) = sent.unwrap();
+    let (sent, new_ping_index) = sent??;
     *ping_index = new_ping_index;
-    let mut recv = recv.unwrap();
+    let mut recv = recv??;
 
     latencies.sort_by_key(|d| d.index);
     recv.sort_by_key(|d| d.0.index);
@@ -914,7 +915,7 @@ async fn ping_measure_send(
     setup_start: Instant,
     socket: Arc<UdpSocket>,
     samples: u32,
-) -> (Vec<Duration>, u64) {
+) -> Result<(Vec<Duration>, u64), anyhow::Error> {
     let mut storage = Vec::with_capacity(samples as usize);
     let mut buf = [0; 64];
 
@@ -930,22 +931,22 @@ async fn ping_measure_send(
         index += 1;
 
         let mut cursor = Cursor::new(&mut buf[..]);
-        bincode::serialize_into(&mut cursor, &ping).unwrap();
+        bincode::serialize_into(&mut cursor, &ping)?;
         let buf = &cursor.get_ref()[0..(cursor.position() as usize)];
 
-        socket.send(buf).await.unwrap();
+        socket.send(buf).await?;
 
         storage.push(current);
     }
 
-    (storage, index)
+    Ok((storage, index))
 }
 
 async fn ping_measure_recv(
     setup_start: Instant,
     socket: Arc<UdpSocket>,
     samples: u32,
-) -> Vec<(Ping, Duration)> {
+) -> Result<Vec<(Ping, Duration)>, anyhow::Error> {
     let mut storage = Vec::with_capacity(samples as usize);
     let mut buf = [0; 64];
 
@@ -964,14 +965,14 @@ async fn ping_measure_recv(
         };
 
         let current = setup_start.elapsed();
-        let len = result.unwrap();
+        let len = result?;
         let buf = &mut buf[..len];
-        let ping: Ping = bincode::deserialize(buf).unwrap();
+        let ping: Ping = bincode::deserialize(buf)?;
 
         storage.push((ping, current));
     }
 
-    storage
+    Ok(storage)
 }
 
 pub fn save_raw(result: &RawResult, name: &str) -> String {
@@ -1067,7 +1068,7 @@ fn upload_loaders(
 
             all_loaders.add_permits(1);
 
-            let start = wait_for_state(&mut state_rx, state).await + MEASURE_DELAY + delay;
+            let start = wait_for_state(&mut state_rx, state).await.unwrap() + MEASURE_DELAY + delay;
 
             time::sleep_until(start).await;
 
@@ -1174,7 +1175,7 @@ fn download_loaders(
 
                 all_loaders.add_permits(1);
 
-                let start = wait_for_state(&mut state_rx, test_state).await + delay;
+                let start = wait_for_state(&mut state_rx, test_state).await.unwrap() + delay;
 
                 time::sleep_until(start).await;
 
@@ -1227,15 +1228,15 @@ fn download_loaders(
 async fn wait_for_state(
     state_rx: &mut watch::Receiver<(TestState, Instant)>,
     state: TestState,
-) -> Instant {
+) -> Result<Instant, RecvError> {
     loop {
         {
             let current = state_rx.borrow_and_update();
             if current.0 == state {
-                return current.1;
+                return Ok(current.1);
             }
         }
-        state_rx.changed().await.unwrap();
+        state_rx.changed().await?;
     }
 }
 

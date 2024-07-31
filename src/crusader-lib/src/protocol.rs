@@ -1,8 +1,8 @@
-use std::error::Error;
-
+use anyhow::anyhow;
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::error::Error;
 use tokio_util::codec::{length_delimited, LengthDelimitedCodec};
 
 use crate::file_format::RawLatency;
@@ -142,10 +142,10 @@ where
 
 pub async fn receive<S: Stream<Item = Result<BytesMut, E>> + Unpin, T: for<'a> Deserialize<'a>, E>(
     stream: &mut S,
-) -> Result<T, Box<dyn Error>>
+) -> Result<T, anyhow::Error>
 where
-    E: Error + 'static,
+    E: Error + Send + Sync + 'static,
 {
-    let bytes = stream.next().await.ok_or("Expected object")??;
+    let bytes = stream.next().await.ok_or(anyhow!("Expected object"))??;
     Ok(bincode::deserialize(&bytes)?)
 }
