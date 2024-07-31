@@ -1357,21 +1357,32 @@ pub(crate) fn unique(name: &str, ext: &str) -> String {
     }
 }
 
-pub fn test(config: Config, plot: PlotConfig, host: &str, latency_peer_server: Option<&str>) {
+pub fn test(
+    config: Config,
+    plot: PlotConfig,
+    host: &str,
+    latency_peer_server: Option<&str>,
+) -> Result<(), Box<dyn Error>> {
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let result = rt
-        .block_on(test_async(
-            config,
-            host,
-            latency_peer_server,
-            Arc::new(|msg| println!("{}", with_time(msg))),
-        ))
-        .unwrap();
+    let result = rt.block_on(test_async(
+        config,
+        host,
+        latency_peer_server,
+        Arc::new(|msg| println!("{}", with_time(msg))),
+    ));
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            println!("{}", with_time(&format!("Client failed: {}", error)));
+            return Err(error);
+        }
+    };
     println!("{}", with_time("Writing data..."));
     let raw = save_raw(&result, "data");
     println!("{}", with_time(&format!("Saved raw data as {}", raw)));
     let file = save_graph(&plot, &result.to_test_result(), "plot");
     println!("{}", with_time(&format!("Saved plot as {}", file)));
+    Ok(())
 }
 
 pub fn test_callback(

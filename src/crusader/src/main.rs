@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::process;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
@@ -127,7 +128,11 @@ fn main() {
                 config.both = both;
             }
 
-            crusader_lib::test::test(config, plot.config(), server, latency_peer.as_deref());
+            if crusader_lib::test::test(config, plot.config(), server, latency_peer.as_deref())
+                .is_err()
+            {
+                process::exit(1);
+            }
         }
         Commands::Serve { port } => {
             crusader_lib::serve::serve(*port);
