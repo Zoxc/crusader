@@ -87,12 +87,16 @@ impl Client {
     }
 }
 
+struct Pong {
+    updates: UnboundedSender<SlotUpdate>,
+}
+
 pub(crate) struct State {
+    port: u16,
     started: Instant,
     dummy_data: Vec<u8>,
     clients: Mutex<Vec<Option<Arc<Client>>>>,
-    pong_v6: UnboundedSender<SlotUpdate>,
-    pong_v4: UnboundedSender<SlotUpdate>,
+    pong_servers: Mutex<HashMap<IpAddr, Arc<Pong>>>,
     pub(crate) msg: Box<dyn Fn(&str) + Send + Sync>,
 }
 
@@ -115,6 +119,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
     stream.set_nodelay(true)?;
 
     let addr = stream.peer_addr()?;
+    let local_ip = stream.local_addr()?.ip();
 
     let (rx, tx) = stream.into_split();
     let mut stream_rx = FramedRead::new(rx, codec());
@@ -170,6 +175,8 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             ClientMessage::NewClient => {
                 (state.msg)(&format!("Serving {}, version {}", addr, hello.version));
 
+                let pong = start_pong_server(&state, local_ip).await?;
+
                 let client = {
                     let client = {
                         let mut clients = state.clients.lock();
@@ -199,39 +206,17 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     };
 
                     if let Some((slot, client)) = client {
-                        // Update IPv6 pong
+                        // Update pong server slot
                         let (rx, tx) = oneshot::channel();
-                        state.pong_v6.send(SlotUpdate {
+                        pong.updates.send(SlotUpdate {
                             slot,
                             client: Some(client.clone()),
                             reply: Some(rx),
                         })?;
                         tx.await.ok();
 
-                        // Update IPv4 pong
-                        let (rx, tx) = oneshot::channel();
-                        state
-                            .pong_v4
-                            .send(SlotUpdate {
-                                slot,
-                                client: Some(client.clone()),
-                                reply: Some(rx),
-                            })
-                            .ok();
-                        tx.await.ok();
-
-                        let state = state.clone();
                         _client_dropper = Some(move || {
-                            state
-                                .pong_v6
-                                .send(SlotUpdate {
-                                    slot,
-                                    client: None,
-                                    reply: None,
-                                })
-                                .ok();
-                            state
-                                .pong_v4
+                            pong.updates
                                 .send(SlotUpdate {
                                     slot,
                                     client: None,
@@ -549,7 +534,14 @@ async fn handle_ping(
     }
 }
 
-async fn pong(socket: UdpSocket, state: Arc<State>, mut rx: UnboundedReceiver<SlotUpdate>) {
+async fn pong(
+    socket: UdpSocket,
+    ip: IpAddr,
+    state: Arc<State>,
+    mut rx: UnboundedReceiver<SlotUpdate>,
+) {
+    (state.msg)(&format!("Starting UDP server ({})", ip));
+
     let mut slots: Vec<_> = (0..SLOTS).map(|_| None).collect();
     let mut buf = [0; 128];
 
@@ -568,8 +560,9 @@ async fn pong(socket: UdpSocket, state: Arc<State>, mut rx: UnboundedReceiver<Sl
                             Some((len, src))
                         }
                         Err(error) => {
-                            (state.msg)(&format!("Unable to get UDP ping: {:?}", error));
-                            None
+                            (state.msg)(&format!("Unable to read from UDP socket ({}): {:?}", ip, error));
+                            state.pong_servers.lock().remove(&ip);
+                            return
                         }
                     }
                 },
@@ -592,29 +585,37 @@ async fn pong(socket: UdpSocket, state: Arc<State>, mut rx: UnboundedReceiver<Sl
 
 const SLOTS: usize = 1000;
 
+async fn start_pong_server(state: &Arc<State>, ip: IpAddr) -> Result<Arc<Pong>, Box<dyn Error>> {
+    let ip = ip.to_canonical();
+
+    if let Some(pong) = state.pong_servers.lock().get(&ip) {
+        return Ok(pong.clone());
+    }
+
+    let socket = UdpSocket::bind(SocketAddr::new(ip, state.port)).await?;
+
+    Ok(
+        (*state.pong_servers.lock().entry(ip).or_insert_with(move || {
+            let (tx, rx) = unbounded_channel();
+
+            tokio::spawn(pong(socket, ip, state.clone(), rx));
+
+            Arc::new(Pong { updates: tx })
+        }))
+        .clone(),
+    )
+}
+
 async fn serve_async(
     port: u16,
     msg: Box<dyn Fn(&str) + Send + Sync>,
 ) -> Result<(), Box<dyn Error>> {
-    let socket_v6 = Socket::new(Domain::IPV6, socket2::Type::DGRAM, Some(Protocol::UDP))?;
-    socket_v6.set_only_v6(true)?;
-    socket_v6.bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port).into())?;
-    let socket_v6: std::net::UdpSocket = socket_v6.into();
-    socket_v6.set_nonblocking(true)?;
-    let socket_v6 = UdpSocket::from_std(socket_v6)?;
-
-    let socket_v4 =
-        UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port)).await?;
-
-    let (pong_ipv6_tx, pong_ipv6_rx) = unbounded_channel();
-    let (pong_ipv4_tx, pong_ipv4_rx) = unbounded_channel();
-
     let state = Arc::new(State {
+        port,
         started: Instant::now(),
         dummy_data: crate::test::data(),
         clients: Mutex::new((0..SLOTS).map(|_| None).collect()),
-        pong_v6: pong_ipv6_tx,
-        pong_v4: pong_ipv4_tx,
+        pong_servers: Default::default(),
         msg,
     });
 
@@ -627,9 +628,6 @@ async fn serve_async(
     let v6 = v6.listen(1024)?;
 
     let v4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).await?;
-
-    tokio::spawn(pong(socket_v6, state.clone(), pong_ipv6_rx));
-    tokio::spawn(pong(socket_v4, state.clone(), pong_ipv4_rx));
 
     task::spawn(listen(state.clone(), v6));
     task::spawn(listen(state.clone(), v4));
