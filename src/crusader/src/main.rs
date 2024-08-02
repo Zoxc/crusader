@@ -9,27 +9,33 @@ use crusader_lib::test::{Config, PlotConfig};
 use crusader_lib::{protocol, with_time, LIB_VERSION};
 
 #[derive(Parser)]
-#[clap(version = LIB_VERSION)]
+#[command(version = LIB_VERSION)]
 struct Cli {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(clap::Args)]
 struct PlotArgs {
-    #[clap(long)]
+    #[arg(long, help = "Plot transferred bytes")]
     plot_transferred: bool,
-    #[clap(long)]
+    #[arg(long, help = "Plot upload and download separately and plot streams")]
     plot_split_bandwidth: bool,
-    #[clap(long, value_parser=si_number::<u64>, value_name = "BPS")]
+    #[arg(long, value_parser=si_number::<u64>, value_name = "BPS",
+        long_help = "Sets the axis for bandwidth to at least this value. \
+            SI units are supported so `100M` would specify 100 Mbps")]
     plot_max_bandwidth: Option<u64>,
-    #[clap(long, value_name = "MILLISECONDS")]
+    #[arg(
+        long,
+        value_name = "MILLISECONDS",
+        help = "Sets the axis for latency to at least this value"
+    )]
     plot_max_latency: Option<u64>,
-    #[clap(long)]
+    #[arg(long, value_name = "PIXELS")]
     plot_width: Option<u64>,
-    #[clap(long)]
+    #[arg(long, value_name = "PIXELS")]
     plot_height: Option<u64>,
-    #[clap(long)]
+    #[arg(long)]
     plot_title: Option<String>,
 }
 
@@ -49,40 +55,68 @@ impl PlotArgs {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(about = "Runs the server")]
     Serve {
-        #[clap(long, default_value_t = protocol::PORT)]
+        #[arg(long, default_value_t = protocol::PORT, help = "Specifies the TCP and UDP port used by the server")]
         port: u16,
     },
+    #[command(
+        long_about = "Runs a test client against a specified server and saves the result to the current directory. \
+        By default this does a download test, an upload test, and a test doing both download and upload while measuring the latency to the server"
+    )]
     Test {
         server: String,
-        #[clap(long)]
+        #[arg(long, help = "Run a download test")]
         download: bool,
-        #[clap(long)]
+        #[arg(long, help = "Run an upload test")]
         upload: bool,
-        #[clap(long)]
+        #[arg(long, help = "Run a test doing both download and upload")]
         both: bool,
-        #[clap(long, default_value_t = protocol::PORT)]
+        #[arg(long, default_value_t = protocol::PORT, help = "Specifies the TCP and UDP port used by the server")]
         port: u16,
-        #[clap(long, default_value_t = 16)]
+        #[arg(
+            long,
+            default_value_t = 16,
+            help = "The number of TCP connections used to generate traffic in a single direction"
+        )]
         streams: u64,
-        #[clap(long, default_value_t = 0.0, value_name = "SECONDS")]
+        #[arg(
+            long,
+            default_value_t = 0.0,
+            value_name = "SECONDS",
+            help = "The delay between the start of each stream"
+        )]
         stream_stagger: f64,
-        #[clap(long, default_value_t = 5.0, value_name = "SECONDS")]
+        #[arg(
+            long,
+            default_value_t = 5.0,
+            value_name = "SECONDS",
+            help = "The duration in which traffic is generated"
+        )]
         load_duration: f64,
-        #[clap(long, default_value_t = 1.0, value_name = "SECONDS")]
+        #[arg(
+            long,
+            default_value_t = 1.0,
+            value_name = "SECONDS",
+            help = "The idle time between each test"
+        )]
         grace_duration: f64,
-        #[clap(long, default_value_t = 5, value_name = "MILLISECONDS")]
+        #[arg(long, default_value_t = 5, value_name = "MILLISECONDS")]
         latency_sample_rate: u64,
-        #[clap(long, default_value_t = 20, value_name = "MILLISECONDS")]
+        #[arg(long, default_value_t = 20, value_name = "MILLISECONDS")]
         bandwidth_sample_rate: u64,
-        #[clap(flatten)]
+        #[command(flatten)]
         plot: PlotArgs,
-        #[clap(long)]
+        #[arg(
+            long,
+            long_help = "Specifies another server (peer) which will also measure the latency to the server independently of the client"
+        )]
         latency_peer: Option<String>,
     },
+    #[command(about = "Plots a previous result")]
     Plot {
         data: PathBuf,
-        #[clap(flatten)]
+        #[command(flatten)]
         plot: PlotArgs,
     },
 }
