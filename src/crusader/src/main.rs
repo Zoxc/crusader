@@ -6,9 +6,10 @@ use clap::{Parser, Subcommand};
 use clap_num::si_number;
 use crusader_lib::file_format::RawResult;
 use crusader_lib::test::{Config, PlotConfig};
-use crusader_lib::{protocol, with_time};
+use crusader_lib::{protocol, with_time, LIB_VERSION};
 
 #[derive(Parser)]
+#[clap(version = LIB_VERSION)]
 struct Cli {
     #[clap(subcommand)]
     command: Commands,
