@@ -12,6 +12,9 @@ a **client** that initiates the test.
 
 Client and server talk (only) on TCP and UDP port 35481.
 
+**Status:** The latest Crusader version is 0.0.12.
+See the [CHANGELOG.md](./CHANGELOG.md) file for details.
+
 ## Setup
 
 To build all binaries, use the commands below. Executables are placed in `src/target/release`
@@ -82,3 +85,6 @@ cd src/target/release
 Click the **Result** tab to see a chart similar to the one above.
 
 <img src="media/gui.png">
+
+## Command-line options
+
