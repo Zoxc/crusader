@@ -20,11 +20,11 @@ struct PlotArgs {
     #[arg(long, help = "Plot transferred bytes")]
     plot_transferred: bool,
     #[arg(long, help = "Plot upload and download separately and plot streams")]
-    plot_split_bandwidth: bool,
+    plot_split_throughput: bool,
     #[arg(long, value_parser=si_number::<u64>, value_name = "BPS",
-        long_help = "Sets the axis for bandwidth to at least this value. \
+        long_help = "Sets the axis for throughput to at least this value. \
             SI units are supported so `100M` would specify 100 Mbps")]
-    plot_max_bandwidth: Option<u64>,
+    plot_max_throughput: Option<u64>,
     #[arg(
         long,
         value_name = "MILLISECONDS",
@@ -43,8 +43,8 @@ impl PlotArgs {
     fn config(&self) -> PlotConfig {
         PlotConfig {
             transferred: self.plot_transferred,
-            split_bandwidth: self.plot_split_bandwidth,
-            max_bandwidth: self.plot_max_bandwidth,
+            split_throughput: self.plot_split_throughput,
+            max_throughput: self.plot_max_throughput,
             max_latency: self.plot_max_latency,
             width: self.plot_width,
             height: self.plot_height,
@@ -104,7 +104,7 @@ enum Commands {
         #[arg(long, default_value_t = 5, value_name = "MILLISECONDS")]
         latency_sample_rate: u64,
         #[arg(long, default_value_t = 20, value_name = "MILLISECONDS")]
-        bandwidth_sample_rate: u64,
+        throughput_sample_rate: u64,
         #[command(flatten)]
         plot: PlotArgs,
         #[arg(
@@ -134,7 +134,7 @@ fn main() {
             download,
             upload,
             both,
-            bandwidth_sample_rate,
+            throughput_sample_rate,
             latency_sample_rate,
             ref plot,
             port,
@@ -154,7 +154,7 @@ fn main() {
                 upload: true,
                 both: true,
                 ping_interval: Duration::from_millis(latency_sample_rate),
-                bandwidth_interval: Duration::from_millis(bandwidth_sample_rate),
+                throughput_interval: Duration::from_millis(throughput_sample_rate),
             };
 
             if download || upload || both {

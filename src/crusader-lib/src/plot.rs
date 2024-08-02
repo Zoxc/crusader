@@ -26,7 +26,7 @@ pub fn register_fonts() {
 
 impl RawResult {
     pub fn to_test_result(&self) -> TestResult {
-        let bandwidth_interval = self.config.bandwidth_interval;
+        let throughput_interval = self.config.bandwidth_interval;
 
         let stream_groups: Vec<_> = self
             .stream_groups
@@ -41,7 +41,7 @@ impl RawResult {
                             .collect();
                         let bytes: Vec<_> = bytes.iter().map(|stream| stream.as_slice()).collect();
                         TestStream {
-                            data: sum_bytes(&bytes, bandwidth_interval),
+                            data: sum_bytes(&bytes, throughput_interval),
                         }
                     })
                     .collect(),
@@ -51,7 +51,7 @@ impl RawResult {
         let process_bytes = |bytes: Vec<Vec<(u64, u64)>>| -> Vec<(u64, f64)> {
             let bytes: Vec<_> = bytes.iter().map(|stream| to_float(stream)).collect();
             let bytes: Vec<_> = bytes.iter().map(|stream| stream.as_slice()).collect();
-            sum_bytes(&bytes, bandwidth_interval)
+            sum_bytes(&bytes, throughput_interval)
         };
 
         let groups: Vec<_> = self
@@ -81,7 +81,7 @@ impl RawResult {
         .into_iter()
         .flatten()
         .collect();
-        let combined_download_bytes = sum_bytes(&combined_download_bytes, bandwidth_interval);
+        let combined_download_bytes = sum_bytes(&combined_download_bytes, throughput_interval);
 
         let upload_bytes_sum = find(false, false);
 
@@ -94,7 +94,7 @@ impl RawResult {
         .into_iter()
         .flatten()
         .collect();
-        let combined_upload_bytes = sum_bytes(&combined_upload_bytes, bandwidth_interval);
+        let combined_upload_bytes = sum_bytes(&combined_upload_bytes, throughput_interval);
 
         let both_bytes = self.both().then(|| {
             sum_bytes(
@@ -102,7 +102,7 @@ impl RawResult {
                     both_download_bytes_sum.as_deref().unwrap(),
                     both_upload_bytes_sum.as_deref().unwrap(),
                 ],
-                bandwidth_interval,
+                throughput_interval,
             )
         });
 
@@ -157,10 +157,10 @@ pub fn save_graph(config: &PlotConfig, result: &TestResult, name: &str) -> Strin
 }
 
 pub fn save_graph_to_path(path: &Path, config: &PlotConfig, result: &TestResult) {
-    let mut bandwidth = Vec::new();
+    let mut throughput = Vec::new();
 
     result.both_bytes.as_ref().map(|both_bytes| {
-        bandwidth.push((
+        throughput.push((
             "Both",
             RGBColor(149, 96, 153),
             to_rates(both_bytes),
@@ -169,7 +169,7 @@ pub fn save_graph_to_path(path: &Path, config: &PlotConfig, result: &TestResult)
     });
 
     if result.upload_bytes.is_some() || result.both_upload_bytes.is_some() {
-        bandwidth.push((
+        throughput.push((
             "Upload",
             UP_COLOR,
             to_rates(&result.combined_upload_bytes),
@@ -184,7 +184,7 @@ pub fn save_graph_to_path(path: &Path, config: &PlotConfig, result: &TestResult)
     }
 
     if result.download_bytes.is_some() || result.both_download_bytes.is_some() {
-        bandwidth.push((
+        throughput.push((
             "Download",
             DOWN_COLOR,
             to_rates(&result.combined_download_bytes),
@@ -203,7 +203,7 @@ pub fn save_graph_to_path(path: &Path, config: &PlotConfig, result: &TestResult)
         config,
         result,
         &result.pings,
-        &bandwidth,
+        &throughput,
         result.start.as_secs_f64(),
         result.duration.as_secs_f64(),
     );
@@ -252,18 +252,18 @@ pub fn to_rates(stream: &[(u64, f64)]) -> Vec<(u64, f64)> {
 fn sum_bytes(input: &[&[(u64, f64)]], interval: Duration) -> Vec<(u64, f64)> {
     let interval = interval.as_micros() as u64;
 
-    let bandwidth: Vec<_> = input
+    let throughput: Vec<_> = input
         .iter()
         .map(|stream| interpolate(stream, interval))
         .collect();
 
-    let min = bandwidth
+    let min = throughput
         .iter()
         .map(|stream| stream.first().map(|e| e.0).unwrap_or(0))
         .min()
         .unwrap_or(0);
 
-    let max = bandwidth
+    let max = throughput
         .iter()
         .map(|stream| stream.last().map(|e| e.0).unwrap_or(0))
         .max()
@@ -272,7 +272,7 @@ fn sum_bytes(input: &[&[(u64, f64)]], interval: Duration) -> Vec<(u64, f64)> {
     let mut data = Vec::new();
 
     for point in (min..=max).step_by(interval as usize) {
-        let value = bandwidth
+        let value = throughput
             .iter()
             .map(
                 |stream| match stream.binary_search_by_key(&point, |e| e.0) {
@@ -535,7 +535,7 @@ fn latency<'a>(
         .unwrap();
 }
 
-fn plot_split_bandwidth(
+fn plot_split_throughput(
     config: &PlotConfig,
     download: bool,
     result: &TestResult,
@@ -560,25 +560,25 @@ fn plot_split_bandwidth(
         })
         .collect();
 
-    let max_bandwidth = float_max(
+    let max_throughput = float_max(
         groups
             .iter()
             .flat_map(|group| group.streams.last().unwrap().data.iter())
             .map(|e| e.1),
     );
 
-    let mut max_bandwidth = max_bandwidth * 1.05;
+    let mut max_throughput = max_throughput * 1.05;
 
-    if let Some(max) = config.max_bandwidth.map(|l| l as f64 / (1000.0 * 1000.0)) {
-        if max > max_bandwidth {
-            max_bandwidth = max;
+    if let Some(max) = config.max_throughput.map(|l| l as f64 / (1000.0 * 1000.0)) {
+        if max > max_throughput {
+            max_throughput = max;
         }
     }
 
     let mut chart = new_chart(
         duration,
         None,
-        max_bandwidth,
+        max_throughput,
         if download {
             "Download (Mbps)"
         } else {
@@ -624,33 +624,38 @@ fn plot_split_bandwidth(
     }
 }
 
-fn plot_bandwidth(
+fn plot_throughput(
     config: &PlotConfig,
-    bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
+    throughput: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
     start: f64,
     duration: f64,
     area: &DrawingArea<BitMapBackend, Shift>,
 ) {
-    let max_bandwidth = float_max(bandwidth.iter().flat_map(|list| list.2.iter()).map(|e| e.1));
+    let max_throughput = float_max(
+        throughput
+            .iter()
+            .flat_map(|list| list.2.iter())
+            .map(|e| e.1),
+    );
 
-    let mut max_bandwidth = max_bandwidth * 1.05;
+    let mut max_throughput = max_throughput * 1.05;
 
-    if let Some(max) = config.max_bandwidth.map(|l| l as f64 / (1000.0 * 1000.0)) {
-        if max > max_bandwidth {
-            max_bandwidth = max;
+    if let Some(max) = config.max_throughput.map(|l| l as f64 / (1000.0 * 1000.0)) {
+        if max > max_throughput {
+            max_throughput = max;
         }
     }
 
     let mut chart = new_chart(
         duration,
         None,
-        max_bandwidth,
-        "Bandwidth (Mbps)",
+        max_throughput,
+        "Throughput (Mbps)",
         None,
         area,
     );
 
-    for (name, color, rates, _) in bandwidth {
+    for (name, color, rates, _) in throughput {
         chart
             .draw_series(LineSeries::new(
                 rates.iter().map(|(time, rate)| {
@@ -667,13 +672,13 @@ fn plot_bandwidth(
 }
 
 pub(crate) fn bytes_transferred(
-    bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
+    throughput: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
     start: f64,
     duration: f64,
     area: &DrawingArea<BitMapBackend, Shift>,
 ) {
     let max_bytes = float_max(
-        bandwidth
+        throughput
             .iter()
             .flat_map(|list| list.3.iter())
             .flat_map(|list| list.iter())
@@ -693,7 +698,7 @@ pub(crate) fn bytes_transferred(
         area,
     );
 
-    for (name, color, _, bytes) in bandwidth {
+    for (name, color, _, bytes) in throughput {
         for (i, bytes) in bytes.iter().enumerate() {
             let series = chart
                 .draw_series(LineSeries::new(
@@ -723,7 +728,7 @@ pub(crate) fn graph(
     config: &PlotConfig,
     result: &TestResult,
     pings: &[RawPing],
-    bandwidth: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
+    throughput: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
     start: f64,
     duration: f64,
 ) {
@@ -829,7 +834,7 @@ pub(crate) fn graph(
     }
 
     if result.raw_result.streams() > 0 {
-        if config.split_bandwidth {
+        if config.split_throughput {
             if result.raw_result.download() || result.raw_result.both() {
                 charts += 1
             }
@@ -852,17 +857,17 @@ pub(crate) fn graph(
     let mut chart_index = 0;
 
     if result.raw_result.streams() > 0 {
-        if config.split_bandwidth {
+        if config.split_throughput {
             if result.raw_result.download() || result.raw_result.both() {
-                plot_split_bandwidth(config, true, result, start, duration, &areas[chart_index]);
+                plot_split_throughput(config, true, result, start, duration, &areas[chart_index]);
                 chart_index += 1;
             }
             if result.raw_result.upload() || result.raw_result.both() {
-                plot_split_bandwidth(config, false, result, start, duration, &areas[chart_index]);
+                plot_split_throughput(config, false, result, start, duration, &areas[chart_index]);
                 chart_index += 1;
             }
         } else {
-            plot_bandwidth(config, bandwidth, start, duration, &areas[chart_index]);
+            plot_throughput(config, throughput, start, duration, &areas[chart_index]);
             chart_index += 1;
         }
     }
@@ -894,7 +899,7 @@ pub(crate) fn graph(
     }
 
     if result.raw_result.streams() > 0 && config.transferred {
-        bytes_transferred(bandwidth, start, duration, &areas[chart_index]);
+        bytes_transferred(throughput, start, duration, &areas[chart_index]);
         #[allow(unused_assignments)]
         {
             chart_index += 1;

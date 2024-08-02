@@ -377,7 +377,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 stream: test_stream,
                 duration,
                 delay,
-                bandwidth_interval,
+                throughput_interval,
             } => {
                 let client = client.ok_or("No associated client")?;
 
@@ -411,7 +411,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 time::sleep_until(start).await;
 
                 tokio::spawn(async move {
-                    let mut interval = time::interval(Duration::from_micros(bandwidth_interval));
+                    let mut interval = time::interval(Duration::from_micros(throughput_interval));
                     loop {
                         interval.tick().await;
 
