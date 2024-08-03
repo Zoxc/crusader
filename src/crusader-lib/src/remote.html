@@ -71,7 +71,6 @@
         border: 1px solid rgb(190, 190, 190);
         border-radius: 5px;
         background-color: #e6e6e6;
-        cursor: pointer;
     }
 
     a:hover {
@@ -194,6 +193,7 @@
                 }
 
                 let binary_index = 0;
+                let open = false;
 
                 let ws = new WebSocket(`ws://${window.location.host}/api/client`)
                 ws.onmessage = event => {
@@ -217,9 +217,17 @@
                     }
                 };
                 ws.onopen = (event) => {
+                    open = true;
                     ws.send(JSON.stringify(request));
                 };
                 ws.onclose = (event) => {
+                    if (!raw_result.value) {
+                        if (open) {
+                            log.value.push("Connection lost.");
+                        } else {
+                            log.value.push("Unable to connect to the client.");
+                        }
+                    }
                     running.value = false;
                 };
             }
