@@ -20,17 +20,17 @@ both running Crusader:
 a **server** that listens for connections, and
 a **client** that initiates the test.
 
-The Crusder GUI incorporates both the server and
-the client, and allows you to interact with results.
+The Crusader GUI incorporates both the server and
+the client and allows you to interact with results.
 To use it, download the proper binary from the 
 [Releases](https://github.com/Zoxc/crusader/releases) page
 then open it.
 
-You will see the following window.
+You will see the window below.
 Enter the address of another computer that's 
 running the Crusader server, then click **Start test**. 
 When the test is complete, the **Result** tab shows a
-chart similar like the second image below.
+chart like the second image below.
 (An easy way to run the server is to start the Crusader GUI
 on another computer, then choose the **Server** tab.)
 
@@ -40,8 +40,8 @@ on another computer, then choose the **Server** tab.)
 
 ## Understanding the results
 
-The Crusader client creates three bursts of traffic
-(by default, five seconds each):
+A Crusader test creates three bursts of traffic:
+by default, five seconds each of
 download only, upload only, then bi-directional traffic.
 Each burst is separated by several seconds of idle time.
 
@@ -59,7 +59,7 @@ Green shows the time from the server to the client (one direction).
 Black shows the sum from the client to the server 
 and back (bi-directional).
 
-* The **Bandwidth** plot (bottom) has green and blue marks
+* The **Packet Loss** plot (bottom) has green and blue marks
 that mark times when packets were lost.
 
 <!-- <img src="media/plot.png"> -->
@@ -123,7 +123,17 @@ cd src/target/release
 - **--plot\_max\_latency**
 - _Other options?_
 
+**GUI Options:** _Need careful definitions_
+
+- **Download, Upload, Both** checkboxes control which tests to run
+- **Streams**
+- **Load duration**
+- **Grace duration**
+- **Stream stagger**
+- **Latency sample rate**
+- **Bandwidth sample rate**
+
 ## Troubleshooting
 
-- Crusader requires that TCP and UDP ports 35481 for its tests.
+- Crusader requires that TCP and UDP ports 35481 are open for its tests.
    Check that your firewall is letting those ports through.

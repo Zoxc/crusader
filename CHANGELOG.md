@@ -1,4 +1,4 @@
-# Changelog
+# CHANGELOG
 
 The **Crusader Network Tester** measures network rates and latency
 in the presence of upload and download traffic.
