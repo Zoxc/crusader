@@ -1,18 +1,20 @@
 # Changelog
 
 The **Crusader Network Tester** measures network rates and latency
-while downloading and uploading data.
+in the presence of upload and download traffic.
 It produces plots of the traffic rates,
 latency and packet loss.
 
-This file lists the changes that have occurred since January 2024 in the project:
+This file lists the changes that have occurred since January 2024 in the project.
 
 ## Unreleased 
 
-- _info about changes that have not been added to a release._
+- Add `crusader remote` command to start a web server
+   listening on port 35482 that emulates the
+   `crusader-gui` and displays the result in the web page.
 
 ## 0.0.12 - 2024-07-31
-- Create UDP server for each server IP
+- Create UDP server for each server IP (fixes #22)
 - Improve error handling for log messages 
 - Change date format to use YYYY-MM-DD
 
