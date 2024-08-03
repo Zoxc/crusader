@@ -45,92 +45,96 @@
     }
 </style>
 <script>
-    let running = false;
-    function run() {
-        if (running) { return }
-        running = true;
-
-        const log = document.getElementById("log");
-        log.innerHTML = "";
-        document.getElementById("run").disabled = true;
-
-        const result = document.getElementById("result");
-        result.innerHTML = "";
-
-        let config = {
-            server: document.getElementById("server").value,
-            download: true,
-            upload: true,
-            both: true,
-            port: 35481,
-            streams: 16,
-            stream_stagger: 0,
-            load_duration: 5,
-            grace_duration: 1,
-            latency_sample_rate: 5,
-            throughput_sample_rate: 20,
-            latency_peer: null,
-        };
-
-        localStorage.setItem("config", JSON.stringify(config));
-
-        let binary_index = 0;
-
-        let ws = new WebSocket(`ws://${window.location.host}/api/client`)
-        ws.onmessage = event => {
-            if (event.data instanceof Blob) {
-                if (binary_index == 0) {
-                    const img = document.createElement('img');
-                    img.src = URL.createObjectURL(event.data);
-                    const box = document.createElement('div');
-                    box.classList.add("box", "plot-box");
-                    box.append(img);
-                    const result = document.getElementById("result");
-                    result.append(box);
-                }
-                binary_index += 1;
-            } else {
-                let data = JSON.parse(event.data);
-                if (data.type == "log") {
-                    let p = document.createElement("p");
-                    p.innerText = data.message;
-                    log.append(p);
-                }
-                if (data.type == "result") {
-                    let p = document.createElement("p");
-                    p.innerText = "Test completed.";
-                    log.append(p);
-                }
-            }
-        };
-        ws.onopen = (event) => {
-            ws.send(JSON.stringify(config));
-        };
-        ws.onclose = (event) => {
-            running = false;
-            document.getElementById("run").disabled = false;
-        };
-    }
-
-    function load() {
-        let data = localStorage.getItem("config");
-        if (data) {
-            let config = JSON.parse(data);
-            document.getElementById("server").value = config.server;
-        }
-    }
 </script>
 
-<body onload="load()">
-    <div class="flex">
-        <div class="box">
-            <h1>Crusader Remote Client</h1>
-            <p>Server: <input type="text" id="server"></p>
-            <p><input type="button" id="run" value="Run test" onclick="run()"></p>
-            <div id="log"></div>
+<body>
+    <div id="app" style="visibility: hidden;">
+        <div class="flex">
+            <div class="box">
+                <h1>Crusader Remote Client</h1>
+                <p>Server: <input type="text" v-model="config.server"></p>
+                <p><input type="checkbox" v-model="config.download" id="download"><label for="download">Download</label>
+                    &nbsp; <input type="checkbox" v-model="config.upload" id="upload"><label for="upload">Upload</label>
+                    &nbsp; <input type="checkbox" v-model="config.both" id="both"><label for="both">Both</label>
+                </p>
+                <p><input type="button" value="Run test" :disabled="running" @click="run"></p>
+                <p v-for="msg in log">
+                    {{ msg }}
+                </p>
+            </div>
+            <div v-if="plot" class="box plot-box"><img :src="plot"></div>
         </div>
-        <div id="result"></div>
     </div>
 </body>
+<script type="module">
+    import { createApp, onMounted, ref } from './assets/vue.js'
+
+    createApp({
+        setup() {
+            let config = ref({
+                server: "",
+                download: true,
+                upload: true,
+                both: true,
+                port: 35481,
+                streams: 16,
+                stream_stagger: 0,
+                load_duration: 5,
+                grace_duration: 1,
+                latency_sample_rate: 5,
+                throughput_sample_rate: 20,
+                latency_peer: null,
+            });
+            let log = ref([]);
+            let plot = ref(null);
+
+
+            onMounted(() => {
+                document.getElementById("app").style = "";
+                Object.assign(config.value, JSON.parse(localStorage.getItem("config")));
+            });
+
+            let running = ref(false);
+
+            function run() {
+                running.value = true;
+                log.value = [];
+                plot.value = null;
+
+                localStorage.setItem("config", JSON.stringify(config.value));
+
+                let binary_index = 0;
+
+                let ws = new WebSocket(`ws://${window.location.host}/api/client`)
+                ws.onmessage = event => {
+                    if (event.data instanceof Blob) {
+                        if (binary_index == 0) {
+                            plot.value = URL.createObjectURL(event.data);
+                        }
+                        binary_index += 1;
+                    } else {
+                        let data = JSON.parse(event.data);
+                        if (data.type == "log") {
+                            log.value.push(data.message);
+                        }
+                        if (data.type == "result") {
+                            log.value.push("Test completed.");
+                        }
+                    }
+                };
+                ws.onopen = (event) => {
+                    ws.send(JSON.stringify(config.value));
+                };
+                ws.onclose = (event) => {
+                    running.value = false;
+                };
+            }
+
+            return {
+                config, running, run, log, plot
+            };
+        }
+    }).mount('#app')
+</script>
 
 </html>

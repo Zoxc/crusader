@@ -27,5 +27,9 @@ rmp-serde = "1.1.0"
 socket2 = "0.4.6"
 libc = "0.2"
 anyhow = "1.0.86"
-axum = { version = "0.7.5", features = ["ws"] }
+axum = { version = "0.7.5", features = [
+    "ws",
+    "tokio",
+    "http1",
+], default-features = false }
 image = "0.24.9"

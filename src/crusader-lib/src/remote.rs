@@ -4,7 +4,9 @@ use crate::{test::Config, with_time, LIB_VERSION};
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Error;
+use axum::body::Body;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::http::{header, HeaderValue, Response};
 use axum::{
     extract::{ConnectInfo, State},
     response::{Html, IntoResponse},
@@ -25,10 +27,6 @@ use tokio::{net::TcpListener, signal, task};
 
 struct Env {
     msg: Box<dyn Fn(&str) + Send + Sync>,
-}
-
-async fn root() -> Html<&'static str> {
-    Html(include_str!("remote.html"))
 }
 
 async fn ws_client(
@@ -152,9 +150,37 @@ async fn handle_client(
 }
 
 async fn listen(state: Arc<Env>, listener: TcpListener) {
+    #[cfg(debug_assertions)]
+    async fn root() -> Html<String> {
+        Html(
+            std::fs::read_to_string("crusader-lib/src/remote.html")
+                .unwrap_or(include_str!("remote.html").to_string()),
+        )
+    }
+
+    #[cfg(not(debug_assertions))]
+    async fn root() -> Html<&'static str> {
+        Html(include_str!("remote.html"))
+    }
+
+    async fn vue() -> Response<Body> {
+        #[cfg(debug_assertions)]
+        let body: Body = include_str!("../assets/vue.js").into();
+        #[cfg(not(debug_assertions))]
+        let body: Body = include_str!("../assets/vue.prod.js").into();
+        (
+            [(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/javascript"),
+            )],
+            body,
+        )
+            .into_response()
+    }
+
     let app = Router::new()
-        // `GET /` goes to `root`
         .route("/", get(root))
+        .route("/assets/vue.js", get(vue))
         .route("/api/client", get(ws_client))
         .with_state(state);
 
@@ -172,7 +198,15 @@ async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<
 
     task::spawn(listen(state.clone(), v4));
 
-    (state.msg)(&format!("Remote version {} running...", LIB_VERSION));
+    (state.msg)(&format!(
+        "Remote{} version {} running...",
+        if cfg!(debug_assertions) {
+            " (debugging enabled)"
+        } else {
+            ""
+        },
+        LIB_VERSION
+    ));
     (state.msg)(&format!("Address http://localhost:{}", port));
 
     Ok(())
