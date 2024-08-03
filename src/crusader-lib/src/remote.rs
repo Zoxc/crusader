@@ -1,5 +1,5 @@
 use crate::plot::save_graph_to_mem;
-use crate::test::{test_async, PlotConfig};
+use crate::test::{test_async, timed, PlotConfig};
 use crate::{test::Config, with_time, LIB_VERSION};
 use anyhow::anyhow;
 use anyhow::bail;
@@ -26,6 +26,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use tokio::{net::TcpListener, signal, task};
 
 struct Env {
+    live_reload: bool,
     msg: Box<dyn Fn(&str) + Send + Sync>,
 }
 
@@ -89,7 +90,7 @@ async fn handle_client(
             msg_tx.send(msg.clone()).ok();
             task::spawn_blocking(move || println!("{}", msg));
         });
-        test_async(
+        let result = test_async(
             config,
             &args.server,
             args.latency_peer.as_deref(),
@@ -99,7 +100,8 @@ async fn handle_client(
         .map_err(|err| {
             msg(&format!("Client failed: {}", err));
             anyhow!("Client failed")
-        })
+        });
+        (result, timed(""))
     });
 
     while let Some(msg) = msg_rx.recv().await {
@@ -114,12 +116,14 @@ async fn handle_client(
             .await?;
     }
 
-    let result = tester.await??;
+    let (result, time) = tester.await?;
+    let result = result?;
 
     socket
         .send(Message::Text(
             json!({
                 "type": "result",
+                "time": time,
             })
             .to_string(),
         ))
@@ -150,17 +154,14 @@ async fn handle_client(
 }
 
 async fn listen(state: Arc<Env>, listener: TcpListener) {
-    #[cfg(debug_assertions)]
-    async fn root() -> Html<String> {
-        Html(
-            std::fs::read_to_string("crusader-lib/src/remote.html")
-                .unwrap_or(include_str!("remote.html").to_string()),
-        )
-    }
+    async fn root(State(state): State<Arc<Env>>) -> Html<String> {
+        if state.live_reload {
+            if let Ok(data) = std::fs::read_to_string("crusader-lib/src/remote.html") {
+                return Html(data);
+            }
+        }
 
-    #[cfg(not(debug_assertions))]
-    async fn root() -> Html<&'static str> {
-        Html(include_str!("remote.html"))
+        Html(include_str!("remote.html").to_string())
     }
 
     async fn vue() -> Response<Body> {
@@ -193,8 +194,19 @@ async fn listen(state: Arc<Env>, listener: TcpListener) {
 }
 
 async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<(), Error> {
+    let live_reload = cfg!(debug_assertions)
+        && std::fs::read_to_string("crusader-lib/src/remote.html")
+            .map(|file| *file == *include_str!("remote.html"))
+            .unwrap_or_default();
+
+    if live_reload {
+        (msg)(&format!(
+            "Live reload of crusader-lib/src/remote.html enabled",
+        ));
+    }
+
     let v4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).await?;
-    let state = Arc::new(Env { msg });
+    let state = Arc::new(Env { live_reload, msg });
 
     task::spawn(listen(state.clone(), v4));
 
