@@ -31,7 +31,7 @@ To use it, download the proper binary from the
 [Releases](https://github.com/Zoxc/crusader/releases) page
 then open it.
 
-You will see the window below.
+The window below opens.
 Enter the address of another computer that's 
 running the Crusader server, then click **Start test**. 
 When the test is complete, the **Result** tab shows a
