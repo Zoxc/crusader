@@ -94,7 +94,7 @@ pub enum ClientMessage {
         stream: TestStream,
         duration: u64,
         delay: u64,
-        bandwidth_interval: u64,
+        throughput_interval: u64,
     },
     LoadFromServer {
         stream: TestStream,

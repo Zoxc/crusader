@@ -279,9 +279,9 @@ pub(crate) async fn read_data(
 
 #[derive(Default)]
 pub struct PlotConfig {
-    pub split_bandwidth: bool,
+    pub split_throughput: bool,
     pub transferred: bool,
-    pub max_bandwidth: Option<u64>,
+    pub max_throughput: Option<u64>,
     pub max_latency: Option<u64>,
     pub width: Option<u64>,
     pub height: Option<u64>,
@@ -299,10 +299,10 @@ pub struct Config {
     pub streams: u64,
     pub stream_stagger: Duration,
     pub ping_interval: Duration,
-    pub bandwidth_interval: Duration,
+    pub throughput_interval: Duration,
 }
 
-async fn test_async(
+pub(crate) async fn test_async(
     config: Config,
     server: &str,
     latency_peer_server: Option<&str>,
@@ -468,7 +468,7 @@ async fn test_async(
 
     let state_ = state.clone();
     let measures = tokio::spawn(async move {
-        let mut bandwidth = Vec::new();
+        let mut throughput = Vec::new();
         let mut latencies = Vec::new();
         let overload_;
 
@@ -491,7 +491,7 @@ async fn test_async(
                     time,
                     bytes,
                 } => {
-                    bandwidth.push((stream, time, bytes));
+                    throughput.push((stream, time, bytes));
                 }
                 ServerMessage::LatencyMeasures(measures) => {
                     latencies.extend(measures.into_iter());
@@ -522,7 +522,7 @@ async fn test_async(
             };
         }
 
-        (latencies, bandwidth, overload_)
+        (latencies, throughput, overload_)
     });
 
     if let Some(peer) = peer.as_mut() {
@@ -660,7 +660,7 @@ async fn test_async(
 
     let mut pongs = ping_recv.await?;
 
-    let (mut latencies, bandwidth, server_overload) = measures.await?;
+    let (mut latencies, throughput, server_overload) = measures.await?;
 
     let server_overload = server_overload || peer.as_ref().map(|p| p.0).unwrap_or_default();
 
@@ -742,7 +742,7 @@ async fn test_async(
     add_down(true, &both_download_bytes);
 
     let get_stream = |group, id| -> Vec<_> {
-        bandwidth
+        throughput
             .iter()
             .filter(|e| e.0.group == group && e.0.id == id)
             .map(|e| (e.1.wrapping_add(server_time_offset), e.2))
@@ -776,7 +776,7 @@ async fn test_async(
         load_duration: config.load_duration,
         grace_duration: config.grace_duration,
         ping_interval: config.ping_interval,
-        bandwidth_interval: config.bandwidth_interval,
+        bandwidth_interval: config.throughput_interval,
     };
 
     if server_overload {
@@ -1040,7 +1040,7 @@ fn upload_loaders(
                     stream: test_stream,
                     delay: delay.as_micros() as u64,
                     duration: (config.load_duration + MEASURE_DELAY).as_micros() as u64,
-                    bandwidth_interval: config.bandwidth_interval.as_micros() as u64,
+                    throughput_interval: config.throughput_interval.as_micros() as u64,
                 },
             )
             .await
@@ -1181,7 +1181,7 @@ fn download_loaders(
 
                 let measures = tokio::spawn(async move {
                     let mut measures = Vec::new();
-                    let mut interval = time::interval(config.bandwidth_interval);
+                    let mut interval = time::interval(config.throughput_interval);
                     loop {
                         interval.tick().await;
 

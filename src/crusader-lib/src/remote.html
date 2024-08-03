@@ -1,0 +1,234 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Crusader Remote Client</title>
+</head>
+<style>
+    body {
+        padding: 0;
+        margin: 0;
+        height: 100%;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 13px;
+        background: #f5f5f5;
+        color: rgb(87, 87, 87);
+    }
+
+    h1 {
+        font-weight: normal;
+        font-size: 1.6em;
+        padding: 0;
+        margin: 0;
+    }
+
+    .flex {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        align-items: flex-start;
+    }
+
+    .box {
+        padding: 1.5em;
+        margin: 1.5em;
+        background: #f7f5f5;
+        box-shadow: 0.1em 0.1em 1.7em rgba(0, 0, 0, 0.08);
+        border-radius: 5px;
+        border: 1px solid rgb(218, 218, 218);
+        width: fit-content;
+    }
+
+    input {
+        border: 1px solid rgb(190, 190, 190);
+        border-radius: 5px;
+        padding: 5px;
+    }
+
+    input[type="number"] {
+        width: 50px;
+    }
+
+    .box img {
+        border-radius: 20px;
+        padding: 5px;
+        border: 1px solid rgb(235, 235, 235);
+        background: white;
+    }
+
+    .tspacer {
+        padding-right: 20px;
+    }
+
+    a {
+        text-decoration: none;
+        padding: 5px;
+        margin: 5px;
+        margin-top: 0;
+        margin-bottom: 0;
+        color: rgb(87, 87, 87);
+        border: 1px solid rgb(190, 190, 190);
+        border-radius: 5px;
+        background-color: #e6e6e6;
+        cursor: pointer;
+    }
+
+    a:hover {
+        background-color: #dadada;
+    }
+</style>
+<script>
+</script>
+
+<body>
+    <div id="app" style="visibility: hidden;">
+        <div class="flex">
+            <div class="box">
+                <h1>Crusader Remote Client</h1>
+                <p>Server: <input type="text" v-model="config.server"></p>
+                <hr>
+                <p>
+                <table>
+                    <tr>
+                        <td class="tspacer"><input type="checkbox" v-model="config.download" id="download"><label
+                                for="download">Download</label></td>
+                        <td>Streams:</td>
+                        <td class="tspacer"><input type="number" v-model="config.streams"></td>
+                        <td>Stream stagger:</td>
+                        <td><input type="number" v-model="config.stream_stagger"> seconds</td>
+                    </tr>
+                    <tr>
+                        <td class="tspacer"><input type="checkbox" v-model="config.upload" id="upload"><label
+                                for="upload">Upload</label></td>
+                        <td>Load duration:</td>
+                        <td class="tspacer"><input type="number" v-model="config.load_duration"> seconds</td>
+                        <td>Latency sample rate:</td>
+                        <td><input type="number" v-model="config.latency_sample_rate"> milliseconds
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="tspacer"><input type="checkbox" v-model="config.both" id="both"><label
+                                for="both">Both</label></td>
+                        <td>Grace duration:</td>
+                        <td class="tspacer"><input type="number" v-model="config.grace_duration"> seconds</td>
+                        <td>Throughput sample rate:</td>
+                        <td><input type="number" v-model="config.throughput_sample_rate">
+                            milliseconds</td>
+                    </tr>
+                </table>
+                <hr>
+                <p><input type="checkbox" v-model="config.latency_peer.enabled" id="latency_peer"><label
+                        for="latency_peer">Latency peer:</label> <input type="text"
+                        :disabled="!config.latency_peer.enabled" v-model="config.latency_peer.value">
+                </p>
+                <hr>
+                <p><input type="button" value="Run test" :disabled="running" @click="run"></p>
+                <p v-for="msg in log">
+                    {{ msg }}
+                </p>
+            </div>
+            <div v-if="plot" class="box">
+                <div style="display: flex; margin-bottom: 10px;">
+                    <h1 style="margin-top: auto; margin-bottom: auto;">Result {{ time.replaceAll("-",
+                        ":").replaceAll(".",
+                        "-") }}</h1>
+                    <span style="flex-grow: 1;"></span>
+                    <a :href="plot" :download="`plot ${time}.png`">⬇ Download plot</a></p>
+                    <a v-if="raw_result" :href="raw_result" :download="`data ${time}.crr`">⬇ Download raw
+                        result</a>
+                </div>
+                <img :src="plot">
+            </div>
+        </div>
+    </div>
+</body>
+<script type="module">
+    import { createApp, onMounted, ref, toRaw } from './assets/vue.js'
+
+    createApp({
+        setup() {
+            let config = ref({
+                server: "",
+                download: true,
+                upload: true,
+                both: true,
+                port: 35481,
+                streams: 16,
+                stream_stagger: 0,
+                load_duration: 5,
+                grace_duration: 1,
+                latency_sample_rate: 5,
+                throughput_sample_rate: 20,
+                latency_peer: {
+                    enabled: false,
+                    value: "",
+                }
+            });
+            let log = ref([]);
+            let plot = ref(null);
+            let raw_result = ref(null);
+            let time = ref(null);
+
+            onMounted(() => {
+                Object.assign(config.value, JSON.parse(localStorage.getItem("config")));
+                document.getElementById("app").style = "";
+            });
+
+            let running = ref(false);
+
+            function run() {
+                running.value = true;
+                log.value = [];
+                plot.value = null;
+                raw_result.value = null;
+                time.value = null;
+
+                localStorage.setItem("config", JSON.stringify(config.value));
+
+                let request = structuredClone(toRaw(config.value));
+                if (request.latency_peer.enabled && request.latency_peer.value) {
+                    request.latency_peer = request.latency_peer.value;
+                } else {
+                    request.latency_peer = null;
+                }
+
+                let binary_index = 0;
+
+                let ws = new WebSocket(`ws://${window.location.host}/api/client`)
+                ws.onmessage = event => {
+                    if (event.data instanceof Blob) {
+                        if (binary_index == 0) {
+                            plot.value = URL.createObjectURL(event.data);
+                        }
+                        if (binary_index == 1) {
+                            raw_result.value = URL.createObjectURL(event.data);
+                        }
+                        binary_index += 1;
+                    } else {
+                        let data = JSON.parse(event.data);
+                        if (data.type == "log") {
+                            log.value.push(data.message);
+                        }
+                        if (data.type == "result") {
+                            time.value = data.time;
+                            log.value.push("Test completed.");
+                        }
+                    }
+                };
+                ws.onopen = (event) => {
+                    ws.send(JSON.stringify(request));
+                };
+                ws.onclose = (event) => {
+                    running.value = false;
+                };
+            }
+
+            return {
+                config, running, run, log, plot, raw_result, time
+            };
+        }
+    }).mount('#app')
+</script>
+
+</html>

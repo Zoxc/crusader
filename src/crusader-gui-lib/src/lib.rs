@@ -110,7 +110,7 @@ pub struct ClientSettings {
     pub grace_duration: f64,
     pub stream_stagger: f64,
     pub latency_sample_rate: u64,
-    pub bandwidth_sample_rate: u64,
+    pub throughput_sample_rate: u64,
     pub latency_peer: bool,
     pub latency_peer_server: String,
 }
@@ -127,7 +127,7 @@ impl Default for ClientSettings {
             grace_duration: 1.0,
             stream_stagger: 0.0,
             latency_sample_rate: 5,
-            bandwidth_sample_rate: 20,
+            throughput_sample_rate: 20,
             latency_peer: false,
             latency_peer_server: String::new(),
         }
@@ -260,7 +260,7 @@ pub struct TestResult {
     both: Vec<(f64, f64)>,
     local_latency: LatencyResult,
     peer_latency: Option<LatencyResult>,
-    bandwidth_max: f64,
+    throughput_max: f64,
 }
 
 impl TestResult {
@@ -273,13 +273,13 @@ impl TestResult {
         let download_max = float_max(download.iter().map(|v| v.1));
         let upload_max = float_max(upload.iter().map(|v| v.1));
         let both_max = float_max(both.iter().map(|v| v.1));
-        let bandwidth_max = float_max([download_max, upload_max, both_max].into_iter());
+        let throughput_max = float_max([download_max, upload_max, both_max].into_iter());
 
         TestResult {
             download,
             upload,
             both,
-            bandwidth_max,
+            throughput_max,
             local_latency: LatencyResult::new(&result, &result.pings),
             peer_latency: result
                 .raw_result
@@ -410,7 +410,7 @@ impl Tester {
             upload: self.settings.client.upload,
             both: self.settings.client.both,
             ping_interval: Duration::from_millis(self.settings.client.latency_sample_rate),
-            bandwidth_interval: Duration::from_millis(self.settings.client.bandwidth_sample_rate),
+            throughput_interval: Duration::from_millis(self.settings.client.throughput_sample_rate),
         }
     }
 
@@ -563,10 +563,10 @@ impl Tester {
                             );
                             ui.label("milliseconds");
                             ui.end_row();
-                            ui.label("Bandwidth sample rate:");
+                            ui.label("Throughput sample rate:");
                             ui.add(
                                 egui::DragValue::new(
-                                    &mut self.settings.client.bandwidth_sample_rate,
+                                    &mut self.settings.client.throughput_sample_rate,
                                 )
                                 .clamp_range(1..=1000)
                                 .speed(0.05),
@@ -626,10 +626,10 @@ impl Tester {
                             );
                             ui.label("seconds");
                             ui.label("");
-                            ui.label("Bandwidth sample rate:");
+                            ui.label("Throughput sample rate:");
                             ui.add(
                                 egui::DragValue::new(
-                                    &mut self.settings.client.bandwidth_sample_rate,
+                                    &mut self.settings.client.throughput_sample_rate,
                                 )
                                 .clamp_range(1..=1000)
                                 .speed(0.05),
@@ -903,7 +903,7 @@ impl Tester {
             let duration = result.result.duration.as_secs_f64() * 1.1;
 
             if result.result.raw_result.streams() > 0 {
-                // Bandwidth
+                // Throughput
                 let mut plot = Plot::new("result")
                     .legend(Legend::default())
                     .link_axis(self.axis.clone())
@@ -911,9 +911,9 @@ impl Tester {
                     .include_x(0.0)
                     .include_x(duration)
                     .include_y(0.0)
-                    .include_y(result.bandwidth_max * 1.1)
+                    .include_y(result.throughput_max * 1.1)
                     .label_formatter(|_, value| {
-                        format!("Bandwidth = {:.2} Mbps\nTime = {:.2} s", value.y, value.x)
+                        format!("Throughput = {:.2} Mbps\nTime = {:.2} s", value.y, value.x)
                     });
 
                 if reset {
@@ -946,7 +946,7 @@ impl Tester {
                         plot_ui.line(both);
                     }
                 });
-                ui.label("Bandwidth");
+                ui.label("Throughput");
             }
         });
     }

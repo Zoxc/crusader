@@ -19,5 +19,6 @@ pub mod latency;
 mod peer;
 pub mod plot;
 pub mod protocol;
+pub mod remote;
 pub mod serve;
 pub mod test;
