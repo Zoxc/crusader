@@ -2,6 +2,8 @@
 
 The **Crusader Network Tester** measures network rates and latency
 in the presence of upload and download traffic.
+It also incorporates a continuous latency tester for
+monitoring background responsiveness.
 It produces plots of the traffic rates,
 latency and packet loss.
 Crusader only uses TCP and UDP ports 35481 for its tests.
@@ -62,7 +64,7 @@ and back (bi-directional).
 * The **Packet Loss** plot (bottom) has green and blue marks
 that mark times when packets were lost.
 
-<!-- <img src="media/plot.png"> -->
+See also the [GUI options](#gui-options) section.
 
 ## Building Crusader from source
 
@@ -76,7 +78,8 @@ cargo build --release
 
 ## Running Crusader from the command line
 
-See also the [command-line options](#command-line-options) below.
+See also the
+[command-line options](#command-line-options) section.
 
 ### GUI Program
 This command starts the GUI program.
@@ -103,6 +106,30 @@ cd src/target/release
 ./crusader test <server-ip>
 ```
 
+## GUI Options
+_Need a few definitions_
+
+- **Client tab**
+   Run the Crusader Client program
+	- **Download, Upload, Both** 
+	    checkboxes control which tests to run
+	- **Streams**
+	- **Load duration**
+	- **Grace duration**
+	- **Stream stagger**
+	- **Latency sample rate**
+	- **Bandwidth sample rate**
+
+- **Server tab**
+   Run the Crusader server to listen for other clients
+
+- **Latency tab**
+   Continually test the latency to the selected
+   Crusader server until stopped.
+
+- **Result tab**
+   Display the result of the most recent client run
+
 ## Command-line options
 
 **Usage: crusader \<COMMAND>**
@@ -122,16 +149,6 @@ cd src/target/release
 - **--plot\_max\_bandwidth** 
 - **--plot\_max\_latency**
 - _Other options?_
-
-**GUI Options:** _Need careful definitions_
-
-- **Download, Upload, Both** checkboxes control which tests to run
-- **Streams**
-- **Load duration**
-- **Grace duration**
-- **Stream stagger**
-- **Latency sample rate**
-- **Bandwidth sample rate**
 
 ## Troubleshooting
 
