@@ -1,5 +1,7 @@
 # Crusader Network Tester
 
+[![GitHub Release](https://img.shields.io/github/v/release/Zoxc/crusader)](https://github.com/Zoxc/crusader/releases)
+
 The **Crusader Network Tester** measures network rates and latency
 in the presence of upload and download traffic.
 It also incorporates a continuous latency tester for
@@ -12,8 +14,9 @@ Crusader only uses TCP and UDP ports 35481 for its tests.
 and Android are available on the
 [Releases](https://github.com/Zoxc/crusader/releases) page.
 
-**Status:** The latest Crusader version is 0.0.12.
-   See the [CHANGELOG.md](./CHANGELOG.md) file for details.
+**Status:** The latest Crusader version is shown above.
+   See the [CHANGELOG.md](./CHANGELOG.md)
+   file for details.
 
 ## Crusader GUI
 
@@ -50,18 +53,18 @@ Each burst is separated by several seconds of idle time.
 The Crusader GUI displays the results of the test with
 three plots (see image above):
 
-* The **Bandwidth** plot (top) shows the bursts of traffic:
+* The **Throughput** plot shows the bursts of traffic:
 green is download, blue is upload, and
 the purple line is the instantaneous
 sum of the download plus upload.
 
-* The **Latency** plot (middle) shows the corresponding latency.
+* The **Latency** plot shows the corresponding latency.
 Blue is the (uni-directional) time from the client to the server.
 Green shows the time from the server to the client (one direction).
 Black shows the sum from the client to the server 
 and back (bi-directional).
 
-* The **Packet Loss** plot (bottom) has green and blue marks
+* The **Packet Loss** plot has green and blue marks
 that mark times when packets were lost.
 
 See also the [GUI options](#gui-options) section.

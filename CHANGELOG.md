@@ -10,8 +10,10 @@ This file lists the changes that have occurred since January 2024 in the project
 ## Unreleased 
 
 - Add `crusader remote` command to start a web server
-   listening on port 35482 that emulates the
-   `crusader-gui` and displays the result in the web page.
+   listening on port 35482 that has much of the functionality of
+   the `crusader-gui`.
+   The GUI requests the server address and various other parameters
+   and displays the resulting chart in the web page.
 
 ## 0.0.12 - 2024-07-31
 - Create UDP server for each server IP (fixes #22)
@@ -27,4 +29,3 @@ This file lists the changes that have occurred since January 2024 in the project
 ## 0.0.10 - 2024-01-09
 - Specify plot title
 - Ignore ENOBUFS error 
-- Fix clippy warnings
