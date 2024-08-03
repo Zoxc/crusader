@@ -16,12 +16,15 @@ use axum::{
 use image::ImageFormat;
 use serde::Deserialize;
 use serde_json::json;
+use socket2::{Domain, Protocol, Socket};
 use std::io::Cursor;
+use std::net::{IpAddr, Ipv6Addr};
 use std::time::Duration;
 use std::{
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
 };
+use tokio::net::TcpSocket;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::{net::TcpListener, signal, task};
 
@@ -205,9 +208,19 @@ async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<
         ));
     }
 
-    let v4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).await?;
     let state = Arc::new(Env { live_reload, msg });
 
+    let v6 = Socket::new(Domain::IPV6, socket2::Type::STREAM, Some(Protocol::TCP))?;
+    v6.set_only_v6(true)?;
+    let v6: std::net::TcpStream = v6.into();
+    v6.set_nonblocking(true)?;
+    let v6 = TcpSocket::from_std_stream(v6);
+    v6.bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))?;
+    let v6 = v6.listen(1024)?;
+
+    let v4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).await?;
+
+    task::spawn(listen(state.clone(), v6));
     task::spawn(listen(state.clone(), v4));
 
     (state.msg)(&format!(
