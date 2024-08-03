@@ -1,3 +1,5 @@
+use anyhow::anyhow;
+use image::{ImageBuffer, ImageFormat, Rgb};
 use plotters::coord::types::RangedCoordf64;
 use plotters::coord::Shift;
 use plotters::prelude::*;
@@ -157,6 +159,15 @@ pub fn save_graph(config: &PlotConfig, result: &TestResult, name: &str) -> Strin
 }
 
 pub fn save_graph_to_path(path: &Path, config: &PlotConfig, result: &TestResult) {
+    let img = save_graph_to_mem(config, result).expect("Unable to write plot to file");
+    img.save_with_format(&path, ImageFormat::Png)
+        .expect("Unable to write plot to file");
+}
+
+pub(crate) fn save_graph_to_mem(
+    config: &PlotConfig,
+    result: &TestResult,
+) -> Result<ImageBuffer<Rgb<u8>, Vec<u8>>, anyhow::Error> {
     let mut throughput = Vec::new();
 
     result.both_bytes.as_ref().map(|both_bytes| {
@@ -199,14 +210,13 @@ pub fn save_graph_to_path(path: &Path, config: &PlotConfig, result: &TestResult)
     }
 
     graph(
-        path,
         config,
         result,
         &result.pings,
         &throughput,
         result.start.as_secs_f64(),
         result.duration.as_secs_f64(),
-    );
+    )
 }
 
 pub fn float_max(iter: impl Iterator<Item = f64>) -> f64 {
@@ -724,14 +734,13 @@ pub(crate) fn bytes_transferred(
 }
 
 pub(crate) fn graph(
-    path: &Path,
     config: &PlotConfig,
     result: &TestResult,
     pings: &[RawPing],
     throughput: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
     start: f64,
     duration: f64,
-) {
+) -> Result<ImageBuffer<Rgb<u8>, Vec<u8>>, anyhow::Error> {
     let width = config.width.unwrap_or(1280) as u32;
 
     let peer_latency = result.raw_result.peer_pings.is_some();
@@ -742,169 +751,191 @@ pub(crate) fn graph(
         def_height += 380;
     }
 
+    let height = config.height.unwrap_or(def_height) as u32;
+
+    let mut data = vec![0; 3 * (width as usize * height as usize)];
+
     let title = config.title.as_deref().unwrap_or("Latency under load");
 
-    let root = BitMapBackend::new(path, (width, config.height.unwrap_or(def_height) as u32))
-        .into_drawing_area();
+    {
+        let root = BitMapBackend::with_buffer(&mut data, (width, height)).into_drawing_area();
 
-    root.fill(&WHITE).unwrap();
+        root.fill(&WHITE).unwrap();
 
-    let style: TextStyle = (FontFamily::SansSerif, 26).into();
+        let style: TextStyle = (FontFamily::SansSerif, 26).into();
 
-    let small_style: TextStyle = (FontFamily::SansSerif, 14).into();
+        let small_style: TextStyle = (FontFamily::SansSerif, 14).into();
 
-    let lines = 2;
+        let lines = 2;
 
-    let text_height = (root.estimate_text_size("Wg", &small_style).unwrap().1 as i32 + 5) * lines;
+        let text_height =
+            (root.estimate_text_size("Wg", &small_style).unwrap().1 as i32 + 5) * lines;
 
-    let center = text_height / 2 + 10;
+        let center = text_height / 2 + 10;
 
-    root.draw_text(
-        title,
-        &style.pos(Pos::new(HPos::Center, VPos::Center)),
-        (width as i32 / 2, center),
-    )
-    .unwrap();
-
-    if result.raw_result.version >= 1 {
-        let top_margin = 10;
         root.draw_text(
-            &format!(
-                "Connections: {} over IPv{}",
-                result.raw_result.streams(),
-                if result.raw_result.ipv6 { 6 } else { 4 },
-            ),
-            &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
-            (100, top_margin + text_height / lines),
+            title,
+            &style.pos(Pos::new(HPos::Center, VPos::Center)),
+            (width as i32 / 2, center),
         )
         .unwrap();
 
-        root.draw_text(
-            &format!(
-                "Stagger: {} s",
-                result.raw_result.config.stagger.as_secs_f64(),
-            ),
-            &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
-            (100 + 180, top_margin + text_height / lines),
-        )
-        .unwrap();
+        if result.raw_result.version >= 1 {
+            let top_margin = 10;
+            root.draw_text(
+                &format!(
+                    "Connections: {} over IPv{}",
+                    result.raw_result.streams(),
+                    if result.raw_result.ipv6 { 6 } else { 4 },
+                ),
+                &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
+                (100, top_margin + text_height / lines),
+            )
+            .unwrap();
 
-        root.draw_text(
-            &format!(
-                "Load duration: {:.2} s",
-                result.raw_result.config.load_duration.as_secs_f64(),
-            ),
-            &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
-            (100, top_margin),
-        )
-        .unwrap();
+            root.draw_text(
+                &format!(
+                    "Stagger: {} s",
+                    result.raw_result.config.stagger.as_secs_f64(),
+                ),
+                &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
+                (100 + 180, top_margin + text_height / lines),
+            )
+            .unwrap();
 
-        root.draw_text(
-            &format!(
-                "Server latency: {:.2} ms",
-                result.raw_result.server_latency.as_secs_f64() * 1000.0,
-            ),
-            &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
-            (100 + 180, top_margin),
-        )
-        .unwrap();
+            root.draw_text(
+                &format!(
+                    "Load duration: {:.2} s",
+                    result.raw_result.config.load_duration.as_secs_f64(),
+                ),
+                &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
+                (100, top_margin),
+            )
+            .unwrap();
 
-        root.draw_text(
-            &result.raw_result.generated_by,
-            &small_style.pos(Pos::new(HPos::Right, VPos::Center)),
-            (width as i32 - 100, center),
-        )
-        .unwrap();
-    }
+            root.draw_text(
+                &format!(
+                    "Server latency: {:.2} ms",
+                    result.raw_result.server_latency.as_secs_f64() * 1000.0,
+                ),
+                &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
+                (100 + 180, top_margin),
+            )
+            .unwrap();
 
-    let mut root = root.split_vertically(text_height + 10).1;
+            root.draw_text(
+                &result.raw_result.generated_by,
+                &small_style.pos(Pos::new(HPos::Right, VPos::Center)),
+                (width as i32 - 100, center),
+            )
+            .unwrap();
+        }
 
-    let loss = if !peer_latency {
-        let loss;
-        (root, loss) = root.split_vertically(root.relative_to_height(1.0) - 70.0);
-        Some(loss)
-    } else {
-        None
-    };
+        let mut root = root.split_vertically(text_height + 10).1;
 
-    let mut charts = 1;
+        let loss = if !peer_latency {
+            let loss;
+            (root, loss) = root.split_vertically(root.relative_to_height(1.0) - 70.0);
+            Some(loss)
+        } else {
+            None
+        };
 
-    if peer_latency {
-        charts += 1;
-    }
+        let mut charts = 1;
 
-    if result.raw_result.streams() > 0 {
-        if config.split_throughput {
-            if result.raw_result.download() || result.raw_result.both() {
+        if peer_latency {
+            charts += 1;
+        }
+
+        if result.raw_result.streams() > 0 {
+            if config.split_throughput {
+                if result.raw_result.download() || result.raw_result.both() {
+                    charts += 1
+                }
+                if result.raw_result.upload() || result.raw_result.both() {
+                    charts += 1
+                }
+            } else {
                 charts += 1
             }
-            if result.raw_result.upload() || result.raw_result.both() {
+            if config.transferred {
                 charts += 1
             }
-        } else {
-            charts += 1
         }
-        if config.transferred {
-            charts += 1
-        }
-    }
 
-    let areas = root.split_evenly((charts, 1));
+        let areas = root.split_evenly((charts, 1));
 
-    // Scale to fit the legend
-    let duration = duration * 1.08;
+        // Scale to fit the legend
+        let duration = duration * 1.08;
 
-    let mut chart_index = 0;
+        let mut chart_index = 0;
 
-    if result.raw_result.streams() > 0 {
-        if config.split_throughput {
-            if result.raw_result.download() || result.raw_result.both() {
-                plot_split_throughput(config, true, result, start, duration, &areas[chart_index]);
+        if result.raw_result.streams() > 0 {
+            if config.split_throughput {
+                if result.raw_result.download() || result.raw_result.both() {
+                    plot_split_throughput(
+                        config,
+                        true,
+                        result,
+                        start,
+                        duration,
+                        &areas[chart_index],
+                    );
+                    chart_index += 1;
+                }
+                if result.raw_result.upload() || result.raw_result.both() {
+                    plot_split_throughput(
+                        config,
+                        false,
+                        result,
+                        start,
+                        duration,
+                        &areas[chart_index],
+                    );
+                    chart_index += 1;
+                }
+            } else {
+                plot_throughput(config, throughput, start, duration, &areas[chart_index]);
                 chart_index += 1;
             }
-            if result.raw_result.upload() || result.raw_result.both() {
-                plot_split_throughput(config, false, result, start, duration, &areas[chart_index]);
-                chart_index += 1;
-            }
-        } else {
-            plot_throughput(config, throughput, start, duration, &areas[chart_index]);
-            chart_index += 1;
         }
-    }
 
-    latency(
-        config,
-        result,
-        pings,
-        start,
-        duration,
-        &areas[chart_index],
-        loss.as_ref(),
-        false,
-    );
-    chart_index += 1;
-
-    if let Some(peer_pings) = result.raw_result.peer_pings.as_ref() {
         latency(
             config,
             result,
-            peer_pings,
+            pings,
             start,
             duration,
             &areas[chart_index],
-            None,
-            true,
+            loss.as_ref(),
+            false,
         );
         chart_index += 1;
-    }
 
-    if result.raw_result.streams() > 0 && config.transferred {
-        bytes_transferred(throughput, start, duration, &areas[chart_index]);
-        #[allow(unused_assignments)]
-        {
+        if let Some(peer_pings) = result.raw_result.peer_pings.as_ref() {
+            latency(
+                config,
+                result,
+                peer_pings,
+                start,
+                duration,
+                &areas[chart_index],
+                None,
+                true,
+            );
             chart_index += 1;
         }
+
+        if result.raw_result.streams() > 0 && config.transferred {
+            bytes_transferred(throughput, start, duration, &areas[chart_index]);
+            #[allow(unused_assignments)]
+            {
+                chart_index += 1;
+            }
+        }
+
+        root.present().map_err(|_| anyhow!("Unable to plot"))?;
     }
 
-    root.present().expect("Unable to write plot to file");
+    ImageBuffer::from_raw(width, height, data).ok_or(anyhow!("Failed to create image"))
 }

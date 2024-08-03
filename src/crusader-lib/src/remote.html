@@ -1,0 +1,136 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Crusader Remote Client</title>
+</head>
+<style>
+    body {
+        padding: 0;
+        margin: 0;
+        height: 100%;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 13px;
+        background: #f5f5f5;
+        color: rgb(87, 87, 87);
+    }
+
+    h1 {
+        font-weight: normal;
+        font-size: 1.6em;
+        padding: 0.5em;
+        margin: 0;
+    }
+
+    .flex {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        align-items: flex-start;
+    }
+
+    .box {
+        padding: 1.5em;
+        margin: 1.5em;
+        background: #f7f5f5;
+        box-shadow: 0.1em 0.1em 1.7em rgba(0, 0, 0, 0.08);
+        border-radius: 5px;
+        border: 1px solid rgb(218, 218, 218);
+        width: fit-content;
+    }
+
+    .plot-box {
+        padding: 0;
+    }
+</style>
+<script>
+    let running = false;
+    function run() {
+        if (running) { return }
+        running = true;
+
+        const log = document.getElementById("log");
+        log.innerHTML = "";
+        document.getElementById("run").disabled = true;
+
+        const result = document.getElementById("result");
+        result.innerHTML = "";
+
+        let config = {
+            server: document.getElementById("server").value,
+            download: true,
+            upload: true,
+            both: true,
+            port: 35481,
+            streams: 16,
+            stream_stagger: 0,
+            load_duration: 5,
+            grace_duration: 1,
+            latency_sample_rate: 5,
+            throughput_sample_rate: 20,
+            latency_peer: null,
+        };
+
+        localStorage.setItem("config", JSON.stringify(config));
+
+        let binary_index = 0;
+
+        let ws = new WebSocket(`ws://${window.location.host}/api/client`)
+        ws.onmessage = event => {
+            if (event.data instanceof Blob) {
+                if (binary_index == 0) {
+                    const img = document.createElement('img');
+                    img.src = URL.createObjectURL(event.data);
+                    const box = document.createElement('div');
+                    box.classList.add("box", "plot-box");
+                    box.append(img);
+                    const result = document.getElementById("result");
+                    result.append(box);
+                }
+                binary_index += 1;
+            } else {
+                let data = JSON.parse(event.data);
+                if (data.type == "log") {
+                    let p = document.createElement("p");
+                    p.innerText = data.message;
+                    log.append(p);
+                }
+                if (data.type == "result") {
+                    let p = document.createElement("p");
+                    p.innerText = "Test completed.";
+                    log.append(p);
+                }
+            }
+        };
+        ws.onopen = (event) => {
+            ws.send(JSON.stringify(config));
+        };
+        ws.onclose = (event) => {
+            running = false;
+            document.getElementById("run").disabled = false;
+        };
+    }
+
+    function load() {
+        let data = localStorage.getItem("config");
+        if (data) {
+            let config = JSON.parse(data);
+            document.getElementById("server").value = config.server;
+        }
+    }
+</script>
+
+<body onload="load()">
+    <div class="flex">
+        <div class="box">
+            <h1>Crusader Remote Client</h1>
+            <p>Server: <input type="text" id="server"></p>
+            <p><input type="button" id="run" value="Run test" onclick="run()"></p>
+            <div id="log"></div>
+        </div>
+        <div id="result"></div>
+    </div>
+</body>
+
+</html>

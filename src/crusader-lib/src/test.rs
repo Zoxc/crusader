@@ -302,7 +302,7 @@ pub struct Config {
     pub throughput_interval: Duration,
 }
 
-async fn test_async(
+pub(crate) async fn test_async(
     config: Config,
     server: &str,
     latency_peer_server: Option<&str>,

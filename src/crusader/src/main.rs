@@ -119,6 +119,15 @@ enum Commands {
         #[command(flatten)]
         plot: PlotArgs,
     },
+    #[command(about = "Allows the client to be controlled over a web server")]
+    Remote {
+        #[arg(
+            long,
+            default_value_t = protocol::PORT + 1,
+            help = "Specifies the HTTP port used by the server"
+        )]
+        port: u16,
+    },
 }
 
 fn main() {
@@ -171,6 +180,9 @@ fn main() {
         }
         Commands::Serve { port } => {
             crusader_lib::serve::serve(*port);
+        }
+        Commands::Remote { port } => {
+            crusader_lib::remote::run(*port);
         }
         Commands::Plot { data, plot } => {
             let result = RawResult::load(data).expect("Unable to load data");
