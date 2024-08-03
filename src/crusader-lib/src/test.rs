@@ -1,3 +1,4 @@
+use anyhow::{anyhow, bail, Context};
 use bytes::{Bytes, BytesMut};
 use futures::future::FutureExt;
 use futures::{pin_mut, select, Sink, Stream};
@@ -111,7 +112,7 @@ pub(crate) async fn hello<
 >(
     tx: &mut T,
     rx: &mut R,
-) -> Result<(), Box<dyn Error>>
+) -> Result<(), anyhow::Error>
 where
     T::Error: Error + Send + Sync + 'static,
     RE: Error + Send + Sync + 'static,
@@ -122,11 +123,11 @@ where
     let server_hello: Hello = receive(rx).await?;
 
     if hello != server_hello {
-        return Err(format!(
+        bail!(
             "Mismatched server hello, got {:?}, expected {:?}",
-            server_hello, hello
-        )
-        .into());
+            server_hello,
+            hello
+        );
     }
 
     Ok(())
@@ -307,10 +308,12 @@ pub(crate) async fn test_async(
     server: &str,
     latency_peer_server: Option<&str>,
     msg: Msg,
-) -> Result<RawResult, Box<dyn Error>> {
+) -> Result<RawResult, anyhow::Error> {
     msg(&format!("Client version {} running", LIB_VERSION));
 
-    let control = net::TcpStream::connect((server, config.port)).await?;
+    let control = net::TcpStream::connect((server, config.port))
+        .await
+        .with_context(|| "Failed to connect to server")?;
     control.set_nodelay(true)?;
 
     let server = control.peer_addr()?;
@@ -330,8 +333,8 @@ pub(crate) async fn test_async(
     let reply: ServerMessage = receive(&mut control_rx).await?;
     let id = match reply {
         ServerMessage::NewClient(Some(id)) => id,
-        ServerMessage::NewClient(None) => return Err("Server was unable to create client".into()),
-        _ => return Err(format!("Unexpected message {:?}", reply).into()),
+        ServerMessage::NewClient(None) => bail!("Server was unable to create client"),
+        _ => bail!("Unexpected message {:?}", reply),
     };
 
     let loading_streams: u32 = config.streams.try_into().unwrap();
@@ -593,7 +596,10 @@ pub(crate) async fn test_async(
         msg(&format!("Testing upload..."));
 
         for _ in 0..config.streams {
-            let stream = upload_done_rx.recv().await.ok_or("Expected stream")?;
+            let stream = upload_done_rx
+                .recv()
+                .await
+                .ok_or(anyhow!("Expected stream"))?;
             send(&mut control_tx, &ClientMessage::LoadComplete { stream }).await?;
         }
 
@@ -620,7 +626,10 @@ pub(crate) async fn test_async(
         msg(&format!("Testing both download and upload..."));
 
         for _ in 0..config.streams {
-            let stream = upload_done_rx.recv().await.ok_or("Expected stream")?;
+            let stream = upload_done_rx
+                .recv()
+                .await
+                .ok_or(anyhow!("Expected stream"))?;
             send(&mut control_tx, &ClientMessage::LoadComplete { stream }).await?;
         }
 
@@ -827,7 +836,7 @@ pub(crate) async fn measure_latency(
         u64,
         FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     ),
-    Box<dyn Error>,
+    anyhow::Error,
 > {
     send(&mut control_tx, &ClientMessage::GetMeasurements).await?;
 
@@ -835,13 +844,13 @@ pub(crate) async fn measure_latency(
         let mut latencies = Vec::new();
 
         loop {
-            let reply: ServerMessage = receive(&mut control_rx).await.unwrap();
+            let reply: ServerMessage = receive(&mut control_rx).await?;
             match reply {
                 ServerMessage::LatencyMeasures(measures) => {
                     latencies.extend(measures.into_iter());
                 }
                 ServerMessage::MeasurementsDone { .. } => break,
-                _ => return Err(format!("Unexpected message {:?}", reply)),
+                _ => bail!("Unexpected message {:?}", reply),
             };
         }
 
@@ -895,7 +904,7 @@ pub(crate) async fn measure_latency(
         })
         .collect();
     if pings.is_empty() {
-        return Err("Unable to measure latency to server".into());
+        bail!("Unable to measure latency to server");
     }
 
     pings.sort_by_key(|d| d.1);
@@ -1363,7 +1372,7 @@ pub fn test(
     plot: PlotConfig,
     host: &str,
     latency_peer_server: Option<&str>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), anyhow::Error> {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let result = rt.block_on(test_async(
         config,
@@ -1374,7 +1383,8 @@ pub fn test(
     let result = match result {
         Ok(result) => result,
         Err(error) => {
-            println!("{}", with_time(&format!("Client failed: {}", error)));
+            println!("{}", with_time(&format!("Client failed")));
+            println!("Error: {:?}", error);
             return Err(error);
         }
     };

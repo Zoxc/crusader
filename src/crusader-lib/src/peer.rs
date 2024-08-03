@@ -26,7 +26,7 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub async fn start(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn start(&mut self) -> Result<(), anyhow::Error> {
         let reply: ServerMessage = receive(&mut self.rx).await?;
         match reply {
             ServerMessage::PeerReady { server_latency } => {
@@ -35,30 +35,30 @@ impl Peer {
                     Duration::from_nanos(server_latency).as_secs_f64() * 1000.0
                 ));
             }
-            _ => return Err(format!("Unexpected message {:?}", reply).into()),
+            _ => bail!("Unexpected message {:?}", reply),
         };
         send(&mut self.tx, &ClientMessage::PeerStart).await?;
         let reply: ServerMessage = receive(&mut self.rx).await?;
         match reply {
             ServerMessage::PeerStarted => (),
-            _ => return Err(format!("Unexpected message {:?}", reply).into()),
+            _ => bail!("Unexpected message {:?}", reply),
         };
         Ok(())
     }
 
-    pub async fn stop(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn stop(&mut self) -> Result<(), anyhow::Error> {
         send(&mut self.tx, &ClientMessage::PeerStop).await?;
         Ok(())
     }
 
-    pub async fn complete(mut self) -> Result<(bool, Vec<PeerLatency>), Box<dyn Error>> {
+    pub async fn complete(mut self) -> Result<(bool, Vec<PeerLatency>), anyhow::Error> {
         let reply: ServerMessage = receive(&mut self.rx).await?;
         match reply {
             ServerMessage::PeerDone {
                 overload,
                 latencies,
             } => Ok((overload, latencies)),
-            _ => Err(format!("Unexpected message {:?}", reply).into()),
+            _ => bail!("Unexpected message {:?}", reply),
         }
     }
 }
@@ -69,7 +69,7 @@ pub async fn connect_to_peer(
     latency_peer_server: &str,
     estimated_duration: Duration,
     msg: Msg,
-) -> Result<Peer, Box<dyn Error>> {
+) -> Result<Peer, anyhow::Error> {
     let control = net::TcpStream::connect((latency_peer_server, config.port)).await?;
     control.set_nodelay(true)?;
 
@@ -101,7 +101,7 @@ pub async fn connect_to_peer(
     let reply: ServerMessage = receive(&mut control_rx).await?;
     match reply {
         ServerMessage::NewPeer => (),
-        _ => return Err(format!("Unexpected message {:?}", reply).into()),
+        _ => bail!("Unexpected message {:?}", reply),
     };
 
     Ok(Peer {

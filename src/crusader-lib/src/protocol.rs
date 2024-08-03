@@ -133,9 +133,9 @@ pub fn codec() -> LengthDelimitedCodec {
 pub async fn send<S: Sink<Bytes> + Unpin>(
     sink: &mut S,
     value: &impl Serialize,
-) -> Result<(), Box<dyn Error>>
+) -> Result<(), anyhow::Error>
 where
-    S::Error: Error + 'static,
+    S::Error: Error + Send + Sync + 'static,
 {
     Ok(sink.send(bincode::serialize(value)?.into()).await?)
 }
