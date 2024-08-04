@@ -9,3 +9,4 @@ edition = "2021"
 crusader-lib = { path = "../crusader-lib" }
 crusader-gui-lib = { path = "../crusader-gui-lib" }
 eframe = { git = "https://github.com/Zoxc/egui.git", branch = "crusader" }
+font-kit = "0.14.2"
