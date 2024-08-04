@@ -60,7 +60,7 @@ impl eframe::App for App {
             let mut rect = ui.max_rect();
             rect.set_top(rect.top() + 40.0);
             rect.set_height(rect.height() - 60.0);
-            let mut ui = ui.child_ui(rect, Layout::left_to_right(Align::Center));
+            let mut ui = ui.child_ui(rect, Layout::left_to_right(Align::Center), None);
             ui.vertical(|ui| {
                 ui.heading("Crusader Network Benchmark");
                 ui.separator();
@@ -199,10 +199,11 @@ fn android_main(app: AndroidApp) {
         "Crusader Network Tester",
         options,
         Box::new(|_cc| {
-            Box::new(App {
+            Ok(Box::new(App {
                 tester,
                 keyboard_shown: false,
-            })
+            }))
         }),
-    );
+    )
+    .unwrap();
 }

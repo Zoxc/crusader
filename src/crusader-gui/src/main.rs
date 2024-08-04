@@ -39,11 +39,12 @@ fn main() {
             let ctx = &cc.egui_ctx;
             let mut style = ctx.style();
             let style_ = Arc::make_mut(&mut style);
+
             style_.spacing.button_padding = vec2(6.0, 0.0);
             style_.spacing.interact_size.y = 30.0;
             style_.spacing.item_spacing = vec2(5.0, 5.0);
 
-            let font_size = 18.0;
+            let font_size = 12.5;
 
             style_.text_styles.get_mut(&egui::TextStyle::Body).map(|v| {
                 v.size = font_size;
@@ -70,11 +71,12 @@ fn main() {
 
             load_system_font(ctx).ok();
 
-            Box::new(App {
+            Ok(Box::new(App {
                 tester: Tester::new(settings),
-            })
+            }))
         }),
-    );
+    )
+    .unwrap()
 }
 
 fn load_system_font(ctx: &Context) -> Result<(), Box<dyn Error>> {
@@ -84,7 +86,6 @@ fn load_system_font(ctx: &Context) -> Result<(), Box<dyn Error>> {
         &[
             FamilyName::Title("system-ui".to_string()),
             FamilyName::Title("Segoe UI".to_string()),
-            FamilyName::SansSerif,
         ],
         &Properties::new(),
     )?;

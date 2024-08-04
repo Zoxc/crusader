@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 crusader-lib = { path = "../crusader-lib" }
 crusader-gui-lib = { path = "../crusader-gui-lib" }
-eframe = { git = "https://github.com/Zoxc/egui.git", branch = "crusader" }
+eframe = "0.28.1"
 font-kit = "0.14.2"

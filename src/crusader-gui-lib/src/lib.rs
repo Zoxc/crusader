@@ -1,7 +1,8 @@
 #![allow(
     clippy::field_reassign_with_default,
     clippy::option_map_unit_fn,
-    clippy::type_complexity
+    clippy::type_complexity,
+    clippy::too_many_arguments
 )]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
@@ -21,14 +22,11 @@ use crusader_lib::{
     with_time,
 };
 use eframe::{
-    egui::{
-        self,
-        plot::{Legend, Line, LinkedAxisGroup, LinkedCursorsGroup, Plot, PlotPoints},
-        Grid, Layout, ScrollArea, TextEdit, TextStyle, Ui,
-    },
+    egui::{self, Grid, Id, ScrollArea, TextEdit, TextStyle, Ui, Vec2b},
     emath::{vec2, Align},
     epaint::Color32,
 };
+use egui_plot::{Legend, Line, Plot, PlotPoints};
 
 #[cfg(not(target_os = "android"))]
 use rfd::FileDialog;
@@ -166,14 +164,10 @@ pub struct Tester {
     raw_result_saved: Option<String>,
     msgs: Vec<String>,
     msg_scrolled: usize,
-    axis: LinkedAxisGroup,
-    cursor: LinkedCursorsGroup,
     pub file_loader: Option<Box<dyn Fn(&mut Tester)>>,
     pub plot_saver: Option<Box<dyn Fn(&plot::TestResult)>>,
     pub raw_saver: Option<Box<dyn Fn(&RawResult)>>,
 
-    latency_axis: LinkedAxisGroup,
-    latency_cursor: LinkedCursorsGroup,
     latency_state: ClientState,
     latency: Option<Latency>,
     latency_data: Arc<latency::Data>,
@@ -355,13 +349,9 @@ impl Tester {
             msg_scrolled: 0,
             server_state: ServerState::Stopped(None),
             server: None,
-            axis: LinkedAxisGroup::x(),
-            cursor: LinkedCursorsGroup::x(),
             file_loader: None,
             raw_saver: None,
             plot_saver: None,
-            latency_axis: LinkedAxisGroup::x(),
-            latency_cursor: LinkedCursorsGroup::x(),
             latency_state: ClientState::Stopped,
             latency: None,
             latency_data: Arc::new(latency::Data::new(0, Arc::new(|| {}))),
@@ -527,14 +517,14 @@ impl Tester {
                             ui.label("Streams: ");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.client.streams)
-                                    .clamp_range(1..=1000)
+                                    .range(1..=1000)
                                     .speed(0.05),
                             );
                             ui.end_row();
                             ui.label("Load duration: ");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.client.load_duration)
-                                    .clamp_range(0..=1000)
+                                    .range(0..=1000)
                                     .speed(0.05),
                             );
                             ui.label("seconds");
@@ -542,7 +532,7 @@ impl Tester {
                             ui.label("Grace duration: ");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.client.grace_duration)
-                                    .clamp_range(0..=1000)
+                                    .range(0..=1000)
                                     .speed(0.05),
                             );
                             ui.label("seconds");
@@ -550,7 +540,7 @@ impl Tester {
                             ui.label("Stream stagger: ");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.client.stream_stagger)
-                                    .clamp_range(0..=1000)
+                                    .range(0..=1000)
                                     .speed(0.05),
                             );
                             ui.label("seconds");
@@ -558,7 +548,7 @@ impl Tester {
                             ui.label("Latency sample rate:");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.client.latency_sample_rate)
-                                    .clamp_range(1..=1000)
+                                    .range(1..=1000)
                                     .speed(0.05),
                             );
                             ui.label("milliseconds");
@@ -568,7 +558,7 @@ impl Tester {
                                 egui::DragValue::new(
                                     &mut self.settings.client.throughput_sample_rate,
                                 )
-                                .clamp_range(1..=1000)
+                                .range(1..=1000)
                                 .speed(0.05),
                             );
                             ui.label("milliseconds");
@@ -581,7 +571,7 @@ impl Tester {
                             ui.label("Streams: ");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.client.streams)
-                                    .clamp_range(1..=1000)
+                                    .range(1..=1000)
                                     .speed(0.05),
                             );
                             ui.label("");
@@ -590,7 +580,7 @@ impl Tester {
                             ui.label("Stream stagger: ");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.client.stream_stagger)
-                                    .clamp_range(0..=1000)
+                                    .range(0..=1000)
                                     .speed(0.05),
                             );
                             ui.label("seconds");
@@ -601,7 +591,7 @@ impl Tester {
                             ui.label("Load duration: ");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.client.load_duration)
-                                    .clamp_range(0..=1000)
+                                    .range(0..=1000)
                                     .speed(0.05),
                             );
                             ui.label("seconds");
@@ -610,7 +600,7 @@ impl Tester {
                             ui.label("Latency sample rate:");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.client.latency_sample_rate)
-                                    .clamp_range(1..=1000)
+                                    .range(1..=1000)
                                     .speed(0.05),
                             );
                             ui.label("milliseconds");
@@ -621,7 +611,7 @@ impl Tester {
                             ui.label("Grace duration: ");
                             ui.add(
                                 egui::DragValue::new(&mut self.settings.client.grace_duration)
-                                    .clamp_range(0..=1000)
+                                    .range(0..=1000)
                                     .speed(0.05),
                             );
                             ui.label("seconds");
@@ -631,7 +621,7 @@ impl Tester {
                                 egui::DragValue::new(
                                     &mut self.settings.client.throughput_sample_rate,
                                 )
-                                .clamp_range(1..=1000)
+                                .range(1..=1000)
                                 .speed(0.05),
                             );
                             ui.label("milliseconds");
@@ -698,7 +688,16 @@ impl Tester {
             });
     }
 
-    fn latency_and_loss(&mut self, ui: &mut Ui, reset: bool, peer: bool, height: f32, plots: u8) {
+    fn latency_and_loss(
+        &mut self,
+        ui: &mut Ui,
+        link: Id,
+        reset: bool,
+        peer: bool,
+        height: f32,
+        plots: u8,
+        y_axis_size: f32,
+    ) {
         let result = self.result.as_ref().unwrap();
 
         let data = if peer {
@@ -709,12 +708,63 @@ impl Tester {
 
         let duration = result.result.duration.as_secs_f64() * 1.1;
 
+        ui.label(if peer { "Peer latency" } else { "Latency" });
+        // Latency
+        let mut plot = Plot::new((peer, "ping"))
+            .legend(Legend::default())
+            .y_axis_min_width(y_axis_size)
+            .link_axis(link, true, false)
+            .link_cursor(link, true, false)
+            .include_x(0.0)
+            .include_x(duration)
+            .include_y(0.0)
+            .include_y(data.max * 1.1)
+            .label_formatter(|_, value| {
+                format!("Latency = {:.2} ms\nTime = {:.2} s", value.y, value.x)
+            });
+
+        if reset {
+            plot = plot.reset();
+        }
+
+        //if plots > 1 {
+        plot = plot.height(height / (plots as f32));
+        //}
+
+        plot.show(ui, |plot_ui| {
+            if result.result.raw_result.version >= 1 {
+                let latency = data.up.iter().map(|v| [v.0, v.1]);
+                let latency = Line::new(PlotPoints::from_iter(latency))
+                    .color(Color32::from_rgb(37, 83, 169))
+                    .name("Up");
+
+                plot_ui.line(latency);
+
+                let latency = data.down.iter().map(|v| [v.0, v.1]);
+                let latency = Line::new(PlotPoints::from_iter(latency))
+                    .color(Color32::from_rgb(95, 145, 62))
+                    .name("Down");
+
+                plot_ui.line(latency);
+            }
+
+            let latency = data.total.iter().map(|v| [v.0, v.1]);
+            let latency = Line::new(PlotPoints::from_iter(latency))
+                .color(Color32::from_rgb(50, 50, 50))
+                .name("Total");
+
+            plot_ui.line(latency);
+        });
+
         // Packet loss
         let mut plot = Plot::new((peer, "loss"))
             .legend(Legend::default())
-            .show_axes([false, false])
-            .link_axis(self.axis.clone())
-            .link_cursor(self.cursor.clone())
+            .show_axes([false, true])
+            .show_grid(Vec2b::new(true, false))
+            .y_axis_min_width(y_axis_size)
+            .y_axis_formatter(|_, _| String::new())
+            .link_axis(link, true, false)
+            .link_cursor(link, true, false)
             .center_y_axis(true)
             .allow_zoom(false)
             .allow_boxed_zoom(false)
@@ -729,6 +779,11 @@ impl Tester {
             plot = plot.reset();
         }
 
+        ui.label(if peer {
+            "Peer packet loss"
+        } else {
+            "Packet loss"
+        });
         plot.show(ui, |plot_ui| {
             for &(loss, down_loss) in &data.loss {
                 let (color, s, e) = down_loss
@@ -759,58 +814,6 @@ impl Tester {
                 }
             }
         });
-        ui.label(if peer {
-            "Peer packet loss"
-        } else {
-            "Packet loss"
-        });
-
-        // Latency
-        let mut plot = Plot::new((peer, "ping"))
-            .legend(Legend::default())
-            .link_axis(self.axis.clone())
-            .link_cursor(self.cursor.clone())
-            .include_x(0.0)
-            .include_x(duration)
-            .include_y(0.0)
-            .include_y(data.max * 1.1)
-            .label_formatter(|_, value| {
-                format!("Latency = {:.2} ms\nTime = {:.2} s", value.y, value.x)
-            });
-
-        if reset {
-            plot = plot.reset();
-        }
-
-        if plots > 1 {
-            plot = plot.height(height / (plots as f32) - 63.0)
-        }
-
-        plot.show(ui, |plot_ui| {
-            if result.result.raw_result.version >= 1 {
-                let latency = data.up.iter().map(|v| [v.0, v.1]);
-                let latency = Line::new(PlotPoints::from_iter(latency))
-                    .color(Color32::from_rgb(37, 83, 169))
-                    .name("Up");
-
-                plot_ui.line(latency);
-
-                let latency = data.down.iter().map(|v| [v.0, v.1]);
-                let latency = Line::new(PlotPoints::from_iter(latency))
-                    .color(Color32::from_rgb(95, 145, 62))
-                    .name("Down");
-
-                plot_ui.line(latency);
-            }
-
-            let latency = data.total.iter().map(|v| [v.0, v.1]);
-            let latency = Line::new(PlotPoints::from_iter(latency))
-                .color(Color32::from_rgb(50, 50, 50))
-                .name("Total");
-
-            plot_ui.line(latency);
-        });
-        ui.label(if peer { "Peer latency" } else { "Latency" });
     }
 
     fn result(&mut self, _ctx: &egui::Context, ui: &mut Ui) {
@@ -879,39 +882,44 @@ impl Tester {
             ui.separator();
         }
 
-        ui.allocate_space(vec2(1.0, 15.0));
-
-        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+        ui.vertical(|ui| {
             let reset = mem::take(&mut self.result_plot_reset);
 
+            let link = ui.id().with("result-link");
+
             let result = self.result.as_ref().unwrap();
 
-            let height = ui.available_height();
+            let loss_size = 39.0;
 
-            let plots = 1
-                + (result.result.raw_result.streams() > 0) as u8
+            let label_size = 37.0;
+
+            let y_axis_size = 30.0;
+
+            let loss_plots = (result.result.raw_result.streams() > 0) as u8
                 + result.peer_latency.is_some() as u8;
 
-            if result.peer_latency.is_some() {
-                self.latency_and_loss(ui, reset, true, height, plots);
-            }
+            let plots = 1 + loss_plots;
 
-            self.latency_and_loss(ui, reset, false, height, plots);
-
-            let result = self.result.as_ref().unwrap();
+            let height = ui.available_height()
+                - loss_size * (loss_plots as f32)
+                - label_size * (plots as f32);
 
             let duration = result.result.duration.as_secs_f64() * 1.1;
 
             if result.result.raw_result.streams() > 0 {
+                ui.label("Throughput");
+
                 // Throughput
                 let mut plot = Plot::new("result")
                     .legend(Legend::default())
-                    .link_axis(self.axis.clone())
-                    .link_cursor(self.cursor.clone())
+                    .y_axis_min_width(y_axis_size)
+                    .link_axis(link, true, false)
+                    .link_cursor(link, true, false)
                     .include_x(0.0)
                     .include_x(duration)
                     .include_y(0.0)
                     .include_y(result.throughput_max * 1.1)
+                    .height(height / (plots as f32))
                     .label_formatter(|_, value| {
                         format!("Throughput = {:.2} Mbps\nTime = {:.2} s", value.y, value.x)
                     });
@@ -946,7 +954,14 @@ impl Tester {
                         plot_ui.line(both);
                     }
                 });
-                ui.label("Throughput");
+            }
+
+            self.latency_and_loss(ui, link, reset, false, height, plots, y_axis_size);
+
+            let result = self.result.as_ref().unwrap();
+
+            if result.peer_latency.is_some() {
+                self.latency_and_loss(ui, link, reset, true, height, plots, y_axis_size);
             }
         });
     }
@@ -1139,7 +1154,7 @@ impl Tester {
                 ui.label("History: ");
                 ui.add(
                     egui::DragValue::new(&mut self.settings.latency_monitor.history)
-                        .clamp_range(0..=1000)
+                        .range(0..=1000)
                         .speed(0.05),
                 );
                 ui.label("seconds");
@@ -1147,7 +1162,7 @@ impl Tester {
                 ui.label("Latency sample rate:");
                 ui.add(
                     egui::DragValue::new(&mut self.settings.latency_monitor.latency_sample_rate)
-                        .clamp_range(1..=1000)
+                        .range(1..=1000)
                         .speed(0.05),
                 );
                 ui.label("milliseconds");
@@ -1207,9 +1222,10 @@ impl Tester {
     }
 
     fn latency_data(&mut self, ctx: &egui::Context, ui: &mut Ui) {
-        ui.allocate_space(vec2(1.0, 15.0));
+        ui.vertical(|ui| {
+            let packet_loss_size = 80.0;
+            let height = ui.available_height();
 
-        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
             let duration = self.settings.latency_monitor.history;
 
             let points = self.latency_data.points.blocking_lock().clone();
@@ -1224,70 +1240,23 @@ impl Tester {
 
             let reset = mem::take(&mut self.latency_plot_reset);
 
-            // Packet loss
-            let mut plot = Plot::new("latency-loss")
-                .legend(Legend::default())
-                .show_axes([false, false])
-                .link_axis(self.latency_axis.clone())
-                .link_cursor(self.latency_cursor.clone())
-                .center_y_axis(true)
-                .allow_zoom(false)
-                .allow_boxed_zoom(false)
-                .include_x(-duration)
-                .include_x(0.0)
-                .include_x(duration * 0.15)
-                .include_y(-1.0)
-                .include_y(1.0)
-                .height(30.0)
-                .label_formatter(|_, value| format!("Time = {:.2} s", value.x));
+            let link = ui.id().with("latency-link");
 
-            if reset {
-                plot = plot.reset();
-            }
-
-            plot.show(ui, |plot_ui| {
-                let loss = points
-                    .iter()
-                    .filter(|point| !point.pending && point.total.is_none());
-
-                for point in loss {
-                    let loss = point.sent.as_secs_f64() - now;
-
-                    let (color, s, e) = if point.up.is_some() {
-                        (Color32::from_rgb(95, 145, 62), 1.0, 0.0)
-                    } else {
-                        (Color32::from_rgb(37, 83, 169), -1.0, 0.0)
-                    };
-
-                    plot_ui.line(
-                        Line::new(PlotPoints::from_iter(
-                            [[loss, s], [loss, e]].iter().copied(),
-                        ))
-                        .color(color),
-                    );
-
-                    plot_ui.line(
-                        Line::new(PlotPoints::from_iter(
-                            [[loss, s], [loss, s - s / 5.0]].iter().copied(),
-                        ))
-                        .width(3.0)
-                        .color(color),
-                    );
-                }
-            });
-            ui.label("Packet loss");
+            let y_axis_size = 30.0;
 
             // Latency
             let mut plot = Plot::new("latency-ping")
                 .legend(Legend::default())
-                .link_axis(self.latency_axis.clone())
-                .link_cursor(self.latency_cursor.clone())
+                .link_axis(link, true, false)
+                .link_cursor(link, true, false)
                 .include_x(-duration)
                 .include_x(0.0)
                 .include_x(duration * 0.15)
                 .include_y(0.0)
                 .include_y(10.0)
-                .auto_bounds_y()
+                .height(height - packet_loss_size)
+                .y_axis_min_width(y_axis_size)
+                .auto_bounds(Vec2b::new(false, true))
                 .label_formatter(|_, value| {
                     format!("Latency = {:.2} ms\nTime = {:.2} s", value.y, value.x)
                 });
@@ -1296,6 +1265,7 @@ impl Tester {
                 plot = plot.reset();
             }
 
+            ui.label("Latency");
             plot.show(ui, |plot_ui| {
                 let latency = points.iter().filter_map(|point| {
                     point
@@ -1331,7 +1301,62 @@ impl Tester {
 
                 plot_ui.line(latency);
             });
-            ui.label("Latency");
+
+            // Packet loss
+            let mut plot = Plot::new("latency-loss")
+                .legend(Legend::default())
+                .show_axes([false, true])
+                .show_grid(Vec2b::new(true, false))
+                .y_axis_min_width(y_axis_size)
+                .y_axis_formatter(|_, _| String::new())
+                .link_axis(link, true, false)
+                .link_cursor(link, true, false)
+                .center_y_axis(true)
+                .allow_zoom(false)
+                .allow_boxed_zoom(false)
+                .include_x(-duration)
+                .include_x(0.0)
+                .include_x(duration * 0.15)
+                .include_y(-1.0)
+                .include_y(1.0)
+                .height(30.0)
+                .label_formatter(|_, value| format!("Time = {:.2} s", value.x));
+
+            if reset {
+                plot = plot.reset();
+            }
+
+            ui.label("Packet loss");
+            plot.show(ui, |plot_ui| {
+                let loss = points
+                    .iter()
+                    .filter(|point| !point.pending && point.total.is_none());
+
+                for point in loss {
+                    let loss = point.sent.as_secs_f64() - now;
+
+                    let (color, s, e) = if point.up.is_some() {
+                        (Color32::from_rgb(95, 145, 62), 1.0, 0.0)
+                    } else {
+                        (Color32::from_rgb(37, 83, 169), -1.0, 0.0)
+                    };
+
+                    plot_ui.line(
+                        Line::new(PlotPoints::from_iter(
+                            [[loss, s], [loss, e]].iter().copied(),
+                        ))
+                        .color(color),
+                    );
+
+                    plot_ui.line(
+                        Line::new(PlotPoints::from_iter(
+                            [[loss, s], [loss, s - s / 5.0]].iter().copied(),
+                        ))
+                        .width(3.0)
+                        .color(color),
+                    );
+                }
+            });
         });
     }
 

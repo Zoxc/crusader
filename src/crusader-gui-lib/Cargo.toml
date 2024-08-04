@@ -10,7 +10,10 @@ toml = "0.5.9"
 serde = { version = "1.0.137", features = ["derive"] }
 crusader-lib = { path = "../crusader-lib" }
 tokio = { version = "1.18.2", features = ["full"] }
-eframe = { git = "https://github.com/Zoxc/egui.git", branch = "crusader" }
+eframe = "0.28.1"
+egui_plot = "0.28.1"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
-rfd = { version = "0.10.0", default-features = false, features = ["xdg-portal"] }
+rfd = { version = "0.10.0", default-features = false, features = [
+    "xdg-portal",
+] }
