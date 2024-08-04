@@ -619,14 +619,7 @@ async fn serve_async(
         msg,
     });
 
-    let v6 = Socket::new(Domain::IPV6, socket2::Type::STREAM, Some(Protocol::TCP))?;
-    v6.set_only_v6(true)?;
-    let v6: std::net::TcpStream = v6.into();
-    v6.set_nonblocking(true)?;
-    let v6 = TcpSocket::from_std_stream(v6);
-    v6.bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))?;
-    let v6 = v6.listen(1024)?;
-
+    let v6 = TcpListener::bind((Ipv6Addr::UNSPECIFIED, port)).await?;
     let v4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).await?;
 
     task::spawn(listen(state.clone(), v6));
