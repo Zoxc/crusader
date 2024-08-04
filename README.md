@@ -1,3 +1,5 @@
+<img src="media/Crusader-Results.png">
+
 # Crusader Network Tester
 
 [![GitHub Release](https://img.shields.io/github/v/release/Zoxc/crusader)](https://github.com/Zoxc/crusader/releases)
@@ -14,7 +16,7 @@ Crusader only uses TCP and UDP ports 35481 for its tests.
 and Android are available on the
 [Releases](https://github.com/Zoxc/crusader/releases) page.
 
-**Status:** The latest Crusader version is shown above.
+**Status:** The latest Crusader release is shown above.
    See the [CHANGELOG.md](./CHANGELOG.md)
    file for details.
 
@@ -39,10 +41,15 @@ chart like the second image below.
 (An easy way to run the server is to start the Crusader GUI
 on another computer, then choose the **Server** tab.)
 
+<img src="media/Crusader-Client.png">
+
+<img src="media/Crusader-Results.png">
+
+<!--
 <img src="media/gui-client.png">
 
 <img src="media/gui.png">
-
+-->
 ## Understanding the results
 
 A Crusader test creates three bursts of traffic:
@@ -110,7 +117,6 @@ cd src/target/release
 ```
 
 ## GUI Options
-_Need a few definitions_
 
 - **Client tab**
    Run the Crusader Client program
@@ -122,6 +128,7 @@ _Need a few definitions_
 	- **Stream stagger**
 	- **Latency sample rate**
 	- **Bandwidth sample rate**
+	- **Latency peer**
 
 - **Server tab**
    Run the Crusader server to listen for other clients
@@ -157,3 +164,10 @@ _Need a few definitions_
 
 - Crusader requires that TCP and UDP ports 35481 are open for its tests.
    Check that your firewall is letting those ports through.
+   
+- Create a debug build by using `cargo build`
+   (instead of `cargo build --release`).
+   Binaries are saved in the _src/target/debug_ directory
+   
+- To get the git commit hash of the current checkout,
+   use `git rev-parse --short master`
