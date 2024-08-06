@@ -7,6 +7,8 @@
 
 use std::{error::Error, sync::Arc};
 
+#[cfg(target_os = "macos")]
+use core_text::font::kCTFontSystemFontType;
 use crusader_gui_lib::Tester;
 use crusader_lib::LIB_VERSION;
 use eframe::{
@@ -17,7 +19,7 @@ use eframe::{
 #[allow(unused_imports)]
 use font_kit::family_name::FamilyName;
 #[cfg(target_os = "macos")]
-use font_kit::{font::Font, loader::Loader};
+use font_kit::font::Font;
 use font_kit::{handle::Handle, properties::Properties, source::SystemSource};
 
 fn main() {
@@ -84,29 +86,39 @@ fn main() {
 fn load_mac_system_font() -> Result<Vec<u8>, Box<dyn Error>> {
     #[cfg(not(target_os = "macos"))]
     {
-        Err("".into())
+        return Err("".into());
     }
     #[cfg(target_os = "macos")]
     {
-        unsafe {
+        /*   let f2 = core_text::font::new_ui_font_for_language(kCTFontSystemFontType, 13.5, None);
+        dbg!(f2.get_available_font_tables());
+        dbg!(f2.url().and_then(|p| p.to_path()));
+        let p = f2.url().and_then(|p| p.to_path()).ok_or("")?;
+        return Ok(std::fs::read(p)?);
+        let d = f2.get_font_table(3).map(|d| d.to_vec());
+        dbg!(d.is_some());
+        return d.ok_or("".into());*/
+        let f = unsafe {
             Font::from_native_font(core_text::font::new_ui_font_for_language(
                 kCTFontSystemFontType,
                 13.5,
                 None,
             ))
-        }
-        .copy_font_data()
-        .map(|data| (*data).clone())
+        };
+        f.copy_font_data()
+            .map(|data| (*data).clone())
+            .ok_or("".into())
     }
 }
 
 fn load_other_system_font() -> Result<Vec<u8>, Box<dyn Error>> {
     let handle = SystemSource::new().select_best_match(
         &[
-            #[cfg(target_os = "macos")]
-            FamilyName::SansSerif,
-            #[cfg(windows)]
-            FamilyName::Title("Segoe UI".to_string()),
+            //  #[cfg(target_os = "macos")]
+            //  FamilyName::SansSerif,
+            //    #[cfg(windows)]
+            FamilyName::Title("System Font Regular".to_string()),
+            //   FamilyName::Title("Segoe UI".to_string()),
         ],
         &Properties::new(),
     )?;
