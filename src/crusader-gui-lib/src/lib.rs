@@ -1002,16 +1002,19 @@ impl Tester {
                             signal_done.send(()).unwrap();
                             ctx__.request_repaint();
                         }),
-                    );
+                    )
+                    .ok();
 
-                    self.server = Some(Server {
-                        done: Some(done),
-                        stop: Some(stop),
-                        started,
-                        rx,
-                        msgs: Vec::new(),
-                    });
-                    self.server_state = ServerState::Starting;
+                    if let Some(stop) = stop {
+                        self.server = Some(Server {
+                            done: Some(done),
+                            stop: Some(stop),
+                            started,
+                            rx,
+                            msgs: Vec::new(),
+                        });
+                        self.server_state = ServerState::Starting;
+                    }
                 };
             }
             ServerState::Running => {

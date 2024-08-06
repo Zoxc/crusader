@@ -1,8 +1,10 @@
+use anyhow::anyhow;
 use futures::{pin_mut, select, FutureExt};
 use parking_lot::Mutex;
 use socket2::{Domain, Protocol, Socket};
 use std::collections::HashMap;
 use std::error::Error;
+use std::io::ErrorKind;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -606,10 +608,7 @@ async fn start_pong_server(state: &Arc<State>, ip: IpAddr) -> Result<Arc<Pong>, 
     )
 }
 
-async fn serve_async(
-    port: u16,
-    msg: Box<dyn Fn(&str) + Send + Sync>,
-) -> Result<(), Box<dyn Error>> {
+async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<(), anyhow::Error> {
     let state = Arc::new(State {
         port,
         started: Instant::now(),
@@ -624,7 +623,16 @@ async fn serve_async(
     let v6: std::net::TcpStream = v6.into();
     v6.set_nonblocking(true)?;
     let v6 = TcpSocket::from_std_stream(v6);
-    v6.bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))?;
+    v6.bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))
+        .map_err(|error| {
+            if let ErrorKind::AddrInUse = error.kind() {
+                anyhow!(
+                    "Failed to bind TCP port, maybe another Crusader instance is already running"
+                )
+            } else {
+                error.into()
+            }
+        })?;
     let v6 = v6.listen(1024)?;
 
     let v4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).await?;
@@ -642,16 +650,17 @@ pub fn serve_until(
     msg: Box<dyn Fn(&str) + Send + Sync>,
     started: Box<dyn FnOnce(Result<(), String>) + Send>,
     done: Box<dyn FnOnce() + Send>,
-) -> oneshot::Sender<()> {
+) -> Result<oneshot::Sender<()>, anyhow::Error> {
     let (tx, rx) = oneshot::channel();
 
+    let rt = tokio::runtime::Runtime::new()?;
+
     thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
             match serve_async(port, msg).await {
                 Ok(()) => {
                     started(Ok(()));
-                    rx.await.unwrap();
+                    rx.await.ok();
                 }
                 Err(error) => started(Err(error.to_string())),
             }
@@ -660,11 +669,11 @@ pub fn serve_until(
         done();
     });
 
-    tx
+    Ok(tx)
 }
 
-pub fn serve(port: u16) {
-    let rt = tokio::runtime::Runtime::new().unwrap();
+pub fn serve(port: u16) -> Result<(), anyhow::Error> {
+    let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         serve_async(
             port,
@@ -673,9 +682,9 @@ pub fn serve(port: u16) {
                 task::spawn_blocking(move || println!("{}", with_time(&msg)));
             }),
         )
-        .await
-        .unwrap();
-        signal::ctrl_c().await.unwrap();
+        .await?;
+        signal::ctrl_c().await?;
         println!("{}", with_time("Server aborting..."));
-    });
+        Ok(())
+    })
 }

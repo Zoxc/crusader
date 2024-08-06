@@ -130,12 +130,8 @@ enum Commands {
     },
 }
 
-fn main() {
-    env_logger::init();
-
+fn run() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
-
-    crusader_lib::plot::register_fonts();
 
     match &cli.command {
         &Commands::Test {
@@ -172,18 +168,10 @@ fn main() {
                 config.both = both;
             }
 
-            if crusader_lib::test::test(config, plot.config(), server, latency_peer.as_deref())
-                .is_err()
-            {
-                process::exit(1);
-            }
+            crusader_lib::test::test(config, plot.config(), server, latency_peer.as_deref())
         }
-        Commands::Serve { port } => {
-            crusader_lib::serve::serve(*port);
-        }
-        Commands::Remote { port } => {
-            crusader_lib::remote::run(*port);
-        }
+        Commands::Serve { port } => crusader_lib::serve::serve(*port),
+        Commands::Remote { port } => crusader_lib::remote::run(*port),
         Commands::Plot { data, plot } => {
             let result = RawResult::load(data).expect("Unable to load data");
             let file = crusader_lib::plot::save_graph(
@@ -194,6 +182,18 @@ fn main() {
                     .unwrap_or("plot"),
             );
             println!("{}", with_time(&format!("Saved plot as {}", file)));
+            Ok(())
         }
+    }
+}
+
+fn main() {
+    env_logger::init();
+
+    crusader_lib::plot::register_fonts();
+
+    if let Err(error) = run() {
+        println!("Error: {:?}", error);
+        process::exit(1);
     }
 }

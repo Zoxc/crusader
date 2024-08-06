@@ -8,3 +8,4 @@ crusader-lib = { path = "../crusader-lib" }
 clap = { version = "4.5.13", features = ["derive"] }
 clap-num = "1.1.1"
 env_logger = "0.10.0"
+anyhow = "1.0.86"

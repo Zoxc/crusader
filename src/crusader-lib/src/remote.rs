@@ -17,7 +17,7 @@ use image::ImageFormat;
 use serde::Deserialize;
 use serde_json::json;
 use socket2::{Domain, Protocol, Socket};
-use std::io::Cursor;
+use std::io::{Cursor, ErrorKind};
 use std::net::{IpAddr, Ipv6Addr};
 use std::time::Duration;
 use std::{
@@ -215,7 +215,16 @@ async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<
     let v6: std::net::TcpStream = v6.into();
     v6.set_nonblocking(true)?;
     let v6 = TcpSocket::from_std_stream(v6);
-    v6.bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))?;
+    v6.bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))
+        .map_err(|error| {
+            if let ErrorKind::AddrInUse = error.kind() {
+                anyhow!(
+                    "Failed to bind TCP port, maybe another Crusader instance is already running"
+                )
+            } else {
+                error.into()
+            }
+        })?;
     let v6 = v6.listen(1024)?;
 
     let v4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).await?;
@@ -237,8 +246,8 @@ async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<
     Ok(())
 }
 
-pub fn run(port: u16) {
-    let rt = tokio::runtime::Runtime::new().unwrap();
+pub fn run(port: u16) -> Result<(), anyhow::Error> {
+    let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         serve_async(
             port,
@@ -247,9 +256,9 @@ pub fn run(port: u16) {
                 task::spawn_blocking(move || println!("{}", with_time(&msg)));
             }),
         )
-        .await
-        .unwrap();
-        signal::ctrl_c().await.unwrap();
+        .await?;
+        signal::ctrl_c().await?;
         println!("{}", with_time("Remote server aborting..."));
-    });
+        Ok(())
+    })
 }

@@ -86,7 +86,7 @@ pub(crate) fn data() -> Vec<u8> {
 
 async fn hello_combined<S: Sink<Bytes> + Stream<Item = Result<BytesMut, S::Error>> + Unpin>(
     stream: &mut S,
-) -> Result<(), Box<dyn Error>>
+) -> Result<(), anyhow::Error>
 where
     S::Error: Error + Send + Sync + 'static,
 {
@@ -191,7 +191,7 @@ pub(crate) async fn read_data(
     bytes: Arc<AtomicU64>,
     until: Instant,
     writer_done: oneshot::Receiver<()>,
-) -> Result<bool, Box<dyn Error>> {
+) -> Result<bool, anyhow::Error> {
     stream.set_linger(Some(Duration::from_secs(0))).ok();
 
     let reading_done = Arc::new(AtomicBool::new(false));
@@ -337,7 +337,7 @@ pub(crate) async fn test_async(
         _ => bail!("Unexpected message {:?}", reply),
     };
 
-    let loading_streams: u32 = config.streams.try_into().unwrap();
+    let loading_streams: u32 = config.streams.try_into()?;
 
     let grace = config.grace_duration;
     let load_duration = config.load_duration;
@@ -476,7 +476,7 @@ pub(crate) async fn test_async(
         let overload_;
 
         loop {
-            let reply: ServerMessage = receive(&mut control_rx).await.unwrap();
+            let reply: ServerMessage = receive(&mut control_rx).await?;
             match reply {
                 ServerMessage::MeasureStreamDone { stream, timeout } => {
                     if timeout {
@@ -508,9 +508,9 @@ pub(crate) async fn test_async(
                         .downloads
                         .lock()
                         .remove(&stream)
-                        .unwrap()
+                        .ok_or(anyhow!("Failed to find stream"))?
                         .send(())
-                        .unwrap();
+                        .map_err(|_| anyhow!("Failed to notify downloader"))?;
                 }
                 ServerMessage::ScheduledLoads { groups: _, time } => {
                     let time = Duration::from_micros(time.wrapping_add(server_time_offset));
@@ -518,14 +518,13 @@ pub(crate) async fn test_async(
                         .send(ScheduledLoads {
                             time: setup_start + time,
                         })
-                        .await
-                        .unwrap()
+                        .await?
                 }
-                _ => panic!("Unexpected message {:?}", reply),
+                _ => bail!("Unexpected message {:?}", reply),
             };
         }
 
-        (latencies, throughput, overload_)
+        Ok((latencies, throughput, overload_))
     });
 
     if let Some(peer) = peer.as_mut() {
@@ -555,7 +554,7 @@ pub(crate) async fn test_async(
 
     let start = Instant::now();
 
-    state_tx.send((TestState::Grace1, start)).unwrap();
+    state_tx.send((TestState::Grace1, start))?;
     time::sleep(grace).await;
 
     let load_delay = (Duration::from_millis(50) + latency).as_micros() as u64;
@@ -569,14 +568,15 @@ pub(crate) async fn test_async(
             },
         )
         .await?;
-        let load = scheduled_load_rx.recv().await.unwrap();
-        state_tx
-            .send((TestState::LoadFromServer, load.time))
-            .unwrap();
+        let load = scheduled_load_rx
+            .recv()
+            .await
+            .ok_or(anyhow!("Failed to receive"))?;
+        state_tx.send((TestState::LoadFromServer, load.time))?;
         msg(&format!("Testing download..."));
-        let _ = semaphore.acquire_many(loading_streams).await.unwrap();
+        let _ = semaphore.acquire_many(loading_streams).await?;
 
-        state_tx.send((TestState::Grace2, Instant::now())).unwrap();
+        state_tx.send((TestState::Grace2, Instant::now()))?;
         time::sleep(grace).await;
     }
 
@@ -589,10 +589,11 @@ pub(crate) async fn test_async(
             },
         )
         .await?;
-        let load = scheduled_load_rx.recv().await.unwrap();
-        state_tx
-            .send((TestState::LoadFromClient, load.time))
-            .unwrap();
+        let load = scheduled_load_rx
+            .recv()
+            .await
+            .ok_or(anyhow!("Failed to receive"))?;
+        state_tx.send((TestState::LoadFromClient, load.time))?;
         msg(&format!("Testing upload..."));
 
         for _ in 0..config.streams {
@@ -603,12 +604,9 @@ pub(crate) async fn test_async(
             send(&mut control_tx, &ClientMessage::LoadComplete { stream }).await?;
         }
 
-        let _ = upload_semaphore
-            .acquire_many(loading_streams)
-            .await
-            .unwrap();
+        let _ = upload_semaphore.acquire_many(loading_streams).await?;
 
-        state_tx.send((TestState::Grace3, Instant::now())).unwrap();
+        state_tx.send((TestState::Grace3, Instant::now()))?;
         time::sleep(grace).await;
     }
 
@@ -621,8 +619,11 @@ pub(crate) async fn test_async(
             },
         )
         .await?;
-        let load = scheduled_load_rx.recv().await.unwrap();
-        state_tx.send((TestState::LoadFromBoth, load.time)).unwrap();
+        let load = scheduled_load_rx
+            .recv()
+            .await
+            .ok_or(anyhow!("Failed to receive"))?;
+        state_tx.send((TestState::LoadFromBoth, load.time))?;
         msg(&format!("Testing both download and upload..."));
 
         for _ in 0..config.streams {
@@ -633,17 +634,14 @@ pub(crate) async fn test_async(
             send(&mut control_tx, &ClientMessage::LoadComplete { stream }).await?;
         }
 
-        let _ = semaphore.acquire_many(loading_streams).await.unwrap();
-        let _ = both_upload_semaphore
-            .acquire_many(loading_streams)
-            .await
-            .unwrap();
+        let _ = semaphore.acquire_many(loading_streams).await?;
+        let _ = both_upload_semaphore.acquire_many(loading_streams).await?;
 
-        state_tx.send((TestState::Grace4, Instant::now())).unwrap();
+        state_tx.send((TestState::Grace4, Instant::now()))?;
         time::sleep(grace).await;
     }
 
-    state_tx.send((TestState::End, Instant::now())).unwrap();
+    state_tx.send((TestState::End, Instant::now()))?;
 
     if let Some(peer) = peer.as_mut() {
         peer.stop().await?;
@@ -651,9 +649,7 @@ pub(crate) async fn test_async(
 
     // Wait for pings to return
     time::sleep(Duration::from_millis(500)).await;
-    state_tx
-        .send((TestState::EndPingRecv, Instant::now()))
-        .unwrap();
+    state_tx.send((TestState::EndPingRecv, Instant::now()))?;
 
     let peer = if let Some(peer) = peer {
         Some(peer.complete().await?)
@@ -669,7 +665,7 @@ pub(crate) async fn test_async(
 
     let mut pongs = ping_recv.await?;
 
-    let (mut latencies, throughput, server_overload) = measures.await?;
+    let (mut latencies, throughput, server_overload) = measures.await??;
 
     let server_overload = server_overload || peer.as_ref().map(|p| p.0).unwrap_or_default();
 
@@ -685,8 +681,8 @@ pub(crate) async fn test_async(
             .collect::<Vec<_>>()
     });
 
-    let download_bytes = wait_on_download_loaders(download).await;
-    let both_download_bytes = wait_on_download_loaders(both_download).await;
+    let download_bytes = wait_on_download_loaders(download).await?;
+    let both_download_bytes = wait_on_download_loaders(both_download).await?;
 
     latencies.sort_by_key(|d| d.index);
     pongs.sort_by_key(|d| d.0.index);
@@ -994,21 +990,19 @@ fn setup_loaders(
     id: u64,
     server: SocketAddr,
     count: u64,
-) -> Vec<JoinHandle<Framed<TcpStream, LengthDelimitedCodec>>> {
+) -> Vec<JoinHandle<Result<Framed<TcpStream, LengthDelimitedCodec>, anyhow::Error>>> {
     (0..count)
         .map(|_| {
             tokio::spawn(async move {
                 let stream = TcpStream::connect(server)
                     .await
-                    .expect("unable to bind TCP socket");
-                stream.set_nodelay(true).unwrap();
+                    .context("unable to bind TCP socket")?;
+                stream.set_nodelay(true)?;
                 let mut stream = Framed::new(stream, codec());
-                hello_combined(&mut stream).await.unwrap();
-                send(&mut stream, &ClientMessage::Associate(id))
-                    .await
-                    .unwrap();
+                hello_combined(&mut stream).await?;
+                send(&mut stream, &ClientMessage::Associate(id)).await?;
 
-                stream
+                Ok(stream)
             })
         })
         .collect()
@@ -1034,7 +1028,7 @@ fn upload_loaders(
         let all_loaders = all_loaders.clone();
         let done = done.clone();
         tokio::spawn(async move {
-            let mut stream = loader.await.unwrap();
+            let mut stream = loader.await??;
 
             let delay = config.stream_stagger * i as u32 + stagger_offset;
 
@@ -1052,21 +1046,20 @@ fn upload_loaders(
                     throughput_interval: config.throughput_interval.as_micros() as u64,
                 },
             )
-            .await
-            .unwrap();
-            let reply: ServerMessage = receive(&mut stream).await.unwrap();
+            .await?;
+            let reply: ServerMessage = receive(&mut stream).await?;
             match reply {
                 ServerMessage::WaitingForLoad => (),
                 _ => panic!("Unexpected message {:?}", reply),
             };
 
-            send(&mut stream, &ClientMessage::SendByte).await.unwrap();
+            send(&mut stream, &ClientMessage::SendByte).await?;
 
             // Wait for a pending read byte
             {
                 let mut stream_rx = stream.get_mut().split().0;
                 loop {
-                    let _ = stream_rx.read(&mut []).await.unwrap();
+                    let _ = stream_rx.read(&mut []).await?;
                     match time::timeout(Duration::from_millis(10), stream_rx.peek(&mut [0])).await {
                         Ok(Ok(1)) => break,
                         Err(_) | Ok(Ok(_)) => (),
@@ -1077,7 +1070,7 @@ fn upload_loaders(
 
             all_loaders.add_permits(1);
 
-            let start = wait_for_state(&mut state_rx, state).await.unwrap() + MEASURE_DELAY + delay;
+            let start = wait_for_state(&mut state_rx, state).await? + MEASURE_DELAY + delay;
 
             time::sleep_until(start).await;
 
@@ -1089,23 +1082,28 @@ fn upload_loaders(
             .await
             .unwrap();
 
-            done.send(test_stream).await.unwrap();
+            done.send(test_stream).await?;
+            Ok::<(), anyhow::Error>(())
         });
     }
 }
 
 async fn wait_on_download_loaders(
-    download: Option<(Arc<Semaphore>, Vec<JoinHandle<Vec<(u64, u64)>>>)>,
-) -> Option<Vec<Vec<(u64, u64)>>> {
+    download: Option<(
+        Arc<Semaphore>,
+        Vec<JoinHandle<Result<Vec<(u64, u64)>, anyhow::Error>>>,
+    )>,
+) -> Result<Option<Vec<Vec<(u64, u64)>>>, anyhow::Error> {
     match download {
         Some((_, result)) => {
             let bytes: Vec<_> = stream::iter(result)
-                .then(|data| async move { data.await.unwrap() })
+                .then(|data| async move { data.await? })
                 .collect()
                 .await;
-            Some(bytes)
+            let bytes: Result<Vec<_>, _> = bytes.into_iter().collect();
+            Ok(Some(bytes?))
         }
-        None => None,
+        None => Ok(None),
     }
 }
 
@@ -1119,7 +1117,10 @@ fn download_loaders(
     setup_start: Instant,
     state_rx: watch::Receiver<(TestState, Instant)>,
     test_state: TestState,
-) -> (Arc<Semaphore>, Vec<JoinHandle<Vec<(u64, u64)>>>) {
+) -> (
+    Arc<Semaphore>,
+    Vec<JoinHandle<Result<Vec<(u64, u64)>, anyhow::Error>>>,
+) {
     let semaphore = Arc::new(Semaphore::new(0));
     let loaders = setup_loaders(id, server, config.streams);
 
@@ -1133,7 +1134,7 @@ fn download_loaders(
             let all_loaders = all_loaders.clone();
 
             tokio::spawn(async move {
-                let mut stream = loader.await.unwrap();
+                let mut stream = loader.await??;
 
                 let mut buffer = Vec::with_capacity(512 * 1024);
                 buffer.extend((0..buffer.capacity()).map(|_| 0));
@@ -1153,18 +1154,17 @@ fn download_loaders(
                         delay: (MEASURE_DELAY + delay).as_micros() as u64,
                     },
                 )
-                .await
-                .unwrap();
+                .await?;
 
-                let reply: ServerMessage = receive(&mut stream).await.unwrap();
+                let reply: ServerMessage = receive(&mut stream).await?;
                 match reply {
                     ServerMessage::WaitingForByte => (),
                     _ => panic!("Unexpected message {:?}", reply),
                 };
 
-                stream.get_mut().write_u8(1).await.unwrap();
+                stream.get_mut().write_u8(1).await?;
 
-                let reply: ServerMessage = receive(&mut stream).await.unwrap();
+                let reply: ServerMessage = receive(&mut stream).await?;
                 match reply {
                     ServerMessage::WaitingForLoad => (),
                     _ => panic!("Unexpected message {:?}", reply),
@@ -1184,7 +1184,7 @@ fn download_loaders(
 
                 all_loaders.add_permits(1);
 
-                let start = wait_for_state(&mut state_rx, test_state).await.unwrap() + delay;
+                let start = wait_for_state(&mut state_rx, test_state).await? + delay;
 
                 time::sleep_until(start).await;
 
@@ -1216,8 +1216,7 @@ fn download_loaders(
                     start + MEASURE_DELAY + config.load_duration,
                     reading_done_rx,
                 )
-                .await
-                .unwrap();
+                .await?;
 
                 if timeout {
                     state.timeout.store(true, Ordering::SeqCst);
@@ -1227,7 +1226,7 @@ fn download_loaders(
 
                 semaphore.add_permits(1);
 
-                measures.await.unwrap()
+                Ok::<_, anyhow::Error>(measures.await?)
             })
         })
         .collect();
@@ -1384,7 +1383,6 @@ pub fn test(
         Ok(result) => result,
         Err(error) => {
             println!("{}", with_time(&format!("Client failed")));
-            println!("Error: {:?}", error);
             return Err(error);
         }
     };
