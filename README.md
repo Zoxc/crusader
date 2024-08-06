@@ -172,3 +172,8 @@ cd src/target/release
 
 * To get the git commit hash of the current checkout,
   use `git rev-parse --short master`
+
+* I sometimes see this message: Should I be concerned?
+`Warning: Load termination timed out. There may be residual untracked traffic in the background.` 
+  
+  No. That may happen due to the TCP termination being lost or TCP incompatibilities between OSes. It's likely benign if you see bandwidth and latency drop to idle values after the tests in the graph. 
