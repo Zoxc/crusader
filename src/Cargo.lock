@@ -1137,6 +1137,7 @@ dependencies = [
 name = "crusader-gui"
 version = "0.1.0"
 dependencies = [
+ "core-text",
  "crusader-gui-lib",
  "crusader-lib",
  "eframe",

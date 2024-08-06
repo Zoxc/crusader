@@ -16,6 +16,8 @@ use eframe::{
 };
 #[allow(unused_imports)]
 use font_kit::family_name::FamilyName;
+#[cfg(target_os = "macos")]
+use font_kit::{font::Font, loader::Loader};
 use font_kit::{handle::Handle, properties::Properties, source::SystemSource};
 
 fn main() {
@@ -79,9 +81,26 @@ fn main() {
     .unwrap()
 }
 
-fn load_system_font(ctx: &Context) -> Result<(), Box<dyn Error>> {
-    let mut fonts = FontDefinitions::default();
+fn load_mac_system_font() -> Result<Vec<u8>, Box<dyn Error>> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("".into())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        unsafe {
+            Font::from_native_font(core_text::font::new_ui_font_for_language(
+                kCTFontSystemFontType,
+                13.5,
+                None,
+            ))
+        }
+        .copy_font_data()
+        .map(|data| (*data).clone())
+    }
+}
 
+fn load_other_system_font() -> Result<Vec<u8>, Box<dyn Error>> {
     let handle = SystemSource::new().select_best_match(
         &[
             #[cfg(target_os = "macos")]
@@ -96,8 +115,15 @@ fn load_system_font(ctx: &Context) -> Result<(), Box<dyn Error>> {
         Handle::Memory { bytes, .. } => bytes.to_vec(),
         Handle::Path { path, .. } => std::fs::read(path)?,
     };
+    Ok(buf)
+}
+
+fn load_system_font(ctx: &Context) -> Result<(), Box<dyn Error>> {
+    let buf = load_mac_system_font().or_else(|_| load_other_system_font())?;
 
     const UI_FONT: &str = "System Sans Serif";
+
+    let mut fonts = FontDefinitions::default();
 
     fonts
         .font_data

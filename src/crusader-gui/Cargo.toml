@@ -10,3 +10,6 @@ crusader-lib = { path = "../crusader-lib" }
 crusader-gui-lib = { path = "../crusader-gui-lib" }
 eframe = "0.28.1"
 font-kit = "0.14.2"
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+core-text = "20.1.0"
