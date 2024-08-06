@@ -14,9 +14,9 @@ use eframe::{
     emath::vec2,
     Theme,
 };
-use font_kit::{
-    family_name::FamilyName, handle::Handle, properties::Properties, source::SystemSource,
-};
+#[allow(unused_imports)]
+use font_kit::family_name::FamilyName;
+use font_kit::{handle::Handle, properties::Properties, source::SystemSource};
 
 fn main() {
     let mut options = eframe::NativeOptions::default();
@@ -84,7 +84,9 @@ fn load_system_font(ctx: &Context) -> Result<(), Box<dyn Error>> {
 
     let handle = SystemSource::new().select_best_match(
         &[
-            FamilyName::Title("system-ui".to_string()),
+            #[cfg(target_os = "macos")]
+            FamilyName::SansSerif,
+            #[cfg(windows)]
             FamilyName::Title("Segoe UI".to_string()),
         ],
         &Properties::new(),
