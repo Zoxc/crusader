@@ -1158,7 +1158,7 @@ dependencies = [
 
 [[package]]
 name = "crusader-lib"
-version = "0.0.12"
+version = "0.0.13-testing"
 dependencies = [
  "anyhow",
  "axum",
