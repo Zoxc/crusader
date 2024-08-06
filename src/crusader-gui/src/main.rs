@@ -44,7 +44,11 @@ fn main() {
             style_.spacing.interact_size.y = 30.0;
             style_.spacing.item_spacing = vec2(5.0, 5.0);
 
-            let font_size = 12.5;
+            let font_size = if cfg!(target_os = "macos") {
+                13.5
+            } else {
+                12.5
+            };
 
             style_.text_styles.get_mut(&egui::TextStyle::Body).map(|v| {
                 v.size = font_size;
