@@ -72,6 +72,11 @@ enum Commands {
         upload: bool,
         #[arg(long, help = "Run a test doing both download and upload")]
         both: bool,
+        #[arg(
+            long,
+            long_help = "Run a test only measuring latency. The duration is specified by `grace_duration`"
+        )]
+        idle: bool,
         #[arg(long, default_value_t = protocol::PORT, help = "Specifies the TCP and UDP port used by the server")]
         port: u16,
         #[arg(
@@ -139,6 +144,7 @@ fn run() -> Result<(), anyhow::Error> {
             download,
             upload,
             both,
+            idle,
             throughput_sample_rate,
             latency_sample_rate,
             ref plot,
@@ -155,14 +161,18 @@ fn run() -> Result<(), anyhow::Error> {
                 stream_stagger: Duration::from_secs_f64(stream_stagger),
                 grace_duration: Duration::from_secs_f64(grace_duration),
                 load_duration: Duration::from_secs_f64(load_duration),
-                download: true,
-                upload: true,
-                both: true,
+                download: !idle,
+                upload: !idle,
+                both: !idle,
                 ping_interval: Duration::from_millis(latency_sample_rate),
                 throughput_interval: Duration::from_millis(throughput_sample_rate),
             };
 
             if download || upload || both {
+                if idle {
+                    println!("Cannot run `idle` test with a load test");
+                    process::exit(1);
+                }
                 config.download = download;
                 config.upload = upload;
                 config.both = both;
