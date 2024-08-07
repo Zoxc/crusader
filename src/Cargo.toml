@@ -10,6 +10,8 @@ panic = "abort"
 strip = "symbols"
 
 [profile.speed]
+opt-level = 3
+codegen-units = 1
 inherits = "release"
 lto = "fat"
 
