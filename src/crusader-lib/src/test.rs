@@ -1345,7 +1345,7 @@ pub(crate) async fn ping_recv(
 }
 
 pub fn timed(name: &str) -> String {
-    let time = chrono::Local::now().format(" %Y.%m.%d %H-%M-%S");
+    let time = chrono::Local::now().format(" %Y-%m-%d %H.%M.%S");
     format!("{}{}", name, time)
 }
 
