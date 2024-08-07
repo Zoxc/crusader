@@ -8,3 +8,11 @@ panic = "abort"
 [profile.release]
 panic = "abort"
 strip = "symbols"
+
+[profile.speed]
+inherits = "release"
+lto = "fat"
+
+[profile.size]
+inherits = "speed"
+opt-level = "s"
