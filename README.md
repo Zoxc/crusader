@@ -153,7 +153,7 @@ cd src/target/release
           [default: 35481]
 * **`--streams <STREAMS>`**
           The number of TCP connections used to generate  
-&nbsp;&nbsp;&nbsp;&nbsp;traffic in a single direction
+           traffic in a single direction
           [default: 16]
 * **`--stream-stagger <SECONDS>`**
           The delay between the start of each stream
@@ -174,7 +174,7 @@ cd src/target/release
           Plot upload and download separately and plot streams
 * **`--plot-max-throughput <BPS>`**
           Sets the axis for throughput to at least this value.  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;SI units are supported so `100M` would specify 100 Mbps
+          SI units are supported so `100M` would specify 100 Mbps
 * **`--plot-max-latency <MILLISECONDS>`**
           Sets the axis for latency to at least this value
 * **`--plot-width <PIXELS>`**
@@ -182,8 +182,7 @@ cd src/target/release
 * **`--plot-title <PLOT_TITLE>`**
 * **`--latency-peer <LATENCY_PEER>`**
           Specifies another server (peer) which will  
-&nbsp;&nbsp;&nbsp;&nbsp;also measure
-the latency to the server independently of the client
+          also measure the latency to the server independently of the client
 * **`-h, --help**`**
           Print help (see a summary with '-h')
           
