@@ -20,6 +20,10 @@ jobs:
           override: true
           components: rustfmt, clippy
 
+      - name: Build server-only binary
+        run: cargo build -p crusader --no-default-features
+        working-directory: src
+
       - name: Build
         run: cargo build
         working-directory: src

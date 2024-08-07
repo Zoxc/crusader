@@ -22,8 +22,8 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
+use crate::common::{hello, udp_handle};
 use crate::protocol::{codec, receive, send, ClientMessage, Ping, ServerMessage};
-use crate::test::{hello, udp_handle};
 
 type UpdateFn = Arc<dyn Fn() + Send + Sync>;
 

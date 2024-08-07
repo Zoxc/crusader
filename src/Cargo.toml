@@ -17,4 +17,4 @@ lto = "fat"
 
 [profile.size]
 inherits = "speed"
-opt-level = "s"
+opt-level = "z"

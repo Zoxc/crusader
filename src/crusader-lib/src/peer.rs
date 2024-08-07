@@ -1,3 +1,11 @@
+#[cfg(feature = "client")]
+use crate::common::{Config, Msg};
+use crate::protocol::PeerLatency;
+use crate::serve::State;
+use crate::{
+    common::{hello, measure_latency, ping_recv, ping_send, TestState},
+    protocol::{codec, receive, send, ClientMessage, RawLatency, ServerMessage},
+};
 use anyhow::bail;
 use std::{
     error::Error,
@@ -14,17 +22,14 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
-use crate::protocol::{codec, receive, send, ClientMessage, ServerMessage};
-use crate::serve::State;
-use crate::test::{hello, measure_latency, ping_recv, ping_send, Config, Msg, TestState};
-use crate::{file_format::RawLatency, protocol::PeerLatency};
-
+#[cfg(feature = "client")]
 pub struct Peer {
     msg: Msg,
     tx: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
     rx: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
 }
 
+#[cfg(feature = "client")]
 impl Peer {
     pub async fn start(&mut self) -> Result<(), anyhow::Error> {
         let reply: ServerMessage = receive(&mut self.rx).await?;
@@ -63,6 +68,7 @@ impl Peer {
     }
 }
 
+#[cfg(feature = "client")]
 pub async fn connect_to_peer(
     config: Config,
     server: SocketAddr,

@@ -8,6 +8,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::protocol;
+use crate::protocol::RawLatency;
 
 // Note that rmp_serde doesn't not use an enumerator when serializing Option.
 // Be careful about which types are inside Option.
@@ -116,19 +117,6 @@ pub struct RawStreamGroup {
     pub download: bool,
     pub both: bool,
     pub streams: Vec<RawStream>,
-}
-
-#[derive(Serialize, Deserialize, Copy, Clone, Debug)]
-pub struct RawLatency {
-    // Changed from Duration to Option<Duration> in v2.
-    pub total: Option<Duration>,
-    pub up: Duration,
-}
-
-impl RawLatency {
-    pub fn down(&self) -> Option<Duration> {
-        self.total.map(|total| total.saturating_sub(self.up))
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -2,10 +2,21 @@ use anyhow::anyhow;
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::error::Error;
+use std::{error::Error, time::Duration};
 use tokio_util::codec::{length_delimited, LengthDelimitedCodec};
 
-use crate::file_format::RawLatency;
+#[derive(Serialize, Deserialize, Copy, Clone, Debug)]
+pub struct RawLatency {
+    // File format: Changed from Duration to Option<Duration> in v2.
+    pub total: Option<Duration>,
+    pub up: Duration,
+}
+
+impl RawLatency {
+    pub fn down(&self) -> Option<Duration> {
+        self.total.map(|total| total.saturating_sub(self.up))
+    }
+}
 
 pub const PORT: u16 = 35481;
 

@@ -1,12 +1,17 @@
-use std::path::PathBuf;
-use std::process;
-use std::time::Duration;
-
 use clap::{Parser, Subcommand};
 use clap_num::si_number;
+#[cfg(feature = "client")]
 use crusader_lib::file_format::RawResult;
-use crusader_lib::test::{Config, PlotConfig};
-use crusader_lib::{protocol, with_time, LIB_VERSION};
+#[cfg(feature = "client")]
+use crusader_lib::test::PlotConfig;
+use crusader_lib::{protocol, LIB_VERSION};
+#[cfg(feature = "client")]
+use crusader_lib::{with_time, Config};
+#[cfg(feature = "client")]
+use std::path::PathBuf;
+use std::process;
+#[cfg(feature = "client")]
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(version = LIB_VERSION)]
@@ -40,6 +45,7 @@ struct PlotArgs {
 }
 
 impl PlotArgs {
+    #[cfg(feature = "client")]
     fn config(&self) -> PlotConfig {
         PlotConfig {
             transferred: self.plot_transferred,
@@ -64,6 +70,7 @@ enum Commands {
         long_about = "Runs a test client against a specified server and saves the result to the current directory. \
         By default this does a download test, an upload test, and a test doing both download and upload while measuring the latency to the server"
     )]
+    #[cfg(feature = "client")]
     Test {
         server: String,
         #[arg(long, help = "Run a download test")]
@@ -118,12 +125,14 @@ enum Commands {
         )]
         latency_peer: Option<String>,
     },
+    #[cfg(feature = "client")]
     #[command(about = "Plots a previous result")]
     Plot {
         data: PathBuf,
         #[command(flatten)]
         plot: PlotArgs,
     },
+    #[cfg(feature = "client")]
     #[command(about = "Allows the client to be controlled over a web server")]
     Remote {
         #[arg(
@@ -139,6 +148,7 @@ fn run() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
 
     match &cli.command {
+        #[cfg(feature = "client")]
         &Commands::Test {
             ref server,
             download,
@@ -181,7 +191,11 @@ fn run() -> Result<(), anyhow::Error> {
             crusader_lib::test::test(config, plot.config(), server, latency_peer.as_deref())
         }
         Commands::Serve { port } => crusader_lib::serve::serve(*port),
+
+        #[cfg(feature = "client")]
         Commands::Remote { port } => crusader_lib::remote::run(*port),
+
+        #[cfg(feature = "client")]
         Commands::Plot { data, plot } => {
             let result = RawResult::load(data).expect("Unable to load data");
             let file = crusader_lib::plot::save_graph(
@@ -200,6 +214,7 @@ fn run() -> Result<(), anyhow::Error> {
 fn main() {
     env_logger::init();
 
+    #[cfg(feature = "client")]
     crusader_lib::plot::register_fonts();
 
     if let Err(error) = run() {

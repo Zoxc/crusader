@@ -19,11 +19,12 @@ use tokio::task::{self};
 use tokio::{signal, time, time::Instant};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
+use crate::common::{read_data, write_data};
 use crate::peer::run_peer;
 use crate::protocol::{
     self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage, TestStream,
 };
-use crate::{test, with_time, LIB_VERSION};
+use crate::{with_time, LIB_VERSION};
 
 use std::thread;
 
@@ -359,7 +360,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 time::sleep_until(start).await;
 
-                test::write_data(
+                write_data(
                     stream,
                     state.dummy_data.as_ref(),
                     start + Duration::from_micros(duration),
@@ -444,7 +445,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                     }
                 });
 
-                let timeout = test::read_data(
+                let timeout = read_data(
                     stream,
                     &mut buffer,
                     bytes,
@@ -612,7 +613,7 @@ async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<
     let state = Arc::new(State {
         port,
         started: Instant::now(),
-        dummy_data: crate::test::data(),
+        dummy_data: crate::common::data(),
         clients: Mutex::new((0..SLOTS).map(|_| None).collect()),
         pong_servers: Default::default(),
         msg,

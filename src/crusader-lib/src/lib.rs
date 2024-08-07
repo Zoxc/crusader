@@ -14,11 +14,19 @@ pub fn with_time(msg: &str) -> String {
     format!("[{}] {}", time, msg)
 }
 
+mod common;
+#[cfg(feature = "client")]
+pub use common::Config;
+#[cfg(feature = "client")]
 pub mod file_format;
+#[cfg(feature = "client")]
 pub mod latency;
 mod peer;
+#[cfg(feature = "client")]
 pub mod plot;
 pub mod protocol;
+#[cfg(feature = "client")]
 pub mod remote;
 pub mod serve;
+#[cfg(feature = "client")]
 pub mod test;

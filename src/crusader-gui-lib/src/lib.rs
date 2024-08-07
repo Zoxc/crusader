@@ -18,8 +18,8 @@ use crusader_lib::{
     latency,
     plot::{self, float_max, to_rates},
     protocol, serve,
-    test::{self, Config, PlotConfig},
-    with_time,
+    test::{self, PlotConfig},
+    with_time, Config,
 };
 use eframe::{
     egui::{self, Grid, Id, ScrollArea, TextEdit, TextStyle, Ui, Vec2b},

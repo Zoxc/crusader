@@ -1,24 +1,31 @@
-ARG TARGET=x86_64-unknown-linux-musl
-ARG PROFILE=release
-
 FROM rust AS build
-ARG PROFILE
-ARG TARGET
+ARG TARGETARCH
+ARG PROFILE=release
 
 COPY src /src
 WORKDIR /src
 
+RUN echo no-target-detected > /target
+
+RUN if [ "$TARGETARCH" = "386" ]; then\
+    echo i686-unknown-linux-musl > /target; fi
+RUN if [ "$TARGETARCH" = "amd64" ]; then\
+    echo x86_64-unknown-linux-musl > /target; fi
+RUN if [ "$TARGETARCH" = "arm" ]; then\
+    echo arm-unknown-linux-musleabihf > /target; fi
+RUN if [ "$TARGETARCH" = "arm64" ]; then\
+    echo aarch64-unknown-linux-musl > /target; fi
+
 ENV RUSTFLAGS="-C target-feature=+crt-static"
 
-RUN rustup target add $TARGET
+RUN rustup target add $(cat /target)
 
-RUN cargo fetch
-RUN cargo build -p crusader --profile=$PROFILE --target $TARGET
+RUN cargo build -p crusader --no-default-features --profile=$PROFILE --target $(cat /target)
+
+RUN cp target/$(cat /target)/$PROFILE/crusader /
 
 FROM scratch
-ARG PROFILE
-ARG TARGET
-COPY --from=build /src/target/$TARGET/$PROFILE/crusader /crusader
+COPY --from=build /crusader /
 
 EXPOSE 35481/tcp 35481/udp
 ENTRYPOINT [ "/crusader", "serve" ]

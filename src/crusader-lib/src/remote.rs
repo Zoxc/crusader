@@ -1,6 +1,7 @@
+use crate::common::Config;
 use crate::plot::save_graph_to_mem;
 use crate::test::{test_async, timed, PlotConfig};
-use crate::{test::Config, with_time, LIB_VERSION};
+use crate::{with_time, LIB_VERSION};
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Error;

@@ -10,7 +10,8 @@ use std::mem;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::file_format::{RawLatency, RawPing, RawResult};
+use crate::file_format::{RawPing, RawResult};
+use crate::protocol::RawLatency;
 use crate::test::{unique, PlotConfig};
 
 const UP_COLOR: RGBColor = RGBColor(37, 83, 169);

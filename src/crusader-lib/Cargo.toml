@@ -5,8 +5,12 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+server = []
+client = ["dep:plotters", "dep:axum", "dep:image", "dep:snap"]
+
 [dependencies]
-plotters = { version = "0.3.6", default-features = false, features = [
+plotters = { version = "0.3.6", default-features = false, optional = true, features = [
     "ab_glyph",
     "bitmap_backend",
     "line_series",
@@ -22,7 +26,7 @@ tokio = { version = "1.18.2", features = ["full"] }
 tokio-util = { version = "0.7.2", features = ["codec"] }
 futures = "0.3.21"
 bytes = "1.1.0"
-snap = "1.0.5"
+snap = { version = "1.0.5", optional = true }
 rmp-serde = "1.1.0"
 socket2 = "0.4.6"
 libc = "0.2"
@@ -31,5 +35,5 @@ axum = { version = "0.7.5", features = [
     "ws",
     "tokio",
     "http1",
-], default-features = false }
-image = "0.24.9"
+], default-features = false, optional = true }
+image = { version = "0.24.9", optional = true }
