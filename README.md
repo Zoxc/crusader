@@ -43,16 +43,33 @@ on another computer, then choose the **Server** tab.)
 
 ![Crusader Client Screenshot](./media/Crusader-Client.png)
 
-![Crusader Results Screenshot](./media/Crusader-Results.png)
+The Crusader GUI has four tabs:
 
-## Understanding the results
+* **Client tab**
+  Runs the Crusader client program. 
+  The options shown above are described in the
+  [Command-line options](#command-line-options) section.
+
+* **Server tab**
+  Runs the Crusader server, listening for connections from other clients
+
+* **Latency tab**
+  Continually tests the latency to the selected
+  Crusader server until stopped.
+
+* **Result tab**
+  Displays the result of the most recent client run
+
+## Understanding the Result Tab
+
+![Crusader Results Screenshot](./media/Crusader-Results.png)
 
 A Crusader test creates three bursts of traffic.
 By default, it generates five seconds each of
 download only, upload only, then bi-directional traffic.
 Each burst is separated by several seconds of idle time.
 
-The Crusader GUI displays the results of the test with
+The Crusader Result tab displays the results of the test with
 three plots (see image above):
 
 * The **Throughput** plot shows the bursts of traffic:
@@ -69,70 +86,6 @@ and back (bi-directional).
 
 * The **Packet Loss** plot has green and blue marks
 that indicate times when packets were lost.
-
-See also the [GUI options](#gui-options) section.
-
-## Building Crusader from source
-
-Use [pre-built binaries](https://github.com/Zoxc/crusader/releases)
-for everyday tests.
-To develop or debug Crusader, use the commands below
-to build all three binaries.
-Executables are placed in `src/target/release`
-
-```sh
-cd src
-cargo build --release
-```
-
-## Running Crusader from the command line
-
-See also the
-[command-line options](#command-line-options) section.
-
-### GUI Program
-
-This command starts the GUI program.
-
-```sh
-cd src/target/release
-./crusader-gui
-```
-
-### Crusader Server
-
-To host a Crusader server, run this on the _server machine:
-
-```sh
-cd src/target/release
-./crusader serve
-```
-
-### Crusader Client
-
-To start a test, run this on the _client machine_:
-
-```sh
-cd src/target/release
-./crusader test <server-ip>
-```
-
-## GUI Options
-
-* **Client tab**
-  Run the Crusader client program. 
-  The options in the GUI are described in the
-  [Command-line options](#command-line-options)
-
-* **Server tab**
-  Run the Crusader server, listening for connections from other clients
-
-* **Latency tab**
-  Continually test the latency to the selected
-  Crusader server until stopped.
-
-* **Result tab**
-  Display the result of the most recent client run
 
 ## Command-line options
 
@@ -186,6 +139,51 @@ cd src/target/release
 * **`-h, --help**`**
           Print help (see a summary with '-h')
           
+## Building Crusader from source
+
+Use [pre-built binaries](https://github.com/Zoxc/crusader/releases)
+for everyday tests.
+To develop or debug Crusader, use the commands below
+to build all three binaries.
+Executables are placed in `src/target/release`
+
+```sh
+cd src
+cargo build --release
+```
+
+## Running Crusader from the command line
+
+See also the
+[command-line options](#command-line-options) section.
+
+### GUI Program
+
+This command starts the GUI program.
+
+```sh
+cd src/target/release
+./crusader-gui
+```
+
+### Crusader Server
+
+To host a Crusader server, run this on the _server machine:
+
+```sh
+cd src/target/release
+./crusader serve
+```
+
+### Crusader Client
+
+To start a test, run this on the _client machine_:
+
+```sh
+cd src/target/release
+./crusader test <server-ip>
+```
+
 ## Troubleshooting
 
 * Crusader requires that TCP and UDP ports 35481 are open for its tests.

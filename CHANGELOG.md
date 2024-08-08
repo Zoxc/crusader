@@ -24,7 +24,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Improve error handling for log messages
 * Change date format to use YYYY-MM-DD
 
-## 0.0.11 - 2024-07-31
+## 0.0.11 - 2024-07-29
 
 * Log file includes timestamps and version number
 * Add peer latency measurements
