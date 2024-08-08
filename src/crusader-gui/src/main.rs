@@ -19,6 +19,8 @@ use font_kit::family_name::FamilyName;
 use font_kit::{handle::Handle, properties::Properties, source::SystemSource};
 
 fn main() {
+    env_logger::init();
+
     let mut options = eframe::NativeOptions::default();
     options.follow_system_theme = false;
     options.default_theme = Theme::Light;

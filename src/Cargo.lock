@@ -1140,6 +1140,7 @@ dependencies = [
  "crusader-gui-lib",
  "crusader-lib",
  "eframe",
+ "env_logger",
  "font-kit",
 ]
 
