@@ -153,7 +153,7 @@ pub(crate) async fn test_async(
     .await?;
 
     msg(&format!(
-        "Latency to server {:.2} ms",
+        "Idle latency to server {:.2} ms",
         latency.as_secs_f64() * 1000.0
     ));
 

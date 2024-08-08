@@ -36,7 +36,7 @@ impl Peer {
         match reply {
             ServerMessage::PeerReady { server_latency } => {
                 (self.msg)(&format!(
-                    "Peer latency to server {:.2} ms",
+                    "Peer idle latency to server {:.2} ms",
                     Duration::from_nanos(server_latency).as_secs_f64() * 1000.0
                 ));
             }
@@ -172,7 +172,7 @@ pub async fn run_peer(
     .await?;
 
     (state.msg)(&format!(
-        "Peer latency to server {:.2} ms",
+        "Peer idle latency to server {:.2} ms",
         latency.as_secs_f64() * 1000.0
     ));
 
