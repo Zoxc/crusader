@@ -12,6 +12,7 @@ crusader-lib = { path = "../crusader-lib", features = ["server", "client"] }
 tokio = { version = "1.18.2", features = ["full"] }
 eframe = "0.28.1"
 egui_plot = "0.28.1"
+egui_extras = { version = "0.28.1", default-features = false }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 rfd = { version = "0.10.0", default-features = false, features = [

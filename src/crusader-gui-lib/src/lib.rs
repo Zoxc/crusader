@@ -26,6 +26,7 @@ use eframe::{
     emath::{vec2, Align},
     epaint::Color32,
 };
+use egui_extras::{Size, Strip, StripBuilder};
 use egui_plot::{Legend, Line, Plot, PlotPoints};
 
 #[cfg(not(target_os = "android"))]
@@ -690,12 +691,10 @@ impl Tester {
 
     fn latency_and_loss(
         &mut self,
-        ui: &mut Ui,
+        strip: &mut Strip<'_, '_>,
         link: Id,
         reset: bool,
         peer: bool,
-        height: f32,
-        plots: u8,
         y_axis_size: f32,
     ) {
         let result = self.result.as_ref().unwrap();
@@ -708,111 +707,115 @@ impl Tester {
 
         let duration = result.result.duration.as_secs_f64() * 1.1;
 
-        ui.label(if peer { "Peer latency" } else { "Latency" });
-        // Latency
-        let mut plot = Plot::new((peer, "ping"))
-            .legend(Legend::default())
-            .y_axis_min_width(y_axis_size)
-            .link_axis(link, true, false)
-            .link_cursor(link, true, false)
-            .include_x(0.0)
-            .include_x(duration)
-            .include_y(0.0)
-            .include_y(data.max * 1.1)
-            .label_formatter(|_, value| {
-                format!("Latency = {:.2} ms\nTime = {:.2} s", value.y, value.x)
-            });
+        strip.cell(|ui| {
+            ui.label(if peer { "Peer latency" } else { "Latency" });
+            // Latency
+            let mut plot = Plot::new((peer, "ping"))
+                .legend(Legend::default())
+                .y_axis_min_width(y_axis_size)
+                .link_axis(link, true, false)
+                .link_cursor(link, true, false)
+                .include_x(0.0)
+                .include_x(duration)
+                .include_y(0.0)
+                .include_y(data.max * 1.1)
+                .label_formatter(|_, value| {
+                    format!("Latency = {:.2} ms\nTime = {:.2} s", value.y, value.x)
+                });
 
-        if reset {
-            plot = plot.reset();
-        }
-
-        //if plots > 1 {
-        plot = plot.height(height / (plots as f32));
-        //}
-
-        plot.show(ui, |plot_ui| {
-            if result.result.raw_result.version >= 1 {
-                let latency = data.up.iter().map(|v| [v.0, v.1]);
-                let latency = Line::new(PlotPoints::from_iter(latency))
-                    .color(Color32::from_rgb(37, 83, 169))
-                    .name("Up");
-
-                plot_ui.line(latency);
-
-                let latency = data.down.iter().map(|v| [v.0, v.1]);
-                let latency = Line::new(PlotPoints::from_iter(latency))
-                    .color(Color32::from_rgb(95, 145, 62))
-                    .name("Down");
-
-                plot_ui.line(latency);
+            if reset {
+                plot = plot.reset();
             }
 
-            let latency = data.total.iter().map(|v| [v.0, v.1]);
-            let latency = Line::new(PlotPoints::from_iter(latency))
-                .color(Color32::from_rgb(50, 50, 50))
-                .name("Total");
+            //if plots > 1 {
+            //  plot = plot.height(height / (plots as f32));
+            //}
 
-            plot_ui.line(latency);
+            plot.show(ui, |plot_ui| {
+                if result.result.raw_result.version >= 1 {
+                    let latency = data.up.iter().map(|v| [v.0, v.1]);
+                    let latency = Line::new(PlotPoints::from_iter(latency))
+                        .color(Color32::from_rgb(37, 83, 169))
+                        .name("Up");
+
+                    plot_ui.line(latency);
+
+                    let latency = data.down.iter().map(|v| [v.0, v.1]);
+                    let latency = Line::new(PlotPoints::from_iter(latency))
+                        .color(Color32::from_rgb(95, 145, 62))
+                        .name("Down");
+
+                    plot_ui.line(latency);
+                }
+
+                let latency = data.total.iter().map(|v| [v.0, v.1]);
+                let latency = Line::new(PlotPoints::from_iter(latency))
+                    .color(Color32::from_rgb(50, 50, 50))
+                    .name("Total");
+
+                plot_ui.line(latency);
+            });
         });
 
-        // Packet loss
-        let mut plot = Plot::new((peer, "loss"))
-            .legend(Legend::default())
-            .show_axes([false, true])
-            .show_grid(Vec2b::new(true, false))
-            .y_axis_min_width(y_axis_size)
-            .y_axis_formatter(|_, _| String::new())
-            .link_axis(link, true, false)
-            .link_cursor(link, true, false)
-            .center_y_axis(true)
-            .allow_zoom(false)
-            .allow_boxed_zoom(false)
-            .include_x(0.0)
-            .include_x(duration)
-            .include_y(-1.0)
-            .include_y(1.0)
-            .height(30.0)
-            .label_formatter(|_, value| format!("Time = {:.2} s", value.x));
+        strip.cell(|ui| {
+            // Packet loss
+            let mut plot = Plot::new((peer, "loss"))
+                .legend(Legend::default())
+                .show_axes([false, true])
+                .show_grid(Vec2b::new(true, false))
+                .y_axis_min_width(y_axis_size)
+                .y_axis_formatter(|_, _| String::new())
+                .link_axis(link, true, false)
+                .link_cursor(link, true, false)
+                .center_y_axis(true)
+                .allow_zoom(false)
+                .allow_boxed_zoom(false)
+                .include_x(0.0)
+                .include_x(duration)
+                .include_y(-1.0)
+                .include_y(1.0)
+                .height(30.0)
+                .label_formatter(|_, value| format!("Time = {:.2} s", value.x));
 
-        if reset {
-            plot = plot.reset();
-        }
+            if reset {
+                plot = plot.reset();
+            }
 
-        ui.label(if peer {
-            "Peer packet loss"
-        } else {
-            "Packet loss"
-        });
-        plot.show(ui, |plot_ui| {
-            for &(loss, down_loss) in &data.loss {
-                let (color, s, e) = down_loss
-                    .map(|down_loss| {
-                        if down_loss {
-                            (Color32::from_rgb(95, 145, 62), 1.0, 0.0)
-                        } else {
-                            (Color32::from_rgb(37, 83, 169), -1.0, 0.0)
-                        }
-                    })
-                    .unwrap_or((Color32::from_rgb(193, 85, 85), -1.0, 1.0));
+            ui.label(if peer {
+                "Peer packet loss"
+            } else {
+                "Packet loss"
+            });
+            plot.show(ui, |plot_ui| {
+                for &(loss, down_loss) in &data.loss {
+                    let (color, s, e) = down_loss
+                        .map(|down_loss| {
+                            if down_loss {
+                                (Color32::from_rgb(95, 145, 62), 1.0, 0.0)
+                            } else {
+                                (Color32::from_rgb(37, 83, 169), -1.0, 0.0)
+                            }
+                        })
+                        .unwrap_or((Color32::from_rgb(193, 85, 85), -1.0, 1.0));
 
-                plot_ui.line(
-                    Line::new(PlotPoints::from_iter(
-                        [[loss, s], [loss, e]].iter().copied(),
-                    ))
-                    .color(color),
-                );
-
-                if down_loss.is_some() {
                     plot_ui.line(
                         Line::new(PlotPoints::from_iter(
-                            [[loss, s], [loss, s - s / 5.0]].iter().copied(),
+                            [[loss, s], [loss, e]].iter().copied(),
                         ))
-                        .width(3.0)
                         .color(color),
                     );
+
+                    if down_loss.is_some() {
+                        plot_ui.line(
+                            Line::new(PlotPoints::from_iter(
+                                [[loss, s], [loss, s - s / 5.0]].iter().copied(),
+                            ))
+                            .width(3.0)
+                            .color(color),
+                        );
+                    }
                 }
-            }
+            });
         });
     }
 
@@ -882,86 +885,91 @@ impl Tester {
             ui.separator();
         }
 
-        ui.vertical(|ui| {
-            let reset = mem::take(&mut self.result_plot_reset);
+        let packet_loss_size = 55.0;
 
-            let link = ui.id().with("result-link");
+        let result = self.result.as_ref().unwrap();
+
+        let link = ui.id().with("result-link");
+
+        let mut strip = StripBuilder::new(ui);
+
+        if result.result.raw_result.streams() > 0 {
+            strip = strip.size(Size::remainder());
+        }
+
+        for _ in 0..(1 + result.peer_latency.is_some() as u8) {
+            strip = strip
+                .size(Size::remainder())
+                .size(Size::exact(packet_loss_size));
+        }
+
+        strip.vertical(|mut strip| {
+            let reset = mem::take(&mut self.result_plot_reset);
 
             let result = self.result.as_ref().unwrap();
 
-            let loss_size = 39.0;
-
-            let label_size = 37.0;
-
             let y_axis_size = 30.0;
-
-            let loss_plots = (result.result.raw_result.streams() > 0) as u8
-                + result.peer_latency.is_some() as u8;
-
-            let plots = 1 + loss_plots;
-
-            let height = ui.available_height()
-                - loss_size * (loss_plots as f32)
-                - label_size * (plots as f32);
 
             let duration = result.result.duration.as_secs_f64() * 1.1;
 
             if result.result.raw_result.streams() > 0 {
-                ui.label("Throughput");
+                strip.cell(|ui| {
+                    ui.label("Throughput");
 
-                // Throughput
-                let mut plot = Plot::new("result")
-                    .legend(Legend::default())
-                    .y_axis_min_width(y_axis_size)
-                    .link_axis(link, true, false)
-                    .link_cursor(link, true, false)
-                    .include_x(0.0)
-                    .include_x(duration)
-                    .include_y(0.0)
-                    .include_y(result.throughput_max * 1.1)
-                    .height(height / (plots as f32))
-                    .label_formatter(|_, value| {
-                        format!("Throughput = {:.2} Mbps\nTime = {:.2} s", value.y, value.x)
+                    // Throughput
+                    let mut plot = Plot::new("result")
+                        .legend(Legend::default())
+                        .y_axis_min_width(y_axis_size)
+                        .link_axis(link, true, false)
+                        .link_cursor(link, true, false)
+                        .include_x(0.0)
+                        .include_x(duration)
+                        .include_y(0.0)
+                        .include_y(result.throughput_max * 1.1)
+                        .height(ui.available_height())
+                        .label_formatter(|_, value| {
+                            format!("Throughput = {:.2} Mbps\nTime = {:.2} s", value.y, value.x)
+                        });
+
+                    if reset {
+                        plot = plot.reset();
+                    }
+
+                    plot.show(ui, |plot_ui| {
+                        if result.result.raw_result.download() {
+                            let download = result.download.iter().map(|v| [v.0, v.1]);
+                            let download = Line::new(PlotPoints::from_iter(download))
+                                .color(Color32::from_rgb(95, 145, 62))
+                                .name("Download");
+
+                            plot_ui.line(download);
+                        }
+                        if result.result.raw_result.upload() {
+                            let upload = result.upload.iter().map(|v| [v.0, v.1]);
+                            let upload = Line::new(PlotPoints::from_iter(upload))
+                                .color(Color32::from_rgb(37, 83, 169))
+                                .name("Upload");
+
+                            plot_ui.line(upload);
+                        }
+                        if result.result.raw_result.both() {
+                            let both = result.both.iter().map(|v| [v.0, v.1]);
+                            let both = Line::new(PlotPoints::from_iter(both))
+                                .color(Color32::from_rgb(149, 96, 153))
+                                .name("Both");
+
+                            plot_ui.line(both);
+                        }
                     });
-
-                if reset {
-                    plot = plot.reset();
-                }
-
-                plot.show(ui, |plot_ui| {
-                    if result.result.raw_result.download() {
-                        let download = result.download.iter().map(|v| [v.0, v.1]);
-                        let download = Line::new(PlotPoints::from_iter(download))
-                            .color(Color32::from_rgb(95, 145, 62))
-                            .name("Download");
-
-                        plot_ui.line(download);
-                    }
-                    if result.result.raw_result.upload() {
-                        let upload = result.upload.iter().map(|v| [v.0, v.1]);
-                        let upload = Line::new(PlotPoints::from_iter(upload))
-                            .color(Color32::from_rgb(37, 83, 169))
-                            .name("Upload");
-
-                        plot_ui.line(upload);
-                    }
-                    if result.result.raw_result.both() {
-                        let both = result.both.iter().map(|v| [v.0, v.1]);
-                        let both = Line::new(PlotPoints::from_iter(both))
-                            .color(Color32::from_rgb(149, 96, 153))
-                            .name("Both");
-
-                        plot_ui.line(both);
-                    }
-                });
+                })
             }
 
-            self.latency_and_loss(ui, link, reset, false, height, plots, y_axis_size);
+            self.latency_and_loss(&mut strip, link, reset, false, y_axis_size);
 
             let result = self.result.as_ref().unwrap();
 
             if result.peer_latency.is_some() {
-                self.latency_and_loss(ui, link, reset, true, height, plots, y_axis_size);
+                self.latency_and_loss(&mut strip, link, reset, true, y_axis_size);
             }
         });
     }
