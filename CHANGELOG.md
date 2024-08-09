@@ -17,6 +17,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Save results in a `crusader-results` folder
 * Allow building of a server-only binary
 * Generated files will use a YYYY-MM-DD HH.MM.SS format
+* Rename bandwidth to throughput
 
 ## 0.0.12 - 2024-07-31
 
