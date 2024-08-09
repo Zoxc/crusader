@@ -199,4 +199,4 @@ cd src/target/release
 * I sometimes see this message: 
 `Warning: Load termination timed out. There may be residual untracked traffic in the background.` 
   
-  Should I be concerned? No. That may happen due to the TCP termination being lost or TCP incompatibilities between OSes. It's likely benign if you see bandwidth and latency drop to idle values after the tests in the graph. 
+  Should I be concerned? No. That may happen due to the TCP termination being lost or TCP incompatibilities between OSes. It's likely benign if you see throughput and latency drop to idle values after the tests in the graph. 
