@@ -182,7 +182,7 @@ fn android_main(app: AndroidApp) {
     tester.file_loader = Some(Box::new(|_| load_file().unwrap()));
     tester.plot_saver = Some(Box::new(move |result| {
         let path = temp_plot.as_deref().unwrap();
-        crusader_lib::plot::save_graph_to_path(path, &PlotConfig::default(), result);
+        crusader_lib::plot::save_graph_to_path(path, &PlotConfig::default(), result).unwrap();
         let data = fs::read(path).unwrap();
         fs::remove_file(path).unwrap();
         let name = format!("{}.png", crusader_lib::test::timed("plot"));
@@ -190,7 +190,7 @@ fn android_main(app: AndroidApp) {
     }));
     tester.raw_saver = Some(Box::new(|result| {
         let mut writer = Cursor::new(Vec::new());
-        result.save_to_writer(&mut writer);
+        result.save_to_writer(&mut writer).unwrap();
         let data = writer.into_inner();
         let name = format!("{}.crr", crusader_lib::test::timed("data"));
         save_file(false, name, data).unwrap();

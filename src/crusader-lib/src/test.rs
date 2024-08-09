@@ -598,10 +598,11 @@ pub(crate) async fn test_async(
     Ok(raw_result)
 }
 
-pub fn save_raw(result: &RawResult, name: &str) -> String {
+pub fn save_raw(result: &RawResult, name: &str, root_path: &Path) -> Result<String, anyhow::Error> {
+    std::fs::create_dir_all(root_path)?;
     let name = unique(name, "crr");
-    result.save(Path::new(&name));
-    name
+    result.save(&root_path.join(&name))?;
+    Ok(name)
 }
 
 fn setup_loaders(
@@ -894,10 +895,17 @@ pub fn test(
         }
     };
     println!("{}", with_time("Writing data..."));
-    let raw = save_raw(&result, "data");
-    println!("{}", with_time(&format!("Saved raw data as {}", raw)));
-    let file = save_graph(&plot, &result.to_test_result(), "plot");
-    println!("{}", with_time(&format!("Saved plot as {}", file)));
+    let path = Path::new("crusader-results");
+    let raw = save_raw(&result, "data", path)?;
+    println!(
+        "{}",
+        with_time(&format!("Saved raw data as {}", path.join(raw).display()))
+    );
+    let plot = save_graph(&plot, &result.to_test_result(), "plot", path)?;
+    println!(
+        "{}",
+        with_time(&format!("Saved plot as {}", path.join(plot).display()))
+    );
     Ok(())
 }
 

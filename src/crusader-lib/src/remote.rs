@@ -147,10 +147,10 @@ async fn handle_client(
     let data = task::spawn_blocking(move || {
         let mut data = Vec::new();
 
-        result.save_to_writer(&mut data);
-        data
+        result.save_to_writer(&mut data)?;
+        Ok::<_, anyhow::Error>(data)
     })
-    .await?;
+    .await??;
     socket.send(Message::Binary(data)).await?;
 
     (state.msg)(&format!("Remote client running from {}", who.ip()));

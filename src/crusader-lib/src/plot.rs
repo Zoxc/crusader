@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use image::{ImageBuffer, ImageFormat, Rgb};
 use plotters::coord::types::RangedCoordf64;
 use plotters::coord::Shift;
@@ -153,16 +153,26 @@ pub struct TestResult {
     pub stream_groups: Vec<TestStreamGroup>,
 }
 
-pub fn save_graph(config: &PlotConfig, result: &TestResult, name: &str) -> String {
+pub fn save_graph(
+    config: &PlotConfig,
+    result: &TestResult,
+    name: &str,
+    root_path: &Path,
+) -> Result<String, anyhow::Error> {
+    std::fs::create_dir_all(root_path)?;
     let file = unique(name, "png");
-    save_graph_to_path(file.as_ref(), config, result);
-    file
+    save_graph_to_path(&root_path.join(&file), config, result)?;
+    Ok(file)
 }
 
-pub fn save_graph_to_path(path: &Path, config: &PlotConfig, result: &TestResult) {
-    let img = save_graph_to_mem(config, result).expect("Unable to write plot to file");
+pub fn save_graph_to_path(
+    path: &Path,
+    config: &PlotConfig,
+    result: &TestResult,
+) -> Result<(), anyhow::Error> {
+    let img = save_graph_to_mem(config, result).context("Unable to plot")?;
     img.save_with_format(&path, ImageFormat::Png)
-        .expect("Unable to write plot to file");
+        .context("Unable to write plot to file")
 }
 
 pub(crate) fn save_graph_to_mem(

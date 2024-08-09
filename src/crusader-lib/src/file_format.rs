@@ -219,20 +219,20 @@ impl RawResult {
         Self::load_from_reader(File::open(path).ok()?)
     }
 
-    pub fn save_to_writer(&self, writer: impl Write) {
+    pub fn save_to_writer(&self, writer: impl Write) -> Result<(), anyhow::Error> {
         let mut file = BufWriter::new(writer);
 
-        bincode::serialize_into(&mut file, &RawHeader::default()).unwrap();
+        bincode::serialize_into(&mut file, &RawHeader::default())?;
 
         let mut compressor = snap::write::FrameEncoder::new(file);
 
-        self.serialize(&mut rmp_serde::Serializer::new(&mut compressor).with_struct_map())
-            .unwrap();
+        self.serialize(&mut rmp_serde::Serializer::new(&mut compressor).with_struct_map())?;
 
-        compressor.flush().unwrap();
+        compressor.flush()?;
+        Ok(())
     }
 
-    pub fn save(&self, name: &Path) {
-        self.save_to_writer(File::create(name).unwrap())
+    pub fn save(&self, name: &Path) -> Result<(), anyhow::Error> {
+        self.save_to_writer(File::create(name)?)
     }
 }

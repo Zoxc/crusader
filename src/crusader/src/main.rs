@@ -9,9 +9,9 @@ use crusader_lib::{protocol, LIB_VERSION};
 use crusader_lib::{with_time, Config};
 #[cfg(feature = "client")]
 use std::path::PathBuf;
-use std::process;
 #[cfg(feature = "client")]
 use std::time::Duration;
+use std::{path::Path, process};
 
 #[derive(Parser)]
 #[command(version = LIB_VERSION)]
@@ -198,14 +198,19 @@ fn run() -> Result<(), anyhow::Error> {
         #[cfg(feature = "client")]
         Commands::Plot { data, plot } => {
             let result = RawResult::load(data).expect("Unable to load data");
+            let root = data.parent().unwrap_or(Path::new(""));
             let file = crusader_lib::plot::save_graph(
                 &plot.config(),
                 &result.to_test_result(),
                 data.file_stem()
                     .and_then(|name| name.to_str())
                     .unwrap_or("plot"),
+                data.parent().unwrap_or(Path::new("")),
+            )?;
+            println!(
+                "{}",
+                with_time(&format!("Saved plot as {}", root.join(file).display()))
             );
-            println!("{}", with_time(&format!("Saved plot as {}", file)));
             Ok(())
         }
     }

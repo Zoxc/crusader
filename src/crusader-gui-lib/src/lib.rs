@@ -843,11 +843,13 @@ impl Tester {
                             saver(&self.result.as_ref().unwrap().result);
                         }
                         None => {
-                            self.result_saved = Some(plot::save_graph(
+                            self.result_saved = plot::save_graph(
                                 &PlotConfig::default(),
                                 &self.result.as_ref().unwrap().result,
                                 "plot",
-                            ));
+                                Path::new("crusader-results"),
+                            )
+                            .ok();
                         }
                     }
                 }
@@ -863,8 +865,12 @@ impl Tester {
                             saver(self.raw_result.as_ref().unwrap());
                         }
                         None => {
-                            self.raw_result_saved =
-                                Some(test::save_raw(self.raw_result.as_ref().unwrap(), "data"));
+                            self.raw_result_saved = test::save_raw(
+                                self.raw_result.as_ref().unwrap(),
+                                "data",
+                                Path::new("crusader-results"),
+                            )
+                            .ok();
                         }
                     }
                 }
