@@ -10,7 +10,7 @@ use crate::plot::save_graph;
 use crate::protocol::{
     codec, receive, send, ClientMessage, Hello, RawLatency, ServerMessage, TestStream,
 };
-use crate::{with_time, LIB_VERSION};
+use crate::{version, with_time};
 use anyhow::{anyhow, bail, Context};
 use bytes::{Bytes, BytesMut};
 use futures::future::FutureExt;
@@ -89,7 +89,7 @@ pub(crate) async fn test_async(
     latency_peer_server: Option<&str>,
     msg: Msg,
 ) -> Result<RawResult, anyhow::Error> {
-    msg(&format!("Client version {} running", LIB_VERSION));
+    msg(&format!("Client version {} running", version()));
 
     let control = net::TcpStream::connect((server, config.port))
         .await
@@ -584,7 +584,7 @@ pub(crate) async fn test_async(
 
     let raw_result = RawResult {
         version: RawHeader::default().version,
-        generated_by: format!("Crusader {}", LIB_VERSION),
+        generated_by: format!("Crusader {}", version()),
         config: raw_config,
         ipv6: server.is_ipv6(),
         load_termination_timeout,

@@ -7,7 +7,18 @@
     clippy::option_map_unit_fn
 )]
 
-pub const LIB_VERSION: &str = env!("CARGO_PKG_VERSION");
+const VERSION: &str = "0.1.0-dev";
+
+pub fn version() -> String {
+    if !VERSION.ends_with("-dev") {
+        VERSION.to_owned()
+    } else {
+        let commit = option_env!("GIT_COMMIT")
+            .map(|commit| format!("commit {}", commit))
+            .unwrap_or("unknown commit".to_owned());
+        format!("{} ({})", VERSION, commit)
+    }
+}
 
 pub fn with_time(msg: &str) -> String {
     let time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");

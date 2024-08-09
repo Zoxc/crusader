@@ -24,7 +24,7 @@ use crate::peer::run_peer;
 use crate::protocol::{
     self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage, TestStream,
 };
-use crate::{with_time, LIB_VERSION};
+use crate::{version, with_time};
 
 use std::thread;
 
@@ -641,7 +641,7 @@ async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<
     task::spawn(listen(state.clone(), v6));
     task::spawn(listen(state.clone(), v4));
 
-    (state.msg)(&format!("Server version {} running...", LIB_VERSION));
+    (state.msg)(&format!("Server version {} running...", version()));
 
     Ok(())
 }

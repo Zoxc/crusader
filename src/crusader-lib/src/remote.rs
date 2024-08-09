@@ -1,7 +1,7 @@
 use crate::common::Config;
 use crate::plot::save_graph_to_mem;
 use crate::test::{test_async, timed, PlotConfig};
-use crate::{with_time, LIB_VERSION};
+use crate::{version, with_time};
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Error;
@@ -240,7 +240,7 @@ async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<
         } else {
             ""
         },
-        LIB_VERSION
+        version()
     ));
     (state.msg)(&format!("Address http://localhost:{}", port));
 

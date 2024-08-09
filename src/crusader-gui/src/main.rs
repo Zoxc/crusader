@@ -8,7 +8,7 @@
 use std::{error::Error, sync::Arc};
 
 use crusader_gui_lib::Tester;
-use crusader_lib::LIB_VERSION;
+use crusader_lib::version;
 use eframe::{
     egui::{self, Context, FontData, FontDefinitions, FontFamily},
     emath::vec2,
@@ -35,7 +35,7 @@ fn main() {
         .map(|exe| exe.with_extension("toml"));
 
     eframe::run_native(
-        &format!("Crusader Network Tester {}", LIB_VERSION),
+        &format!("Crusader Network Tester {}", version()),
         options,
         Box::new(move |cc| {
             let ctx = &cc.egui_ctx;

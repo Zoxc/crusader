@@ -4,7 +4,7 @@ use clap_num::si_number;
 use crusader_lib::file_format::RawResult;
 #[cfg(feature = "client")]
 use crusader_lib::test::PlotConfig;
-use crusader_lib::{protocol, LIB_VERSION};
+use crusader_lib::{protocol, version};
 #[cfg(feature = "client")]
 use crusader_lib::{with_time, Config};
 #[cfg(feature = "client")]
@@ -14,7 +14,7 @@ use std::time::Duration;
 use std::{path::Path, process};
 
 #[derive(Parser)]
-#[command(version = LIB_VERSION)]
+#[command(version = version())]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
