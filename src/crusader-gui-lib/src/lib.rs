@@ -476,7 +476,13 @@ impl Tester {
         ui.horizontal_wrapped(|ui| {
             ui.add_enabled_ui(active, |ui| {
                 ui.label("Server address:");
-                ui.add(TextEdit::singleline(&mut self.settings.client.server));
+                let response = ui.add(TextEdit::singleline(&mut self.settings.client.server));
+                if self.client_state == ClientState::Stopped
+                    && response.lost_focus()
+                    && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                {
+                    self.start_client(ctx)
+                }
             });
 
             match self.client_state {
