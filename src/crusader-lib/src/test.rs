@@ -93,7 +93,7 @@ pub(crate) async fn test_async(
 
     let control = net::TcpStream::connect((server, config.port))
         .await
-        .with_context(|| "Failed to connect to server")?;
+        .context("Failed to connect to server")?;
     control.set_nodelay(true)?;
 
     let server = control.peer_addr()?;
@@ -104,7 +104,9 @@ pub(crate) async fn test_async(
     let mut control_rx = FramedRead::new(rx, codec());
     let mut control_tx = FramedWrite::new(tx, codec());
 
-    hello(&mut control_tx, &mut control_rx).await?;
+    hello(&mut control_tx, &mut control_rx)
+        .await
+        .context("Protocol handshake")?;
 
     send(&mut control_tx, &ClientMessage::NewClient).await?;
 

@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -157,6 +157,10 @@ pub async fn receive<S: Stream<Item = Result<BytesMut, E>> + Unpin, T: for<'a> D
 where
     E: Error + Send + Sync + 'static,
 {
-    let bytes = stream.next().await.ok_or(anyhow!("Expected object"))??;
+    let bytes = stream
+        .next()
+        .await
+        .ok_or(anyhow!("Expected object"))?
+        .context("Failed to receive object")?;
     Ok(bincode::deserialize(&bytes)?)
 }

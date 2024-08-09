@@ -2,7 +2,7 @@ use crate::{
     protocol::{receive, send, ClientMessage, Hello, Ping, ServerMessage},
     serve::OnDrop,
 };
-use anyhow::bail;
+use anyhow::{bail, Context};
 use bytes::{Bytes, BytesMut};
 use futures::{pin_mut, select, FutureExt, Sink, Stream};
 use rand::Rng;
@@ -237,8 +237,8 @@ where
 {
     let hello = Hello::new();
 
-    send(tx, &hello).await?;
-    let server_hello: Hello = receive(rx).await?;
+    send(tx, &hello).await.context("Sending hello")?;
+    let server_hello: Hello = receive(rx).await.context("Receiving hello")?;
 
     if hello != server_hello {
         bail!(
