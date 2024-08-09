@@ -1,8 +1,11 @@
 # Crusader Network Tester
 
-![Crusader Results Screenshot](./media/Crusader-Results.png)
-
 [![GitHub Release](https://img.shields.io/github/v/release/Zoxc/crusader)](https://github.com/Zoxc/crusader/releases)
+[![Docker Hub](https://img.shields.io/badge/container-dockerhub-blue)](https://hub.docker.com/r/zoxc/crusader)
+[![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/Zoxc/crusader/blob/master/LICENSE-MIT)
+[![Apache](https://img.shields.io/badge/license-Apache-blue.svg)](https://github.com/Zoxc/crusader/blob/master/LICENSE-APACHE)
+
+![Crusader Results Screenshot](./media/Crusader-Results.png)
 
 The **Crusader Network Tester** measures network rates and latency
 in the presence of upload and download traffic.
@@ -14,9 +17,11 @@ Crusader only uses TCP and UDP ports 35481 for its tests.
 
 **Pre-built binaries** for Windows, Mac, Linux,
 and Android are available on the
-[Releases](https://github.com/Zoxc/crusader/releases) page.
+[Releases](https://github.com/Zoxc/crusader/releases) page. The GUI is not prebuilt for Linux and must be built from source.
 
-**Status:** The latest Crusader release is shown above.
+A **Docker container** for running the server may be found on [dockerhub](https://hub.docker.com/r/zoxc/crusader).
+
+**Status:** The latest Crusader release is linked at the top.
   See the [CHANGELOG.md](./CHANGELOG.md)
   file for details.
 
@@ -87,7 +92,33 @@ and back (bi-directional).
 * The **Packet Loss** plot has green and blue marks
 that indicate times when packets were lost.
 
-## Command-line options
+## Running Crusader from the command line
+
+### Server
+
+To host a Crusader server, run this on the _server machine:
+
+```
+crusader serve
+```
+
+### Client
+
+To start a test, run this on the _client machine_:
+
+```
+crusader test <server-ip>
+```
+
+### Remote
+
+To host a web server allowing remote control of a Crusader client, run this:
+
+```
+crusader remote
+```
+
+### Options for the `test` command
 
 **Usage: crusader test [OPTIONS] \<SERVER>**
 
@@ -136,52 +167,48 @@ that indicate times when packets were lost.
 * **`--latency-peer <LATENCY_PEER>`**
           Specifies another server (peer) which will
           also measure the latency to the server independently of the client
-* **`-h, --help**`**
+* **`-h, --help`**
           Print help (see a summary with '-h')
           
 ## Building Crusader from source
 
 Use [pre-built binaries](https://github.com/Zoxc/crusader/releases)
-for everyday tests.
-To develop or debug Crusader, use the commands below
-to build all three binaries.
-Executables are placed in `src/target/release`
+for everyday tests if available.
 
+To develop or debug Crusader, use the commands below
+to build required binaries. Executables will be placed in `src/target/release`
+
+### Required dependencies:
+- A Rust and C toolchain.
+
+### Additional GUI dependencies:
+Development packages for:
+- `fontconfig`
+
+To install these on Ubuntu:
+```
+sudo apt install libfontconfig1-dev
+```
+
+### Building
+
+
+To build the `crusader` command line executable:
+```sh
+cd src
+cargo build -p crusader --release
+```
+
+To build both command line and GUI executables:
 ```sh
 cd src
 cargo build --release
 ```
 
-## Running Crusader from the command line
-
-See also the
-[command-line options](#command-line-options) section.
-
-### GUI Program
-
-This command starts the GUI program.
-
+To build a docker container running the server:
 ```sh
-cd src/target/release
-./crusader-gui
-```
-
-### Crusader Server
-
-To host a Crusader server, run this on the _server machine:
-
-```sh
-cd src/target/release
-./crusader serve
-```
-
-### Crusader Client
-
-To start a test, run this on the _client machine_:
-
-```sh
-cd src/target/release
-./crusader test <server-ip>
+cd docker
+docker build .. -t crusader -f server-static.Dockerfile
 ```
 
 ## Troubleshooting
@@ -200,3 +227,7 @@ cd src/target/release
 `Warning: Load termination timed out. There may be residual untracked traffic in the background.` 
   
   Should I be concerned? No. That may happen due to the TCP termination being lost or TCP incompatibilities between OSes. It's likely benign if you see throughput and latency drop to idle values after the tests in the graph. 
+
+* The up and down latency measurement rely on a symmetric stable latency to the server. These values may be wrong if those assumption don't hold on test startup.
+
+* The up and down latency measurement may slowly get out of sync due to clock drift. Clocks are currently only synchronized on test startup.

@@ -9,27 +9,27 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
-* Add `crusader remote` command to start a web server
-   listening on port 35482 that has much of the functionality of
-   the `crusader-gui`.
-   The GUI requests the server address and various other parameters
-   and displays the resulting chart in the web page.
+* Added `crusader remote` command to start a web server listening on port 35482.
+   It allows starting tests on a separate machine and displays the resulting charts in the web page.
 * Use system fonts in GUI
-* Improved error messages when client cannot connect
-* Add `--idle` option to the client to test without traffic
+* Improved error messages
+* Added `--idle` option to the client to test without traffic
+* Save results in a `crusader-results` folder
+* Allow building of a server-only binary
+* Generated files will use a YYYY-MM-DD HH.MM.SS format
 
 ## 0.0.12 - 2024-07-31
 
 * Create UDP server for each server IP (fixes #22)
-* Improve error handling for log messages
-* Change date format to use YYYY-MM-DD
+* Improved error handling for log messages
+* Changed date format to use YYYY-MM-DD in logs
 
 ## 0.0.11 - 2024-07-29
 
 * Log file includes timestamps and version number
-* Add peer latency measurements
-* Add version to title bar of GUI
-* Add `plot_max_bandwidth` and `plot_max_latency` command line options
+* Added peer latency measurements
+* Added version to title bar of GUI
+* Added `plot_max_bandwidth` and `plot_max_latency` command line options
 
 ## 0.0.10 - 2024-01-09
 
