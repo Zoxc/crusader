@@ -17,7 +17,7 @@ use crusader_lib::{
     file_format::{RawPing, RawResult},
     latency,
     plot::{self, float_max, to_rates},
-    protocol, serve,
+    protocol, remote, serve,
     test::{self, PlotConfig},
     with_time, Config,
 };
@@ -75,6 +75,7 @@ struct Latency {
 enum Tab {
     Client,
     Server,
+    Remote,
     Latency,
     Result,
 }
@@ -156,6 +157,8 @@ pub struct Tester {
     saved_settings: Settings,
     server_state: ServerState,
     server: Option<Server>,
+    remote_state: ServerState,
+    remote_server: Option<Server>,
     client_state: ClientState,
     client: Option<Client>,
     result_plot_reset: bool,
@@ -350,6 +353,8 @@ impl Tester {
             msg_scrolled: 0,
             server_state: ServerState::Stopped(None),
             server: None,
+            remote_state: ServerState::Stopped(None),
+            remote_server: None,
             file_loader: None,
             raw_saver: None,
             plot_saver: None,
@@ -987,6 +992,13 @@ impl Tester {
     }
 
     fn server(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        ui.label(format!(
+            "A server listens on TCP and UDP port {}. It allows clients \
+            to run tests and measure latency against it. It can also act as a latency peer for tests connecting to another server.",
+            protocol::PORT
+        ));
+        ui.separator();
+
         match self.server_state {
             ServerState::Stopped(ref error) => {
                 let button = ui
@@ -1011,15 +1023,15 @@ impl Tester {
                     let stop = serve::serve_until(
                         protocol::PORT,
                         Box::new(move |msg| {
-                            tx.send(with_time(msg)).unwrap();
+                            tx.send(with_time(msg)).ok();
                             ctx.request_repaint();
                         }),
                         Box::new(move |result| {
-                            signal_started.send(result).unwrap();
+                            signal_started.send(result).ok();
                             ctx_.request_repaint();
                         }),
                         Box::new(move || {
-                            signal_done.send(()).unwrap();
+                            signal_done.send(()).ok();
                             ctx__.request_repaint();
                         }),
                     )
@@ -1101,6 +1113,140 @@ impl Tester {
                 {
                     self.server_state = ServerState::Stopped(None);
                     self.server = None;
+                }
+
+                ui.add_enabled_ui(false, |ui| {
+                    let _ = ui.button("Stopping..");
+                });
+            }
+        }
+    }
+
+    fn remote(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        ui.label(format!(
+            "A remote server runs a web server on TCP port {}. It allows web clients to remotely start \
+            tests against other servers.",
+            protocol::PORT + 1
+        ));
+        ui.separator();
+
+        match self.remote_state {
+            ServerState::Stopped(ref error) => {
+                let button = ui
+                    .vertical(|ui| {
+                        let button = ui.button("Start server");
+                        if let Some(error) = error {
+                            ui.separator();
+                            ui.label(format!("Unable to start server: {}", error));
+                        }
+                        button
+                    })
+                    .inner;
+
+                if button.clicked() {
+                    let ctx = ctx.clone();
+                    let ctx_ = ctx.clone();
+                    let ctx__ = ctx.clone();
+                    let (tx, rx) = mpsc::unbounded_channel();
+                    let (signal_started, started) = oneshot::channel();
+                    let (signal_done, done) = oneshot::channel();
+
+                    let stop = remote::serve_until(
+                        protocol::PORT + 1,
+                        Box::new(move |msg| {
+                            tx.send(with_time(msg)).ok();
+                            ctx.request_repaint();
+                        }),
+                        Box::new(move |result| {
+                            signal_started.send(result).ok();
+                            ctx_.request_repaint();
+                        }),
+                        Box::new(move || {
+                            signal_done.send(()).ok();
+                            ctx__.request_repaint();
+                        }),
+                    )
+                    .ok();
+
+                    if let Some(stop) = stop {
+                        self.remote_server = Some(Server {
+                            done: Some(done),
+                            stop: Some(stop),
+                            started,
+                            rx,
+                            msgs: Vec::new(),
+                        });
+                        self.remote_state = ServerState::Starting;
+                    }
+                };
+            }
+            ServerState::Running => {
+                let remote_server = self.remote_server.as_mut().unwrap();
+                let button = ui.button("Stop server");
+
+                ui.separator();
+
+                loop {
+                    match remote_server.rx.try_recv() {
+                        Ok(msg) => {
+                            println!("[Remote] {msg}");
+                            remote_server.msgs.push(msg);
+                        }
+                        Err(TryRecvError::Disconnected) => panic!(),
+                        Err(TryRecvError::Empty) => break,
+                    }
+                }
+
+                ScrollArea::vertical()
+                    .stick_to_bottom(true)
+                    .auto_shrink([false; 2])
+                    .show_rows(
+                        ui,
+                        ui.text_style_height(&TextStyle::Body),
+                        remote_server.msgs.len(),
+                        |ui, rows| {
+                            for row in rows {
+                                ui.label(&remote_server.msgs[row]);
+                            }
+                        },
+                    );
+
+                if button.clicked() {
+                    mem::take(&mut remote_server.stop)
+                        .unwrap()
+                        .send(())
+                        .unwrap();
+                    self.remote_state = ServerState::Stopping;
+                };
+            }
+            ServerState::Starting => {
+                let remote_server = self.remote_server.as_mut().unwrap();
+
+                if let Ok(result) = remote_server.started.try_recv() {
+                    if let Err(error) = result {
+                        self.remote_state = ServerState::Stopped(Some(error));
+                        self.remote_server = None;
+                    } else {
+                        self.remote_state = ServerState::Running;
+                    }
+                }
+
+                ui.add_enabled_ui(false, |ui| {
+                    let _ = ui.button("Starting..");
+                });
+            }
+            ServerState::Stopping => {
+                if let Ok(()) = self
+                    .remote_server
+                    .as_mut()
+                    .unwrap()
+                    .done
+                    .as_mut()
+                    .unwrap()
+                    .try_recv()
+                {
+                    self.remote_state = ServerState::Stopped(None);
+                    self.remote_server = None;
                 }
 
                 ui.add_enabled_ui(false, |ui| {
@@ -1388,6 +1534,7 @@ impl Tester {
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Client, "Client");
             ui.selectable_value(&mut self.tab, Tab::Server, "Server");
+            ui.selectable_value(&mut self.tab, Tab::Remote, "Remote");
             ui.selectable_value(&mut self.tab, Tab::Latency, "Latency");
             ui.selectable_value(&mut self.tab, Tab::Result, "Result");
         });
@@ -1396,6 +1543,7 @@ impl Tester {
         match self.tab {
             Tab::Client => self.client(ctx, ui, compact),
             Tab::Server => self.server(ctx, ui),
+            Tab::Remote => self.remote(ctx, ui),
             Tab::Latency => self.latency(ctx, ui),
             Tab::Result => self.result(ctx, ui),
         }

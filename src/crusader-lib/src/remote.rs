@@ -20,6 +20,7 @@ use serde_json::json;
 use socket2::{Domain, Protocol, Socket};
 use std::io::{Cursor, ErrorKind};
 use std::net::{IpAddr, Ipv6Addr};
+use std::thread;
 use std::time::Duration;
 use std::{
     net::{Ipv4Addr, SocketAddr},
@@ -27,6 +28,7 @@ use std::{
 };
 use tokio::net::TcpSocket;
 use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::oneshot;
 use tokio::{net::TcpListener, signal, task};
 
 struct Env {
@@ -85,6 +87,8 @@ async fn handle_client(
         ping_interval: Duration::from_millis(args.latency_sample_rate),
         throughput_interval: Duration::from_millis(args.throughput_sample_rate),
     };
+
+    (state.msg)(&format!("Remote client ({}) test started", who.ip()));
 
     let (msg_tx, mut msg_rx) = unbounded_channel();
 
@@ -153,7 +157,7 @@ async fn handle_client(
     .await??;
     socket.send(Message::Binary(data)).await?;
 
-    (state.msg)(&format!("Remote client running from {}", who.ip()));
+    (state.msg)(&format!("Remote client ({}) test complete", who.ip()));
     Ok(())
 }
 
@@ -245,6 +249,33 @@ async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<
     (state.msg)(&format!("Address http://localhost:{}", port));
 
     Ok(())
+}
+
+pub fn serve_until(
+    port: u16,
+    msg: Box<dyn Fn(&str) + Send + Sync>,
+    started: Box<dyn FnOnce(Result<(), String>) + Send>,
+    done: Box<dyn FnOnce() + Send>,
+) -> Result<oneshot::Sender<()>, anyhow::Error> {
+    let (tx, rx) = oneshot::channel();
+
+    let rt = tokio::runtime::Runtime::new()?;
+
+    thread::spawn(move || {
+        rt.block_on(async move {
+            match serve_async(port, msg).await {
+                Ok(()) => {
+                    started(Ok(()));
+                    rx.await.ok();
+                }
+                Err(error) => started(Err(error.to_string())),
+            }
+        });
+
+        done();
+    });
+
+    Ok(tx)
 }
 
 pub fn run(port: u16) -> Result<(), anyhow::Error> {
