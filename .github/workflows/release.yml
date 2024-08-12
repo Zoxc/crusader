@@ -39,36 +39,43 @@ jobs:
             target: arm-unknown-linux-musleabihf
             exe_postfix:
             cargo: cross
+            gui: false
 
           - os: ubuntu-latest
             target: aarch64-unknown-linux-musl
             exe_postfix:
             cargo: cross
+            gui: false
 
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             exe_postfix:
             cargo: cargo
+            gui: false
 
           - os: macos-latest
             target: aarch64-apple-darwin
             exe_postfix:
             cargo: cargo
+            gui: true
 
           - os: macos-latest
             target: x86_64-apple-darwin
             exe_postfix:
             cargo: cargo
+            gui: true
 
           - os: windows-latest
             target: i686-pc-windows-msvc
             exe_postfix: .exe
             cargo: cargo
+            gui: true
 
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             exe_postfix: .exe
             cargo: cargo
+            gui: true
     steps:
       - uses: actions/checkout@v2
 
@@ -89,7 +96,15 @@ jobs:
           echo "CC=musl-gcc" >> $GITHUB_ENV
           echo "AR=ar" >> $GITHUB_ENV
 
+      - name: Build command line binary
+        if: !matrix.build.gui
+        run: ${{ matrix.build.cargo }} build -p crusader --target ${{ matrix.build.target }} --release
+        working-directory: src
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
+
       - name: Build
+        if: matrix.build.gui
         run: ${{ matrix.build.cargo }} build --target ${{ matrix.build.target }} --release
         working-directory: src
         env:
@@ -103,7 +118,7 @@ jobs:
           cp src/target/${{ matrix.build.target }}/release/crusader${{ matrix.build.exe_postfix }} "$staging/"
 
       - name: Copy GUI binary
-        if: matrix.build.os == 'windows-latest' || matrix.build.os == 'macos-latest'
+        if: matrix.build.gui
         shell: bash
         run: |
           cp src/target/${{ matrix.build.target }}/release/crusader-gui${{ matrix.build.exe_postfix }} "crusader-${{ matrix.build.target }}/"
