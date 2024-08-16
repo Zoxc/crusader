@@ -254,11 +254,11 @@ pub async fn run_peer(
 
     state_tx.send((TestState::EndPingRecv, Instant::now())).ok();
 
-    let pings_sent = ping_send.await?;
+    let pings_sent = ping_send.await??;
     send(&mut control_tx, &ClientMessage::StopMeasurements).await?;
     send(&mut control_tx, &ClientMessage::Done).await?;
 
-    let mut pongs = ping_recv.await?;
+    let mut pongs = ping_recv.await??;
 
     let (mut latencies, server_overload) = measures.await??;
 

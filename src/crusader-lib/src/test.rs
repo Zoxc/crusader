@@ -441,11 +441,11 @@ pub(crate) async fn test_async(
 
     let duration = start.elapsed();
 
-    let pings_sent = ping_send.await?;
+    let pings_sent = ping_send.await??;
     send(&mut control_tx, &ClientMessage::StopMeasurements).await?;
     send(&mut control_tx, &ClientMessage::Done).await?;
 
-    let mut pongs = ping_recv.await?;
+    let mut pongs = ping_recv.await??;
 
     let (mut latencies, throughput, server_overload) = measures.await??;
 
@@ -928,7 +928,7 @@ pub fn test_callback(
             let mut result = task::spawn(async move {
                 test_async(config, &host, latency_peer_server.as_deref(), msg)
                     .await
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| format!("{:?}", error))
             })
             .fuse();
 
@@ -937,7 +937,7 @@ pub fn test_callback(
                     Some(result.map_err(|error| error.to_string()).and_then(|result| result))
                 },
                 result = rx.fuse() => {
-                    result.unwrap();
+                    result.ok();
                     None
                 },
             }

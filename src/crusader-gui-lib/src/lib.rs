@@ -1370,7 +1370,7 @@ impl Tester {
                 if let Ok(result) = latency.done.as_mut().unwrap().try_recv() {
                     self.latency_error = match result {
                         Some(Ok(())) => None,
-                        Some(Err(error)) => Some(format!("Error: {error}")),
+                        Some(Err(error)) => Some(error),
                         None => Some("Aborted...".to_owned()),
                     };
                     self.latency_stop = self.latency_data.start.elapsed();

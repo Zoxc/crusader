@@ -2,7 +2,7 @@ use crate::{
     protocol::{receive, send, ClientMessage, Hello, Ping, ServerMessage},
     serve::OnDrop,
 };
-use anyhow::{bail, Context};
+use anyhow::{anyhow, bail, Context};
 use bytes::{Bytes, BytesMut};
 use futures::{pin_mut, select, FutureExt, Sink, Stream};
 use rand::Rng;
@@ -321,7 +321,9 @@ async fn ping_measure_recv(
 
         let current = setup_start.elapsed();
         let len = result?;
-        let buf = &mut buf[..len];
+        let buf = buf
+            .get_mut(..len)
+            .ok_or_else(|| anyhow!("Pong too large"))?;
         let ping: Ping = bincode::deserialize(buf)?;
 
         storage.push((ping, current));
@@ -434,7 +436,7 @@ pub(crate) async fn ping_send(
     socket: Arc<UdpSocket>,
     interval: Duration,
     estimated_duration: Duration,
-) -> Vec<Duration> {
+) -> Result<Vec<Duration>, anyhow::Error> {
     let mut storage = Vec::with_capacity(
         ((estimated_duration.as_secs_f64() + 2.0) * (1000.0 / interval.as_millis() as f64) * 1.5)
             as usize,
@@ -463,12 +465,12 @@ pub(crate) async fn ping_send(
         bincode::serialize_into(&mut cursor, &ping).unwrap();
         let buf = &cursor.get_ref()[0..(cursor.position() as usize)];
 
-        udp_handle(socket.send(buf).await.map(|_| ())).expect("unable to udp ping");
+        udp_handle(socket.send(buf).await.map(|_| ())).context("unable to UDP ping")?;
 
         storage.push(current);
     }
 
-    storage
+    Ok(storage)
 }
 
 pub(crate) async fn ping_recv(
@@ -477,7 +479,7 @@ pub(crate) async fn ping_recv(
     socket: Arc<UdpSocket>,
     interval: Duration,
     estimated_duration: Duration,
-) -> Vec<(Ping, Duration)> {
+) -> Result<Vec<(Ping, Duration)>, anyhow::Error> {
     let mut storage = Vec::with_capacity(
         ((estimated_duration.as_secs_f64() + 2.0) * (1000.0 / interval.as_millis() as f64) * 1.5)
             as usize,
@@ -499,14 +501,16 @@ pub(crate) async fn ping_recv(
         };
 
         let current = setup_start.elapsed();
-        let len = result.unwrap();
-        let buf = &mut buf[..len];
-        let ping: Ping = bincode::deserialize(buf).unwrap();
+        let len = result?;
+        let buf = buf
+            .get_mut(..len)
+            .ok_or_else(|| anyhow!("Pong too large"))?;
+        let ping: Ping = bincode::deserialize(buf)?;
 
         storage.push((ping, current));
     }
 
-    storage
+    Ok(storage)
 }
 
 pub(crate) async fn wait_for_state(
