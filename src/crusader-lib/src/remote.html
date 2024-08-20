@@ -102,8 +102,8 @@
                                 for="upload">Upload</label></td>
                         <td>Load duration:</td>
                         <td class="tspacer"><input type="number" v-model="config.load_duration"> seconds</td>
-                        <td>Latency sample rate:</td>
-                        <td><input type="number" v-model="config.latency_sample_rate"> milliseconds
+                        <td>Latency sample interval:</td>
+                        <td><input type="number" v-model="config.latency_sample_interval"> milliseconds
                         </td>
                     </tr>
                     <tr>
@@ -111,8 +111,8 @@
                                 for="both">Both</label></td>
                         <td>Grace duration:</td>
                         <td class="tspacer"><input type="number" v-model="config.grace_duration"> seconds</td>
-                        <td>Throughput sample rate:</td>
-                        <td><input type="number" v-model="config.throughput_sample_rate">
+                        <td>Throughput sample interval:</td>
+                        <td><input type="number" v-model="config.throughput_sample_interval">
                             milliseconds</td>
                     </tr>
                 </table>
@@ -157,8 +157,8 @@
                 stream_stagger: 0,
                 load_duration: 5,
                 grace_duration: 1,
-                latency_sample_rate: 5,
-                throughput_sample_rate: 20,
+                latency_sample_interval: 5,
+                throughput_sample_interval: 20,
                 latency_peer: {
                     enabled: false,
                     value: "",

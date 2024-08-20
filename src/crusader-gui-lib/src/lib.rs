@@ -85,7 +85,7 @@ enum Tab {
 pub struct LatencyMonitorSettings {
     pub server: String,
     pub history: f64,
-    pub latency_sample_rate: u64,
+    pub latency_sample_interval: u64,
 }
 
 impl Default for LatencyMonitorSettings {
@@ -93,7 +93,7 @@ impl Default for LatencyMonitorSettings {
         Self {
             server: "localhost".to_owned(),
             history: 60.0,
-            latency_sample_rate: 5,
+            latency_sample_interval: 5,
         }
     }
 }
@@ -109,8 +109,8 @@ pub struct ClientSettings {
     pub load_duration: f64,
     pub grace_duration: f64,
     pub stream_stagger: f64,
-    pub latency_sample_rate: u64,
-    pub throughput_sample_rate: u64,
+    pub latency_sample_interval: u64,
+    pub throughput_sample_interval: u64,
     pub latency_peer: bool,
     pub latency_peer_server: String,
 }
@@ -126,8 +126,8 @@ impl Default for ClientSettings {
             load_duration: 5.0,
             grace_duration: 1.0,
             stream_stagger: 0.0,
-            latency_sample_rate: 5,
-            throughput_sample_rate: 20,
+            latency_sample_interval: 5,
+            throughput_sample_interval: 20,
             latency_peer: false,
             latency_peer_server: String::new(),
         }
@@ -405,8 +405,10 @@ impl Tester {
             download: self.settings.client.download,
             upload: self.settings.client.upload,
             both: self.settings.client.both,
-            ping_interval: Duration::from_millis(self.settings.client.latency_sample_rate),
-            throughput_interval: Duration::from_millis(self.settings.client.throughput_sample_rate),
+            ping_interval: Duration::from_millis(self.settings.client.latency_sample_interval),
+            throughput_interval: Duration::from_millis(
+                self.settings.client.throughput_sample_interval,
+            ),
         }
     }
 
@@ -557,18 +559,20 @@ impl Tester {
                             );
                             ui.label("seconds");
                             ui.end_row();
-                            ui.label("Latency sample rate:");
+                            ui.label("Latency sample interval:");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.client.latency_sample_rate)
-                                    .range(1..=1000)
-                                    .speed(0.05),
+                                egui::DragValue::new(
+                                    &mut self.settings.client.latency_sample_interval,
+                                )
+                                .range(1..=1000)
+                                .speed(0.05),
                             );
                             ui.label("milliseconds");
                             ui.end_row();
-                            ui.label("Throughput sample rate:");
+                            ui.label("Throughput sample interval:");
                             ui.add(
                                 egui::DragValue::new(
-                                    &mut self.settings.client.throughput_sample_rate,
+                                    &mut self.settings.client.throughput_sample_interval,
                                 )
                                 .range(1..=1000)
                                 .speed(0.05),
@@ -609,11 +613,13 @@ impl Tester {
                             ui.label("seconds");
                             ui.label("");
 
-                            ui.label("Latency sample rate:");
+                            ui.label("Latency sample interval:");
                             ui.add(
-                                egui::DragValue::new(&mut self.settings.client.latency_sample_rate)
-                                    .range(1..=1000)
-                                    .speed(0.05),
+                                egui::DragValue::new(
+                                    &mut self.settings.client.latency_sample_interval,
+                                )
+                                .range(1..=1000)
+                                .speed(0.05),
                             );
                             ui.label("milliseconds");
                             ui.end_row();
@@ -628,10 +634,10 @@ impl Tester {
                             );
                             ui.label("seconds");
                             ui.label("");
-                            ui.label("Throughput sample rate:");
+                            ui.label("Throughput sample interval:");
                             ui.add(
                                 egui::DragValue::new(
-                                    &mut self.settings.client.throughput_sample_rate,
+                                    &mut self.settings.client.throughput_sample_interval,
                                 )
                                 .range(1..=1000)
                                 .speed(0.05),
@@ -1264,7 +1270,7 @@ impl Tester {
         let ctx_ = ctx.clone();
         let data = Arc::new(latency::Data::new(
             ((self.settings.latency_monitor.history * 1000.0)
-                / self.settings.latency_monitor.latency_sample_rate as f64)
+                / self.settings.latency_monitor.latency_sample_interval as f64)
                 .round() as usize,
             Arc::new(move || {
                 ctx_.request_repaint();
@@ -1276,7 +1282,7 @@ impl Tester {
             latency::Config {
                 port: protocol::PORT,
                 ping_interval: Duration::from_millis(
-                    self.settings.latency_monitor.latency_sample_rate,
+                    self.settings.latency_monitor.latency_sample_interval,
                 ),
             },
             &self.settings.latency_monitor.server,
@@ -1328,11 +1334,13 @@ impl Tester {
                 );
                 ui.label("seconds");
                 ui.end_row();
-                ui.label("Latency sample rate:");
+                ui.label("Latency sample interval:");
                 ui.add(
-                    egui::DragValue::new(&mut self.settings.latency_monitor.latency_sample_rate)
-                        .range(1..=1000)
-                        .speed(0.05),
+                    egui::DragValue::new(
+                        &mut self.settings.latency_monitor.latency_sample_interval,
+                    )
+                    .range(1..=1000)
+                    .speed(0.05),
                 );
                 ui.label("milliseconds");
             });

@@ -148,9 +148,9 @@ crusader remote
 * **`--grace-duration <SECONDS>`**
           The idle time between each test
           [default: 1.0]
-* **`--latency-sample-rate <MILLISECONDS>`**
+* **`--latency-sample-interval <MILLISECONDS>`**
           [default: 5.0]
-* **`--throughput-sample-rate <MILLISECONDS>`**
+* **`--throughput-sample-interval <MILLISECONDS>`**
           [default: 20.0]
 * **`--plot-transferred`**
           Plot transferred bytes

@@ -61,8 +61,8 @@ struct TestArgs {
     load_duration: f64,
 
     grace_duration: f64,
-    latency_sample_rate: u64,
-    throughput_sample_rate: u64,
+    latency_sample_interval: u64,
+    throughput_sample_interval: u64,
     latency_peer: Option<String>,
 }
 
@@ -84,8 +84,8 @@ async fn handle_client(
         download: args.download,
         upload: args.upload,
         both: args.both,
-        ping_interval: Duration::from_millis(args.latency_sample_rate),
-        throughput_interval: Duration::from_millis(args.throughput_sample_rate),
+        ping_interval: Duration::from_millis(args.latency_sample_interval),
+        throughput_interval: Duration::from_millis(args.throughput_sample_interval),
     };
 
     (state.msg)(&format!("Remote client ({}) test started", who.ip()));

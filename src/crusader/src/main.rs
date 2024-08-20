@@ -114,9 +114,9 @@ enum Commands {
         )]
         grace_duration: f64,
         #[arg(long, default_value_t = 5, value_name = "MILLISECONDS")]
-        latency_sample_rate: u64,
+        latency_sample_interval: u64,
         #[arg(long, default_value_t = 20, value_name = "MILLISECONDS")]
-        throughput_sample_rate: u64,
+        throughput_sample_interval: u64,
         #[command(flatten)]
         plot: PlotArgs,
         #[arg(
@@ -155,8 +155,8 @@ fn run() -> Result<(), anyhow::Error> {
             upload,
             both,
             idle,
-            throughput_sample_rate,
-            latency_sample_rate,
+            throughput_sample_interval,
+            latency_sample_interval,
             ref plot,
             port,
             streams,
@@ -174,8 +174,8 @@ fn run() -> Result<(), anyhow::Error> {
                 download: !idle,
                 upload: !idle,
                 both: !idle,
-                ping_interval: Duration::from_millis(latency_sample_rate),
-                throughput_interval: Duration::from_millis(throughput_sample_rate),
+                ping_interval: Duration::from_millis(latency_sample_interval),
+                throughput_interval: Duration::from_millis(throughput_sample_interval),
             };
 
             if download || upload || both {
