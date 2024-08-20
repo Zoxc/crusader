@@ -12,7 +12,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Added `crusader remote` command to start a web server listening on port 35482.
    It allows starting tests on a separate machine and displays the resulting charts in the web page.
 * Use system fonts in GUI
-* Improved error messages
+* Improved error handling and error messages
 * Added `--idle` option to the client to test without traffic
 * Save results in a `crusader-results` folder
 * Allow building of a server-only binary
