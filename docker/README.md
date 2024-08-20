@@ -3,6 +3,12 @@ To build a statically linked server image:
 docker build .. -t crusader -f server-static.Dockerfile
 ```
 
+To build a statically linked remote image:
+```
+docker build .. -t crusader -f remote-static.Dockerfile
+```
+This image allow initiation of tests using the web application running on port 35482.
+
 Supported platforms:
 - `linux/i386`
 - `linux/x86_64`
