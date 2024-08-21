@@ -97,7 +97,7 @@ jobs:
           echo "AR=ar" >> $GITHUB_ENV
 
       - name: Build command line binary
-        if: !matrix.build.gui
+        if: ${{ !matrix.build.gui }}
         run: ${{ matrix.build.cargo }} build -p crusader --target ${{ matrix.build.target }} --release
         working-directory: src
         env:
