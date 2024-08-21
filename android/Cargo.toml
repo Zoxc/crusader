@@ -21,6 +21,9 @@ android-activity = { version = "0.5", features = ["game-activity"] }
 
 [patch.crates-io]
 winit = { git = "https://github.com/Zoxc/winit", branch = "crusader2" }
+egui = { git = "https://github.com/Zoxc/egui", branch = "crusader2" }
+epaint = { git = "https://github.com/Zoxc/egui", branch = "crusader2" }
+emath = { git = "https://github.com/Zoxc/egui", branch = "crusader2" }
 
 [lib]
 name = "main"

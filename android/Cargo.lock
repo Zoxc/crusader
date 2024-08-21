@@ -1173,8 +1173,7 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 [[package]]
 name = "ecolor"
 version = "0.28.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e6b451ff1143f6de0f33fc7f1b68fecfd2c7de06e104de96c4514de3f5396f8"
+source = "git+https://github.com/Zoxc/egui?branch=crusader2#f215ab644e54822d3d94b6ca61a26966fe8eb67d"
 dependencies = [
  "bytemuck",
  "emath",
@@ -1220,8 +1219,7 @@ dependencies = [
 [[package]]
 name = "egui"
 version = "0.28.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20c97e70a2768de630f161bb5392cbd3874fcf72868f14df0e002e82e06cb798"
+source = "git+https://github.com/Zoxc/egui?branch=crusader2#f215ab644e54822d3d94b6ca61a26966fe8eb67d"
 dependencies = [
  "accesskit",
  "ahash",
@@ -1317,8 +1315,7 @@ checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 [[package]]
 name = "emath"
 version = "0.28.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a6a21708405ea88f63d8309650b4d77431f4bc28fb9d8e6f77d3963b51249e6"
+source = "git+https://github.com/Zoxc/egui?branch=crusader2#f215ab644e54822d3d94b6ca61a26966fe8eb67d"
 dependencies = [
  "bytemuck",
 ]
@@ -1378,8 +1375,7 @@ dependencies = [
 [[package]]
 name = "epaint"
 version = "0.28.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f0dcc0a0771e7500e94cd1cb797bd13c9f23b9409bdc3c824e2cbc562b7fa01"
+source = "git+https://github.com/Zoxc/egui?branch=crusader2#f215ab644e54822d3d94b6ca61a26966fe8eb67d"
 dependencies = [
  "ab_glyph",
  "ahash",
