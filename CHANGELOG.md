@@ -19,6 +19,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Generated files will use a YYYY-MM-DD HH.MM.SS format
 * Rename bandwidth to throughput
 * Rename sample rate to sample interval
+* Rename `Both` to `Aggregate` and `Total` to `Round-trip` in plots
 
 ## 0.0.12 - 2024-07-31
 

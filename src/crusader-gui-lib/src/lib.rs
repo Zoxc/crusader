@@ -744,10 +744,6 @@ impl Tester {
                 plot = plot.reset();
             }
 
-            //if plots > 1 {
-            //  plot = plot.height(height / (plots as f32));
-            //}
-
             plot.show(ui, |plot_ui| {
                 if result.result.raw_result.version >= 1 {
                     let latency = data.up.iter().map(|v| [v.0, v.1]);
@@ -768,7 +764,7 @@ impl Tester {
                 let latency = data.total.iter().map(|v| [v.0, v.1]);
                 let latency = Line::new(PlotPoints::from_iter(latency))
                     .color(Color32::from_rgb(50, 50, 50))
-                    .name("Total");
+                    .name("Round-trip");
 
                 plot_ui.line(latency);
             });
@@ -979,7 +975,7 @@ impl Tester {
                             let both = result.both.iter().map(|v| [v.0, v.1]);
                             let both = Line::new(PlotPoints::from_iter(both))
                                 .color(Color32::from_rgb(149, 96, 153))
-                                .name("Both");
+                                .name("Aggregate");
 
                             plot_ui.line(both);
                         }
@@ -1428,7 +1424,7 @@ impl Tester {
                 .link_cursor(link, true, false)
                 .include_x(-duration)
                 .include_x(0.0)
-                .include_x(duration * 0.15)
+                .include_x(duration * 0.20)
                 .include_y(0.0)
                 .include_y(10.0)
                 .height(height - packet_loss_size)
@@ -1474,7 +1470,7 @@ impl Tester {
                 });
                 let latency = Line::new(PlotPoints::from_iter(latency))
                     .color(Color32::from_rgb(50, 50, 50))
-                    .name("Total");
+                    .name("Round-trip");
 
                 plot_ui.line(latency);
             });

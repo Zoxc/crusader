@@ -183,7 +183,7 @@ pub(crate) fn save_graph_to_mem(
 
     result.both_bytes.as_ref().map(|both_bytes| {
         throughput.push((
-            "Both",
+            "Aggregate",
             RGBColor(149, 96, 153),
             to_rates(both_bytes),
             vec![both_bytes.as_slice()],
@@ -506,7 +506,7 @@ fn latency<'a>(
 
     draw_latency(DOWN_COLOR, "Down", |latency| latency.down());
 
-    draw_latency(RGBColor(50, 50, 50), "Total", |latency| latency.total);
+    draw_latency(RGBColor(50, 50, 50), "Round-trip", |latency| latency.total);
 
     legends(&mut chart);
 
@@ -877,7 +877,7 @@ pub(crate) fn graph(
         let areas = root.split_evenly((charts, 1));
 
         // Scale to fit the legend
-        let duration = duration * 1.08;
+        let duration = duration * 1.12;
 
         let mut chart_index = 0;
 
