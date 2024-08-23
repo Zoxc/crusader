@@ -149,7 +149,10 @@ pub fn serve(state: Arc<State>, port: u16) -> Result<(), anyhow::Error> {
         Ok(())
     }
 
-    let hostname = hostname::get().ok().and_then(|n| n.into_string().ok());
+    let hostname = hostname::get()
+        .ok()
+        .and_then(|n| n.into_string().ok())
+        .filter(|n| n != "localhost");
 
     let socket = Socket::new(Domain::IPV6, socket2::Type::DGRAM, Some(Protocol::UDP))?;
     socket.set_only_v6(true)?;
