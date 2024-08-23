@@ -113,13 +113,15 @@ pub(crate) async fn test_async(
 
     hello(&mut control_tx, &mut control_rx)
         .await
-        .context("Protocol handshake")?;
+        .context("Failed protocol handshake")?;
 
     send(&mut control_tx, &ClientMessage::NewClient).await?;
 
     let setup_start = Instant::now();
 
-    let reply: ServerMessage = receive(&mut control_rx).await?;
+    let reply: ServerMessage = receive(&mut control_rx)
+        .await
+        .context("Failed to create a new client id")?;
     let id = match reply {
         ServerMessage::NewClient(Some(id)) => id,
         ServerMessage::NewClient(None) => bail!("Server was unable to create client"),

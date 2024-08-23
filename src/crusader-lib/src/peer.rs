@@ -8,7 +8,6 @@ use crate::{
 };
 use anyhow::bail;
 use std::{
-    error::Error,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
     time::Duration,
@@ -125,7 +124,7 @@ pub async fn run_peer(
     estimated_duration: Duration,
     stream_rx: &mut FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     stream_tx: &mut FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), anyhow::Error> {
     let control = net::TcpStream::connect((server, port)).await?;
     control.set_nodelay(true)?;
 
@@ -146,8 +145,8 @@ pub async fn run_peer(
     let reply: ServerMessage = receive(&mut control_rx).await?;
     let id = match reply {
         ServerMessage::NewClient(Some(id)) => id,
-        ServerMessage::NewClient(None) => return Err("Server was unable to create client".into()),
-        _ => return Err(format!("Unexpected message {:?}", reply).into()),
+        ServerMessage::NewClient(None) => bail!("Server was unable to create client"),
+        _ => bail!("Unexpected message {:?}", reply),
     };
 
     send(stream_tx, &ServerMessage::NewPeer).await?;
@@ -216,7 +215,7 @@ pub async fn run_peer(
     let reply: ClientMessage = receive(stream_rx).await?;
     match reply {
         ClientMessage::PeerStart => (),
-        _ => return Err(format!("Unexpected message {:?}", reply).into()),
+        _ => bail!("Unexpected message {:?}", reply),
     };
 
     let ping_start_index = ping_index;
@@ -244,7 +243,7 @@ pub async fn run_peer(
     let reply: ClientMessage = receive(stream_rx).await?;
     match reply {
         ClientMessage::PeerStop => (),
-        _ => return Err(format!("Unexpected message {:?}", reply).into()),
+        _ => bail!("Unexpected message {:?}", reply),
     };
 
     state_tx.send((TestState::End, Instant::now())).ok();

@@ -175,7 +175,7 @@ pub(crate) async fn write_data(
     stream: TcpStream,
     data: &[u8],
     until: Instant,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), anyhow::Error> {
     stream.set_nodelay(false).ok();
     stream.set_linger(Some(Duration::from_secs(0))).ok();
 

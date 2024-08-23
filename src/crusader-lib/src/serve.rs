@@ -1,9 +1,8 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, bail, Context};
 use futures::{pin_mut, select, FutureExt};
 use parking_lot::Mutex;
 use socket2::{Domain, Protocol, Socket};
 use std::collections::HashMap;
-use std::error::Error;
 use std::io::ErrorKind;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -74,12 +73,15 @@ impl Client {
         state: &State,
         groups: Vec<u32>,
         delay: u64,
-    ) -> Result<ServerMessage, Box<dyn Error>> {
+    ) -> Result<ServerMessage, anyhow::Error> {
         let time = Instant::now() + Duration::from_micros(delay);
         {
             let loads = self.loads.lock();
             for group in &groups {
-                loads.get(group).ok_or("Unknown group")?.send(Some(time))?;
+                loads
+                    .get(group)
+                    .ok_or(anyhow!("Unknown group"))?
+                    .send(Some(time))?;
             }
         }
 
@@ -118,7 +120,7 @@ impl<F: Fn()> Drop for OnDrop<F> {
     }
 }
 
-async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Error>> {
+async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), anyhow::Error> {
     stream.set_nodelay(true)?;
 
     let addr = stream.peer_addr()?;
@@ -178,7 +180,9 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             ClientMessage::NewClient => {
                 (state.msg)(&format!("Serving {}, version {}", addr, hello.version));
 
-                let pong = start_pong_server(&state, local_ip).await?;
+                let pong = start_pong_server(&state, local_ip)
+                    .await
+                    .context("Failed to start pong server")?;
 
                 let client = {
                     let client = {
@@ -247,13 +251,13 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                         .and_then(|client| {
                             (client.ip == ip_to_ipv6_mapped(addr.ip())).then_some(client)
                         })
-                        .ok_or("Unable to assoicate client")?,
+                        .ok_or(anyhow!("Unable to assoicate client"))?,
                 );
             }
             ClientMessage::GetMeasurements => {
-                let receiver = receiver.as_mut().ok_or("Not the main client")?;
+                let receiver = receiver.as_mut().ok_or(anyhow!("Not the main client"))?;
 
-                let client = client.clone().ok_or("Not the main client")?;
+                let client = client.clone().ok_or(anyhow!("Not the main client"))?;
                 let client_ = client.clone();
 
                 let done = Arc::new(AtomicBool::new(false));
@@ -311,18 +315,18 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                                 .uploads
                                 .lock()
                                 .remove(&stream)
-                                .ok_or("Expected upload stream")?
+                                .ok_or(anyhow!("Expected upload stream"))?
                                 .send(())
-                                .map_err(|_| "Unable to notify reader of writer completion")?;
+                                .map_err(|_| {
+                                    anyhow!("Unable to notify reader of writer completion")
+                                })?;
                         }
                         Err(ClientMessage::ScheduleLoads { groups, delay }) => {
                             let reply = client_.schedule_loads(&state, groups, delay).await?;
                             send(&mut stream_tx, &reply).await?;
                         }
                         Err(msg) => {
-                            return Err(
-                                format!("Unexpected message during measurement {:?}", msg).into()
-                            )
+                            bail!("Unexpected message during measurement {:?}", msg)
                         }
                     }
                 }
@@ -333,7 +337,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 duration,
                 delay,
             } => {
-                let client = client.ok_or("No associated client")?;
+                let client = client.ok_or(anyhow!("No associated client"))?;
 
                 let mut stream_rx = stream_rx.into_inner();
 
@@ -356,7 +360,8 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 let stream = stream_tx.into_inner().reunite(stream_rx).unwrap();
 
                 waiter.changed().await?;
-                let start = waiter.borrow().ok_or("Expected time")? + Duration::from_micros(delay);
+                let start =
+                    waiter.borrow().ok_or(anyhow!("Expected time"))? + Duration::from_micros(delay);
 
                 time::sleep_until(start).await;
 
@@ -382,14 +387,14 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
                 delay,
                 throughput_interval,
             } => {
-                let client = client.ok_or("No associated client")?;
+                let client = client.ok_or(anyhow!("No associated client"))?;
 
                 send(&mut stream_tx, &ServerMessage::WaitingForLoad).await?;
 
                 let reply: ClientMessage = receive(&mut stream_rx).await.unwrap();
                 match reply {
                     ClientMessage::SendByte => (),
-                    _ => return Err(format!("Unexpected message {:?}", reply).into()),
+                    _ => bail!("Unexpected message {:?}", reply),
                 };
 
                 let mut stream = stream_rx
@@ -409,7 +414,8 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 let mut waiter = client.load_waiter(test_stream.group);
                 waiter.changed().await?;
-                let start = waiter.borrow().ok_or("Expected time")? + Duration::from_micros(delay);
+                let start =
+                    waiter.borrow().ok_or(anyhow!("Expected time"))? + Duration::from_micros(delay);
 
                 time::sleep_until(start).await;
 
@@ -456,7 +462,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
 
                 done_tx
                     .send(timeout)
-                    .map_err(|_| "Unable to signal reading completion")?;
+                    .map_err(|_| anyhow!("Unable to signal reading completion"))?;
 
                 return Ok(());
             }
@@ -471,7 +477,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), Box<dyn Erro
             | ClientMessage::SendByte
             | ClientMessage::PeerStart
             | ClientMessage::PeerStop) => {
-                return Err(format!("Unexpected message {:?}", msg).into());
+                bail!("Unexpected message {:?}", msg);
             }
         };
     }
@@ -484,7 +490,7 @@ async fn listen(state: Arc<State>, listener: TcpListener) {
                 let state = state.clone();
                 tokio::spawn(async move {
                     client(state.clone(), socket).await.map_err(|error| {
-                        (state.msg)(&format!("Error from client {}: {}", addr, error));
+                        (state.msg)(&format!("Error serving client {}: {:?}", addr, error));
                     })
                 });
             }
@@ -588,7 +594,7 @@ async fn pong(
 
 const SLOTS: usize = 1000;
 
-async fn start_pong_server(state: &Arc<State>, ip: IpAddr) -> Result<Arc<Pong>, Box<dyn Error>> {
+async fn start_pong_server(state: &Arc<State>, ip: IpAddr) -> Result<Arc<Pong>, anyhow::Error> {
     let ip = ip.to_canonical();
 
     if let Some(pong) = state.pong_servers.lock().get(&ip) {

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -160,7 +160,7 @@ where
     let bytes = stream
         .next()
         .await
-        .ok_or(anyhow!("Expected object"))?
-        .context("Failed to receive object")?;
+        .context("Expected protocol message, but stream closed")?
+        .context("Failed to receive protocol message")?;
     Ok(bincode::deserialize(&bytes)?)
 }

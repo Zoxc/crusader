@@ -48,7 +48,7 @@ enum Message {
 
 #[cfg(feature = "client")]
 pub async fn locate(msg: Msg) -> Result<SocketAddr, anyhow::Error> {
-    use std::time::Duration;
+    use std::{net::SocketAddrV6, time::Duration};
 
     use tokio::time::timeout;
 
@@ -61,6 +61,11 @@ pub async fn locate(msg: Msg) -> Result<SocketAddr, anyhow::Error> {
         if data.hello != Hello::new() {
             bail!("Wrong hello");
         }
+        let src = if let SocketAddr::V6(src) = src {
+            src
+        } else {
+            bail!("Wrong IP version");
+        };
         if let Message::Server {
             port,
             protocol_version,
@@ -71,8 +76,7 @@ pub async fn locate(msg: Msg) -> Result<SocketAddr, anyhow::Error> {
             if protocol_version != protocol::VERSION {
                 bail!("Wrong protocol");
             }
-            let mut server = src;
-            server.set_port(port);
+            let server = SocketAddr::V6(SocketAddrV6::new(*src.ip(), port, 0, src.scope_id()));
 
             let at = hostname
                 .map(|hostname| format!("`{hostname}` {server}"))
