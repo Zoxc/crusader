@@ -18,7 +18,7 @@ use tokio::task::{self};
 use tokio::{signal, time, time::Instant};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-use crate::common::{read_data, write_data};
+use crate::common::{fresh_socket_addr, read_data, write_data};
 use crate::peer::run_peer;
 use crate::protocol::{
     self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage, TestStream,
@@ -101,7 +101,7 @@ pub(crate) struct State {
     started: Instant,
     dummy_data: Vec<u8>,
     clients: Mutex<Vec<Option<Arc<Client>>>>,
-    pong_servers: Mutex<HashMap<IpAddr, Arc<Pong>>>,
+    pong_servers: Mutex<HashMap<SocketAddr, Arc<Pong>>>,
     pub(crate) msg: Box<dyn Fn(&str) + Send + Sync>,
 }
 
@@ -124,7 +124,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), anyhow::Erro
     stream.set_nodelay(true)?;
 
     let addr = stream.peer_addr()?;
-    let local_ip = stream.local_addr()?.ip();
+    let local_addr = fresh_socket_addr(stream.local_addr()?, state.port);
 
     let (rx, tx) = stream.into_split();
     let mut stream_rx = FramedRead::new(rx, codec());
@@ -180,7 +180,7 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), anyhow::Erro
             ClientMessage::NewClient => {
                 (state.msg)(&format!("Serving {}, version {}", addr, hello.version));
 
-                let pong = start_pong_server(&state, local_ip)
+                let pong = start_pong_server(&state, local_addr)
                     .await
                     .context("Failed to start pong server")?;
 
@@ -545,11 +545,11 @@ async fn handle_ping(
 
 async fn pong(
     socket: UdpSocket,
-    ip: IpAddr,
+    addr: SocketAddr,
     state: Arc<State>,
     mut rx: UnboundedReceiver<SlotUpdate>,
 ) {
-    (state.msg)(&format!("Starting UDP server ({})", ip));
+    (state.msg)(&format!("Starting UDP server ({})", addr));
 
     let mut slots: Vec<_> = (0..SLOTS).map(|_| None).collect();
     let mut buf = [0; 128];
@@ -569,8 +569,8 @@ async fn pong(
                             Some((len, src))
                         }
                         Err(error) => {
-                            (state.msg)(&format!("Unable to read from UDP socket ({}): {}", ip, error));
-                            state.pong_servers.lock().remove(&ip);
+                            (state.msg)(&format!("Unable to read from UDP socket ({}): {}", addr, error));
+                            state.pong_servers.lock().remove(&addr);
                             return
                         }
                     }
@@ -594,25 +594,28 @@ async fn pong(
 
 const SLOTS: usize = 1000;
 
-async fn start_pong_server(state: &Arc<State>, ip: IpAddr) -> Result<Arc<Pong>, anyhow::Error> {
-    let ip = ip.to_canonical();
-
-    if let Some(pong) = state.pong_servers.lock().get(&ip) {
+async fn start_pong_server(
+    state: &Arc<State>,
+    addr: SocketAddr,
+) -> Result<Arc<Pong>, anyhow::Error> {
+    if let Some(pong) = state.pong_servers.lock().get(&addr) {
         return Ok(pong.clone());
     }
 
-    let socket = UdpSocket::bind(SocketAddr::new(ip, state.port)).await?;
+    let socket = UdpSocket::bind(addr).await?;
 
-    Ok(
-        (*state.pong_servers.lock().entry(ip).or_insert_with(move || {
+    Ok((*state
+        .pong_servers
+        .lock()
+        .entry(addr)
+        .or_insert_with(move || {
             let (tx, rx) = unbounded_channel();
 
-            tokio::spawn(pong(socket, ip, state.clone(), rx));
+            tokio::spawn(pong(socket, addr, state.clone(), rx));
 
             Arc::new(Pong { updates: tx })
         }))
-        .clone(),
-    )
+    .clone())
 }
 
 async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<(), anyhow::Error> {

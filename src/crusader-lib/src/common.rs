@@ -10,7 +10,7 @@ use rand::{rngs::StdRng, SeedableRng};
 use std::{
     error::Error,
     io::Cursor,
-    net::SocketAddr,
+    net::{SocketAddr, SocketAddrV4, SocketAddrV6},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
@@ -64,6 +64,18 @@ pub struct Config {
     pub stream_stagger: Duration,
     pub ping_interval: Duration,
     pub throughput_interval: Duration,
+}
+
+pub fn fresh_socket_addr(socket: SocketAddr, port: u16) -> SocketAddr {
+    match socket {
+        SocketAddr::V4(socket) => SocketAddr::V4(SocketAddrV4::new(*socket.ip(), port)),
+        SocketAddr::V6(socket) => {
+            if let Some(ip) = socket.ip().to_ipv4_mapped() {
+                return SocketAddr::V4(SocketAddrV4::new(ip, port));
+            }
+            SocketAddr::V6(SocketAddrV6::new(*socket.ip(), port, 0, socket.scope_id()))
+        }
+    }
 }
 
 pub(crate) fn data() -> Vec<u8> {
