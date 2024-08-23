@@ -9,6 +9,9 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
+* Added support for local discovery of servers using UDP port 35483
+* Improved error messages
+
 ## 0.1 - 2024-08-21
 
 * Added `crusader remote` command to start a web server listening on port 35482.
