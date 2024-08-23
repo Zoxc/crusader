@@ -118,7 +118,7 @@ pub struct ClientSettings {
 impl Default for ClientSettings {
     fn default() -> Self {
         Self {
-            server: "localhost".to_owned(),
+            server: String::new(),
             download: true,
             upload: true,
             both: true,
@@ -425,7 +425,8 @@ impl Tester {
 
         let abort = test::test_callback(
             self.config(),
-            &self.settings.client.server,
+            (!self.settings.client.server.trim().is_empty())
+                .then_some(&self.settings.client.server),
             (!self.settings.client.latency_peer_server.trim().is_empty()
                 && self.settings.client.latency_peer)
                 .then_some(&self.settings.client.latency_peer_server),
@@ -483,7 +484,10 @@ impl Tester {
         ui.horizontal_wrapped(|ui| {
             ui.add_enabled_ui(active, |ui| {
                 ui.label("Server address:");
-                let response = ui.add(TextEdit::singleline(&mut self.settings.client.server));
+                let response = ui.add(
+                    TextEdit::singleline(&mut self.settings.client.server)
+                        .hint_text("(Locate local server)"),
+                );
                 if self.client_state == ClientState::Stopped
                     && response.lost_focus()
                     && ui.input(|i| i.key_pressed(egui::Key::Enter))

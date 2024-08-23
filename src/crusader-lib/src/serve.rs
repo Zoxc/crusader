@@ -24,7 +24,7 @@ use crate::peer::run_peer;
 use crate::protocol::{
     self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage, TestStream,
 };
-use crate::{version, with_time};
+use crate::{discovery, version, with_time};
 
 use std::thread;
 
@@ -563,7 +563,7 @@ async fn pong(
                             Some((len, src))
                         }
                         Err(error) => {
-                            (state.msg)(&format!("Unable to read from UDP socket ({}): {:?}", ip, error));
+                            (state.msg)(&format!("Unable to read from UDP socket ({}): {}", ip, error));
                             state.pong_servers.lock().remove(&ip);
                             return
                         }
@@ -640,6 +640,10 @@ async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<
 
     task::spawn(listen(state.clone(), v6));
     task::spawn(listen(state.clone(), v4));
+
+    if let Err(error) = discovery::serve(state.clone(), port) {
+        (state.msg)(&format!("Failed to run discovery: {:?}", error));
+    }
 
     (state.msg)(&format!("Server version {} running...", version()));
 

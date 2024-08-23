@@ -85,7 +85,7 @@
         <div class="flex">
             <div class="box">
                 <h1>Crusader Remote Client</h1>
-                <p>Server: <input type="text" v-model="config.server"></p>
+                <p>Server: <input type="text" v-model="config.server" placeholder="(Locate local server)"></p>
                 <hr>
                 <p>
                 <table>
@@ -190,6 +190,9 @@
                     request.latency_peer = request.latency_peer.value;
                 } else {
                     request.latency_peer = null;
+                }
+                if (!request.server) {
+                    request.server = null;
                 }
 
                 let binary_index = 0;

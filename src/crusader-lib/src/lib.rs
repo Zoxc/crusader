@@ -26,6 +26,7 @@ pub fn with_time(msg: &str) -> String {
 }
 
 mod common;
+mod discovery;
 #[cfg(feature = "client")]
 pub use common::Config;
 #[cfg(feature = "client")]

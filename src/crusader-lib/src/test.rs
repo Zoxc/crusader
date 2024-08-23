@@ -10,7 +10,7 @@ use crate::plot::save_graph;
 use crate::protocol::{
     codec, receive, send, ClientMessage, Hello, RawLatency, ServerMessage, TestStream,
 };
-use crate::{version, with_time};
+use crate::{discovery, version, with_time};
 use anyhow::{anyhow, bail, Context};
 use bytes::{Bytes, BytesMut};
 use futures::future::FutureExt;
@@ -85,15 +85,22 @@ pub struct PlotConfig {
 
 pub(crate) async fn test_async(
     config: Config,
-    server: &str,
+    server: Option<&str>,
     latency_peer_server: Option<&str>,
     msg: Msg,
 ) -> Result<RawResult, anyhow::Error> {
     msg(&format!("Client version {} running", version()));
 
-    let control = net::TcpStream::connect((server, config.port))
-        .await
-        .context("Failed to connect to server")?;
+    let control = if let Some(server) = server {
+        net::TcpStream::connect((server, config.port))
+            .await
+            .context("Failed to connect to server")?
+    } else {
+        net::TcpStream::connect(discovery::locate(msg.clone()).await?)
+            .await
+            .context("Failed to connect to server")?
+    };
+
     control.set_nodelay(true)?;
 
     let server = control.peer_addr()?;
@@ -879,7 +886,7 @@ pub(crate) fn unique(name: &str, ext: &str) -> String {
 pub fn test(
     config: Config,
     plot: PlotConfig,
-    host: &str,
+    host: Option<&str>,
     latency_peer_server: Option<&str>,
 ) -> Result<(), anyhow::Error> {
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -913,20 +920,20 @@ pub fn test(
 
 pub fn test_callback(
     config: Config,
-    host: &str,
+    host: Option<&str>,
     latency_peer_server: Option<&str>,
     msg: Arc<dyn Fn(&str) + Send + Sync>,
     done: Box<dyn FnOnce(Option<Result<RawResult, String>>) + Send>,
 ) -> oneshot::Sender<()> {
     let (tx, rx) = oneshot::channel();
-    let host = host.to_string();
+    let host = host.map(|host| host.to_string());
     let latency_peer_server = latency_peer_server.map(|host| host.to_string());
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
 
         done(rt.block_on(async move {
             let mut result = task::spawn(async move {
-                test_async(config, &host, latency_peer_server.as_deref(), msg)
+                test_async(config, host.as_deref(), latency_peer_server.as_deref(), msg)
                     .await
                     .map_err(|error| format!("{:?}", error))
             })

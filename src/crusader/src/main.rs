@@ -9,9 +9,9 @@ use crusader_lib::{protocol, version};
 use crusader_lib::{with_time, Config};
 #[cfg(feature = "client")]
 use std::path::PathBuf;
+use std::process;
 #[cfg(feature = "client")]
-use std::time::Duration;
-use std::{path::Path, process};
+use {std::path::Path, std::time::Duration};
 
 #[derive(Parser)]
 #[command(version = version())]
@@ -72,7 +72,7 @@ enum Commands {
     )]
     #[cfg(feature = "client")]
     Test {
-        server: String,
+        server: Option<String>,
         #[arg(long, help = "Run a download test")]
         download: bool,
         #[arg(long, help = "Run an upload test")]
@@ -188,7 +188,12 @@ fn run() -> Result<(), anyhow::Error> {
                 config.both = both;
             }
 
-            crusader_lib::test::test(config, plot.config(), server, latency_peer.as_deref())
+            crusader_lib::test::test(
+                config,
+                plot.config(),
+                server.as_deref(),
+                latency_peer.as_deref(),
+            )
         }
         Commands::Serve { port } => crusader_lib::serve::serve(*port),
 

@@ -48,7 +48,7 @@ async fn ws_client(
 
 #[derive(Deserialize, Debug)]
 struct TestArgs {
-    server: String,
+    server: Option<String>,
     download: bool,
     upload: bool,
     both: bool,
@@ -100,7 +100,7 @@ async fn handle_client(
         });
         let result = test_async(
             config,
-            &args.server,
+            args.server.as_deref(),
             args.latency_peer.as_deref(),
             msg.clone(),
         )
