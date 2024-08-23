@@ -129,9 +129,7 @@
             </div>
             <div v-if="plot" class="box">
                 <div style="display: flex; margin-bottom: 10px;">
-                    <h1 style="margin-top: auto; margin-bottom: auto;">Result {{ time.replaceAll("-",
-                        ":").replaceAll(".",
-                        "-") }}</h1>
+                    <h1 style="margin-top: auto; margin-bottom: auto;">Result {{ time.replaceAll(".", ":") }}</h1>
                     <span style="flex-grow: 1;"></span>
                     <a :href="plot" :download="`plot ${time}.png`">⬇ Download plot</a></p>
                     <a v-if="raw_result" :href="raw_result" :download="`data ${time}.crr`">⬇ Download raw
