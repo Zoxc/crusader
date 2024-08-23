@@ -122,6 +122,9 @@ pub async fn locate(msg: Msg) -> Result<SocketAddr, anyhow::Error> {
 }
 
 pub fn serve(state: Arc<State>, port: u16) -> Result<(), anyhow::Error> {
+    fn is_unicast_link_local(ip: Ipv6Addr) -> bool {
+        (ip.segments()[0] & 0xffc0) == 0xfe80
+    }
     async fn handle_packet(
         port: u16,
         hostname: &Option<String>,
@@ -129,6 +132,10 @@ pub fn serve(state: Arc<State>, port: u16) -> Result<(), anyhow::Error> {
         socket: &UdpSocket,
         src: SocketAddr,
     ) -> Result<(), anyhow::Error> {
+        match src {
+            SocketAddr::V6(src) if is_unicast_link_local(*src.ip()) => (),
+            _ => bail!("Unexpected source"),
+        }
         let data: Data = bincode::deserialize(packet)?;
         if data.hello != Hello::new() {
             bail!("Wrong hello");
