@@ -13,6 +13,10 @@ This file lists the changes that have occurred since January 2024 in the project
 * Improved error messages
 * Fix date/time display in remote web page
 * Rename the `Latency` tab to `Monitor`
+* Change default streams from 16 to 8.
+* Change default throughput sample interval from 20 ms to 60 ms.
+* Change default load duration from 5 s to 10 s.
+* Change default grace duration from 5 s to 10 s.
 
 ## 0.1 - 2024-08-21
 

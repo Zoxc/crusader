@@ -88,7 +88,7 @@ enum Commands {
         port: u16,
         #[arg(
             long,
-            default_value_t = 16,
+            default_value_t = 8,
             help = "The number of TCP connections used to generate traffic in a single direction"
         )]
         streams: u64,
@@ -101,21 +101,21 @@ enum Commands {
         stream_stagger: f64,
         #[arg(
             long,
-            default_value_t = 5.0,
+            default_value_t = 10.0,
             value_name = "SECONDS",
             help = "The duration in which traffic is generated"
         )]
         load_duration: f64,
         #[arg(
             long,
-            default_value_t = 1.0,
+            default_value_t = 2.0,
             value_name = "SECONDS",
             help = "The idle time between each test"
         )]
         grace_duration: f64,
         #[arg(long, default_value_t = 5, value_name = "MILLISECONDS")]
         latency_sample_interval: u64,
-        #[arg(long, default_value_t = 20, value_name = "MILLISECONDS")]
+        #[arg(long, default_value_t = 60, value_name = "MILLISECONDS")]
         throughput_sample_interval: u64,
         #[command(flatten)]
         plot: PlotArgs,
