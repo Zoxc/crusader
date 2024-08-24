@@ -27,4 +27,4 @@ emath = { git = "https://github.com/Zoxc/egui", branch = "crusader2" }
 
 [lib]
 name = "main"
-crate_type = ["cdylib"]
+crate-type = ["cdylib"]

@@ -2,6 +2,8 @@ use crate::{protocol, serve::State};
 #[cfg(feature = "client")]
 use anyhow::anyhow;
 use anyhow::bail;
+#[cfg(target_family = "unix")]
+use nix::net::if_::InterfaceFlags;
 use serde::{Deserialize, Serialize};
 use socket2::{Domain, Protocol, Socket};
 use std::{
@@ -52,10 +54,36 @@ pub struct Server {
     pub software_version: String,
 }
 
+fn interfaces() -> Vec<u32> {
+    let mut _result = vec![0];
+
+    #[cfg(target_family = "unix")]
+    {
+        if let Ok(interfaces) = nix::ifaddrs::getifaddrs() {
+            for interface in interfaces {
+                if interface.flags.contains(InterfaceFlags::IFF_LOOPBACK) {
+                    continue;
+                }
+                if !interface.flags.contains(InterfaceFlags::IFF_MULTICAST) {
+                    continue;
+                }
+                if let Some(addr) = interface.address.as_ref().and_then(|i| i.as_sockaddr_in6()) {
+                    if !is_unicast_link_local(addr.ip()) {
+                        continue;
+                    }
+                    _result.push(addr.scope_id());
+                }
+            }
+        }
+    }
+
+    _result
+}
+
 #[cfg(feature = "client")]
 pub async fn locate() -> Result<Server, anyhow::Error> {
     use crate::common::fresh_socket_addr;
-    use std::time::Duration;
+    use std::{net::SocketAddrV6, time::Duration};
     use tokio::time::timeout;
 
     fn handle_packet(packet: &[u8], src: SocketAddr) -> Result<Server, anyhow::Error> {
@@ -105,7 +133,21 @@ pub async fn locate() -> Result<Server, anyhow::Error> {
 
     let buf = bincode::serialize(&data)?;
 
-    socket.send_to(&buf, ("ff02::1", DISCOVER_PORT)).await?;
+    let ip = Ipv6Addr::from_str("ff02::1").unwrap();
+
+    let mut any = false;
+    for interface in interfaces() {
+        if socket
+            .send_to(&buf, SocketAddrV6::new(ip, DISCOVER_PORT, 0, interface))
+            .await
+            .is_ok()
+        {
+            any = true;
+        }
+    }
+    if !any {
+        bail!("Failed to send any discovery multicast packets");
+    }
 
     let find = async {
         let mut buf = [0; 1500];
@@ -122,11 +164,10 @@ pub async fn locate() -> Result<Server, anyhow::Error> {
         .await
         .map_err(|_| anyhow!("Failed to locate local server"))
 }
-
+fn is_unicast_link_local(ip: Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xffc0) == 0xfe80
+}
 pub fn serve(state: Arc<State>, port: u16) -> Result<(), anyhow::Error> {
-    fn is_unicast_link_local(ip: Ipv6Addr) -> bool {
-        (ip.segments()[0] & 0xffc0) == 0xfe80
-    }
     async fn handle_packet(
         port: u16,
         hostname: &Option<String>,
@@ -171,7 +212,17 @@ pub fn serve(state: Arc<State>, port: u16) -> Result<(), anyhow::Error> {
     socket.set_nonblocking(true)?;
     let socket = UdpSocket::from_std(socket)?;
 
-    socket.join_multicast_v6(&Ipv6Addr::from_str("ff02::1")?, 0)?;
+    let ip = Ipv6Addr::from_str("ff02::1").unwrap();
+
+    let mut any = false;
+    for interface in interfaces() {
+        if socket.join_multicast_v6(&ip, interface).is_ok() {
+            any = true;
+        }
+    }
+    if !any {
+        bail!("Failed to join any multicast groups");
+    }
 
     tokio::spawn(async move {
         let mut buf = [0; 1500];
