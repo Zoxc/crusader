@@ -17,6 +17,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Change default throughput sample interval from 20 ms to 60 ms.
 * Change default load duration from 5 s to 10 s.
 * Change default grace duration from 5 s to 10 s.
+* Fix serving from link-local interfaces on Linux
 
 ## 0.1 - 2024-08-21
 
