@@ -1,4 +1,4 @@
-use crate::{protocol, serve::State};
+use crate::{protocol, serve::State, version};
 #[cfg(feature = "client")]
 use anyhow::anyhow;
 use anyhow::bail;
@@ -189,7 +189,7 @@ pub fn serve(state: Arc<State>, port: u16) -> Result<(), anyhow::Error> {
                 message: Message::Server {
                     port,
                     protocol_version: protocol::VERSION,
-                    software_version: crate::VERSION.to_owned(),
+                    software_version: version(),
                     hostname: hostname.clone(),
                 },
             };
