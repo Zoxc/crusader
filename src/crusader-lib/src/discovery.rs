@@ -1,4 +1,6 @@
 use crate::{protocol, serve::State};
+#[cfg(feature = "client")]
+use anyhow::anyhow;
 use anyhow::bail;
 use serde::{Deserialize, Serialize};
 use socket2::{Domain, Protocol, Socket};
@@ -8,8 +10,6 @@ use std::{
     sync::Arc,
 };
 use tokio::net::UdpSocket;
-#[cfg(feature = "client")]
-use {crate::common::Msg, anyhow::anyhow};
 
 pub const DISCOVER_PORT: u16 = protocol::PORT + 2;
 pub const DISCOVER_VERSION: u64 = 0;
@@ -46,17 +46,19 @@ enum Message {
     },
 }
 
+pub struct Server {
+    pub at: String,
+    pub socket: SocketAddr,
+    pub software_version: String,
+}
+
 #[cfg(feature = "client")]
-pub async fn locate(msg: Msg) -> Result<SocketAddr, anyhow::Error> {
+pub async fn locate() -> Result<Server, anyhow::Error> {
     use crate::common::fresh_socket_addr;
     use std::time::Duration;
     use tokio::time::timeout;
 
-    fn handle_packet(
-        msg: &Msg,
-        packet: &[u8],
-        src: SocketAddr,
-    ) -> Result<SocketAddr, anyhow::Error> {
+    fn handle_packet(packet: &[u8], src: SocketAddr) -> Result<Server, anyhow::Error> {
         let data: Data = bincode::deserialize(packet)?;
         if data.hello != Hello::new() {
             bail!("Wrong hello");
@@ -71,17 +73,17 @@ pub async fn locate(msg: Msg) -> Result<SocketAddr, anyhow::Error> {
             if protocol_version != protocol::VERSION {
                 bail!("Wrong protocol");
             }
-            let server = fresh_socket_addr(src, port);
+            let socket = fresh_socket_addr(src, port);
 
             let at = hostname
-                .map(|hostname| format!("`{hostname}` {server}"))
-                .unwrap_or(server.to_string());
+                .map(|hostname| format!("`{hostname}` {socket}"))
+                .unwrap_or(socket.to_string());
 
-            msg(&format!(
-                "Found server at {at} running version {software_version}"
-            ));
-
-            Ok(server)
+            Ok(Server {
+                at,
+                socket,
+                software_version,
+            })
         } else {
             bail!("Wrong message")
         }
@@ -109,7 +111,7 @@ pub async fn locate(msg: Msg) -> Result<SocketAddr, anyhow::Error> {
         let mut buf = [0; 1500];
         loop {
             if let Ok((len, src)) = socket.recv_from(&mut buf).await {
-                if let Ok(server) = handle_packet(&msg, &buf[..len], src) {
+                if let Ok(server) = handle_packet(&buf[..len], src) {
                     return server;
                 }
             }

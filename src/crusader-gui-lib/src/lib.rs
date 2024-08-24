@@ -91,7 +91,7 @@ pub struct LatencyMonitorSettings {
 impl Default for LatencyMonitorSettings {
     fn default() -> Self {
         Self {
-            server: "localhost".to_owned(),
+            server: "".to_owned(),
             history: 60.0,
             latency_sample_interval: 5,
         }
@@ -1285,7 +1285,8 @@ impl Tester {
                     self.settings.latency_monitor.latency_sample_interval,
                 ),
             },
-            &self.settings.latency_monitor.server,
+            (!self.settings.latency_monitor.server.trim().is_empty())
+                .then_some(&self.settings.latency_monitor.server),
             data.clone(),
             Box::new(move |result| {
                 signal_done.send(result).map_err(|_| ()).unwrap();
@@ -1309,9 +1310,10 @@ impl Tester {
         if self.latency_state == ClientState::Stopped {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Server address:");
-                ui.add(TextEdit::singleline(
-                    &mut self.settings.latency_monitor.server,
-                ));
+                ui.add(
+                    TextEdit::singleline(&mut self.settings.latency_monitor.server)
+                        .hint_text("(Locate local server)"),
+                );
 
                 match self.latency_state {
                     ClientState::Running | ClientState::Stopping => {}
@@ -1364,12 +1366,10 @@ impl Tester {
                     ClientState::Stopped => {}
                 }
 
-                let state = *self.latency_data.state.lock();
-
-                let state = match state {
-                    latency::State::Connecting => "Connecting..",
-                    latency::State::Monitoring => "",
-                    latency::State::Syncing => "Synchronizing clocks..",
+                let state = match *self.latency_data.state.lock() {
+                    latency::State::Connecting => "Connecting..".to_owned(),
+                    latency::State::Monitoring { ref at } => format!("Connected to {at}"),
+                    latency::State::Syncing => "Synchronizing clocks..".to_owned(),
                 };
                 ui.label(state);
 

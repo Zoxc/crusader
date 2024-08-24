@@ -22,6 +22,7 @@ use tokio::{
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::common::{hello, measure_latency, udp_handle};
+use crate::discovery;
 use crate::protocol::{codec, receive, send, ClientMessage, Ping, ServerMessage};
 
 type UpdateFn = Arc<dyn Fn() + Send + Sync>;
@@ -56,11 +57,11 @@ pub struct Point {
     pub up: Option<Duration>,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum State {
     Connecting,
     Syncing,
-    Monitoring,
+    Monitoring { at: String },
 }
 
 pub struct Data {
@@ -85,11 +86,27 @@ impl Data {
 
 async fn test_async(
     config: Config,
-    server: &str,
+    server: Option<&str>,
     data: Arc<Data>,
     stop: oneshot::Receiver<()>,
 ) -> Result<(), anyhow::Error> {
-    let control = net::TcpStream::connect((server, config.port)).await?;
+    let (control, at) = if let Some(server) = server {
+        (
+            net::TcpStream::connect((server, config.port))
+                .await
+                .context("Failed to connect to server")?,
+            server.to_owned(),
+        )
+    } else {
+        let server = discovery::locate().await?;
+        (
+            net::TcpStream::connect(server.socket)
+                .await
+                .context("Failed to connect to server")?,
+            server.at,
+        )
+    };
+
     control.set_nodelay(true)?;
 
     let server = control.peer_addr()?;
@@ -182,7 +199,7 @@ async fn test_async(
 
     time::sleep(Duration::from_millis(50)).await;
 
-    *data.state.lock() = State::Monitoring;
+    *data.state.lock() = State::Monitoring { at };
     (data.update_fn)();
 
     let ping_send = tokio::spawn(ping_send(
@@ -340,13 +357,13 @@ async fn ping_recv(
 
 pub fn test_callback(
     config: Config,
-    host: &str,
+    host: Option<&str>,
     data: Arc<Data>,
     done: Box<dyn FnOnce(Option<Result<(), String>>) + Send>,
 ) -> oneshot::Sender<()> {
     let (stop_tx, stop_rx) = oneshot::channel();
     let (force_stop_tx, force_stop_rx) = oneshot::channel();
-    let host = host.to_string();
+    let host = host.map(|host| host.to_string());
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
 
@@ -360,7 +377,7 @@ pub fn test_callback(
             });
 
             let mut result = task::spawn(async move {
-                test_async(config, &host, data, rx)
+                test_async(config, host.as_deref(), data, rx)
                     .await
                     .map_err(|error| format!("{:?}", error))
             })

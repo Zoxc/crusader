@@ -96,7 +96,12 @@ pub(crate) async fn test_async(
             .await
             .context("Failed to connect to server")?
     } else {
-        net::TcpStream::connect(discovery::locate(msg.clone()).await?)
+        let server = discovery::locate().await?;
+        msg(&format!(
+            "Found server at {} running version {}",
+            server.at, server.software_version
+        ));
+        net::TcpStream::connect(server.socket)
             .await
             .context("Failed to connect to server")?
     };
