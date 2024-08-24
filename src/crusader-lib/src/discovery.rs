@@ -1,4 +1,4 @@
-use crate::{protocol, serve::State, version};
+use crate::{common::is_unicast_link_local, protocol, serve::State, version};
 #[cfg(feature = "client")]
 use anyhow::anyhow;
 use anyhow::bail;
@@ -39,8 +39,11 @@ struct Data {
 
 #[derive(Serialize, Deserialize, Debug)]
 enum Message {
-    Discover,
+    Discover {
+        peer: bool,
+    },
     Server {
+        peer: bool,
         port: u16,
         protocol_version: u64,
         software_version: String,
@@ -48,6 +51,7 @@ enum Message {
     },
 }
 
+#[cfg(feature = "client")]
 pub struct Server {
     pub at: String,
     pub socket: SocketAddr,
@@ -81,23 +85,31 @@ fn interfaces() -> Vec<u32> {
 }
 
 #[cfg(feature = "client")]
-pub async fn locate() -> Result<Server, anyhow::Error> {
+pub async fn locate(peer_server: bool) -> Result<Server, anyhow::Error> {
     use crate::common::fresh_socket_addr;
     use std::{net::SocketAddrV6, time::Duration};
     use tokio::time::timeout;
 
-    fn handle_packet(packet: &[u8], src: SocketAddr) -> Result<Server, anyhow::Error> {
+    fn handle_packet(
+        peer_server: bool,
+        packet: &[u8],
+        src: SocketAddr,
+    ) -> Result<Server, anyhow::Error> {
         let data: Data = bincode::deserialize(packet)?;
         if data.hello != Hello::new() {
             bail!("Wrong hello");
         }
         if let Message::Server {
+            peer,
             port,
             protocol_version,
             software_version,
             hostname,
         } = data.message
         {
+            if peer != peer_server {
+                bail!("Wrong server kind");
+            }
             if protocol_version != protocol::VERSION {
                 bail!("Wrong protocol");
             }
@@ -128,7 +140,7 @@ pub async fn locate() -> Result<Server, anyhow::Error> {
 
     let data = Data {
         hello: Hello::new(),
-        message: Message::Discover,
+        message: Message::Discover { peer: peer_server },
     };
 
     let buf = bincode::serialize(&data)?;
@@ -153,23 +165,26 @@ pub async fn locate() -> Result<Server, anyhow::Error> {
         let mut buf = [0; 1500];
         loop {
             if let Ok((len, src)) = socket.recv_from(&mut buf).await {
-                if let Ok(server) = handle_packet(&buf[..len], src) {
+                if let Ok(server) = handle_packet(peer_server, &buf[..len], src) {
                     return server;
                 }
             }
         }
     };
 
-    timeout(Duration::from_secs(1), find)
-        .await
-        .map_err(|_| anyhow!("Failed to locate local server"))
+    timeout(Duration::from_secs(1), find).await.map_err(|_| {
+        if peer_server {
+            anyhow!("Failed to locate local peer")
+        } else {
+            anyhow!("Failed to locate local server")
+        }
+    })
 }
-fn is_unicast_link_local(ip: Ipv6Addr) -> bool {
-    (ip.segments()[0] & 0xffc0) == 0xfe80
-}
-pub fn serve(state: Arc<State>, port: u16) -> Result<(), anyhow::Error> {
+
+pub fn serve(state: Arc<State>, port: u16, peer_server: bool) -> Result<(), anyhow::Error> {
     async fn handle_packet(
         port: u16,
+        peer_server: bool,
         hostname: &Option<String>,
         packet: &[u8],
         socket: &UdpSocket,
@@ -183,10 +198,14 @@ pub fn serve(state: Arc<State>, port: u16) -> Result<(), anyhow::Error> {
         if data.hello != Hello::new() {
             bail!("Wrong hello");
         }
-        if let Message::Discover = data.message {
+        if let Message::Discover { peer } = data.message {
+            if peer != peer_server {
+                return Ok(());
+            }
             let data = Data {
                 hello: Hello::new(),
                 message: Message::Server {
+                    peer,
                     port,
                     protocol_version: protocol::VERSION,
                     software_version: version(),
@@ -228,7 +247,7 @@ pub fn serve(state: Arc<State>, port: u16) -> Result<(), anyhow::Error> {
         let mut buf = [0; 1500];
         loop {
             if let Ok((len, src)) = socket.recv_from(&mut buf).await {
-                handle_packet(port, &hostname, &buf[..len], &socket, src)
+                handle_packet(port, peer_server, &hostname, &buf[..len], &socket, src)
                     .await
                     .map_err(|error| {
                         (state.msg)(&format!("Unable to handle discovery packet: {:?}", error));

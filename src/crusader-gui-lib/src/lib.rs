@@ -427,9 +427,10 @@ impl Tester {
             self.config(),
             (!self.settings.client.server.trim().is_empty())
                 .then_some(&self.settings.client.server),
-            (!self.settings.client.latency_peer_server.trim().is_empty()
-                && self.settings.client.latency_peer)
-                .then_some(&self.settings.client.latency_peer_server),
+            self.settings.client.latency_peer.then_some(
+                (!self.settings.client.latency_peer_server.trim().is_empty())
+                    .then_some(&self.settings.client.latency_peer_server),
+            ),
             Arc::new(move |msg| {
                 tx.send(with_time(msg)).unwrap();
                 ctx.request_repaint();
@@ -656,9 +657,10 @@ impl Tester {
                     ui.horizontal_wrapped(|ui| {
                         ui.checkbox(&mut self.settings.client.latency_peer, "Latency peer:");
                         ui.add_enabled_ui(self.settings.client.latency_peer, |ui| {
-                            ui.add(TextEdit::singleline(
-                                &mut self.settings.client.latency_peer_server,
-                            ));
+                            ui.add(
+                                TextEdit::singleline(&mut self.settings.client.latency_peer_server)
+                                    .hint_text("(Locate local peer)"),
+                            );
                         });
                     });
                 });
@@ -1000,18 +1002,16 @@ impl Tester {
     fn server(&mut self, ctx: &egui::Context, ui: &mut Ui) {
         match self.server_state {
             ServerState::Stopped(ref error) => {
-                let button = ui
-                    .vertical(|ui| {
-                        let button = ui.button("Start server");
-                        if let Some(error) = error {
-                            ui.separator();
-                            ui.label(format!("Unable to start server: {}", error));
-                        }
-                        button
-                    })
+                let (server_button, peer_button) = ui
+                    .horizontal_wrapped(|ui| (ui.button("Start server"), ui.button("Start peer")))
                     .inner;
 
-                if button.clicked() {
+                if let Some(error) = error {
+                    ui.separator();
+                    ui.label(format!("Unable to start server: {}", error));
+                }
+
+                if server_button.clicked() || peer_button.clicked() {
                     let ctx = ctx.clone();
                     let ctx_ = ctx.clone();
                     let ctx__ = ctx.clone();
@@ -1021,6 +1021,7 @@ impl Tester {
 
                     let stop = serve::serve_until(
                         protocol::PORT,
+                        peer_button.clicked(),
                         Box::new(move |msg| {
                             tx.send(with_time(msg)).ok();
                             ctx.request_repaint();

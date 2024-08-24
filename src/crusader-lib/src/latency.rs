@@ -98,7 +98,7 @@ async fn test_async(
             server.to_owned(),
         )
     } else {
-        let server = discovery::locate().await?;
+        let server = discovery::locate(false).await?;
         (
             net::TcpStream::connect(server.socket)
                 .await

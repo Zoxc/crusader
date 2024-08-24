@@ -10,7 +10,7 @@ use rand::{rngs::StdRng, SeedableRng};
 use std::{
     error::Error,
     io::Cursor,
-    net::{SocketAddr, SocketAddrV4, SocketAddrV6},
+    net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
@@ -66,6 +66,10 @@ pub struct Config {
     pub throughput_interval: Duration,
 }
 
+pub fn is_unicast_link_local(ip: Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xffc0) == 0xfe80
+}
+
 pub fn fresh_socket_addr(socket: SocketAddr, port: u16) -> SocketAddr {
     match socket {
         SocketAddr::V4(socket) => SocketAddr::V4(SocketAddrV4::new(*socket.ip(), port)),
@@ -76,6 +80,18 @@ pub fn fresh_socket_addr(socket: SocketAddr, port: u16) -> SocketAddr {
             SocketAddr::V6(SocketAddrV6::new(*socket.ip(), port, 0, socket.scope_id()))
         }
     }
+}
+
+pub fn inherit_local(socket: SocketAddr, ip: IpAddr, port: u16) -> SocketAddr {
+    if let SocketAddr::V6(socket) = socket {
+        if let IpAddr::V6(ip) = ip {
+            if is_unicast_link_local(ip) {
+                return SocketAddr::V6(SocketAddrV6::new(ip, port, 0, socket.scope_id()));
+            }
+        }
+    }
+
+    SocketAddr::new(ip, port)
 }
 
 pub(crate) fn data() -> Vec<u8> {

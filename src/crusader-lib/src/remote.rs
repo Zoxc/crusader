@@ -63,7 +63,8 @@ struct TestArgs {
     grace_duration: f64,
     latency_sample_interval: u64,
     throughput_sample_interval: u64,
-    latency_peer: Option<String>,
+    latency_peer: bool,
+    latency_peer_server: Option<String>,
 }
 
 async fn handle_client(
@@ -101,7 +102,8 @@ async fn handle_client(
         let result = test_async(
             config,
             args.server.as_deref(),
-            args.latency_peer.as_deref(),
+            args.latency_peer
+                .then_some(args.latency_peer_server.as_deref()),
             msg.clone(),
         )
         .await

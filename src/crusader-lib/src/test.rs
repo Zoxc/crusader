@@ -86,7 +86,7 @@ pub struct PlotConfig {
 pub(crate) async fn test_async(
     config: Config,
     server: Option<&str>,
-    latency_peer_server: Option<&str>,
+    latency_peer_server: Option<Option<&str>>,
     msg: Msg,
 ) -> Result<RawResult, anyhow::Error> {
     msg(&format!("Client version {} running", version()));
@@ -96,7 +96,7 @@ pub(crate) async fn test_async(
             .await
             .context("Failed to connect to server")?
     } else {
-        let server = discovery::locate().await?;
+        let server = discovery::locate(false).await?;
         msg(&format!(
             "Found server at {} running version {}",
             server.at, server.software_version
@@ -894,7 +894,7 @@ pub fn test(
     config: Config,
     plot: PlotConfig,
     host: Option<&str>,
-    latency_peer_server: Option<&str>,
+    latency_peer_server: Option<Option<&str>>,
 ) -> Result<(), anyhow::Error> {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let result = rt.block_on(test_async(
@@ -928,21 +928,26 @@ pub fn test(
 pub fn test_callback(
     config: Config,
     host: Option<&str>,
-    latency_peer_server: Option<&str>,
+    latency_peer_server: Option<Option<&str>>,
     msg: Arc<dyn Fn(&str) + Send + Sync>,
     done: Box<dyn FnOnce(Option<Result<RawResult, String>>) + Send>,
 ) -> oneshot::Sender<()> {
     let (tx, rx) = oneshot::channel();
     let host = host.map(|host| host.to_string());
-    let latency_peer_server = latency_peer_server.map(|host| host.to_string());
+    let latency_peer_server = latency_peer_server.map(|host| host.map(|host| host.to_string()));
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
 
         done(rt.block_on(async move {
             let mut result = task::spawn(async move {
-                test_async(config, host.as_deref(), latency_peer_server.as_deref(), msg)
-                    .await
-                    .map_err(|error| format!("{:?}", error))
+                test_async(
+                    config,
+                    host.as_deref(),
+                    latency_peer_server.as_ref().map(|host| host.as_deref()),
+                    msg,
+                )
+                .await
+                .map_err(|error| format!("{:?}", error))
             })
             .fuse();
 

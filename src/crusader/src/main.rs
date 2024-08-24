@@ -65,6 +65,8 @@ enum Commands {
     Serve {
         #[arg(long, default_value_t = protocol::PORT, help = "Specifies the TCP and UDP port used by the server")]
         port: u16,
+        #[arg(long, help = "Allow discovery as a peer")]
+        peer: bool,
     },
     #[command(
         long_about = "Runs a test client against a specified server and saves the result to the current directory. \
@@ -123,7 +125,12 @@ enum Commands {
             long,
             long_help = "Specifies another server (peer) which will also measure the latency to the server independently of the client"
         )]
-        latency_peer: Option<String>,
+        latency_peer_server: Option<String>,
+        #[arg(
+            long,
+            help = "Use another server (peer) which will also measure the latency to the server independently of the client"
+        )]
+        latency_peer: bool,
     },
     #[cfg(feature = "client")]
     #[command(about = "Plots a previous result")]
@@ -163,7 +170,8 @@ fn run() -> Result<(), anyhow::Error> {
             stream_stagger,
             grace_duration,
             load_duration,
-            ref latency_peer,
+            ref latency_peer_server,
+            latency_peer,
         } => {
             let mut config = Config {
                 port,
@@ -192,10 +200,11 @@ fn run() -> Result<(), anyhow::Error> {
                 config,
                 plot.config(),
                 server.as_deref(),
-                latency_peer.as_deref(),
+                (latency_peer || latency_peer_server.is_some())
+                    .then_some(latency_peer_server.as_deref()),
             )
         }
-        Commands::Serve { port } => crusader_lib::serve::serve(*port),
+        &Commands::Serve { port, peer } => crusader_lib::serve::serve(port, peer),
 
         #[cfg(feature = "client")]
         Commands::Remote { port } => crusader_lib::remote::run(*port),

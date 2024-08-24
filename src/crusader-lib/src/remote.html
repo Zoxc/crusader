@@ -117,9 +117,9 @@
                     </tr>
                 </table>
                 <hr>
-                <p><input type="checkbox" v-model="config.latency_peer.enabled" id="latency_peer"><label
-                        for="latency_peer">Latency peer:</label> <input type="text"
-                        :disabled="!config.latency_peer.enabled" v-model="config.latency_peer.value">
+                <p><input type="checkbox" v-model="config.latency_peer" id="latency_peer"><label
+                        for="latency_peer">Latency peer:</label> <input type="text" :disabled="!config.latency_peer"
+                        v-model="config.latency_peer_server" placeholder="(Locate local peer)">
                 </p>
                 <hr>
                 <p><input type="button" value="Run test" :disabled="running" @click="run"></p>
@@ -157,10 +157,8 @@
                 grace_duration: 2,
                 latency_sample_interval: 5,
                 throughput_sample_interval: 60,
-                latency_peer: {
-                    enabled: false,
-                    value: "",
-                }
+                latency_peer: false,
+                latency_peer_server: "",
             });
             let log = ref([]);
             let plot = ref(null);
@@ -184,10 +182,9 @@
                 localStorage.setItem("config", JSON.stringify(config.value));
 
                 let request = structuredClone(toRaw(config.value));
-                if (request.latency_peer.enabled && request.latency_peer.value) {
-                    request.latency_peer = request.latency_peer.value;
-                } else {
-                    request.latency_peer = null;
+
+                if (!request.latency_peer_server) {
+                    request.latency_peer_server = null;
                 }
                 if (!request.server) {
                     request.server = null;

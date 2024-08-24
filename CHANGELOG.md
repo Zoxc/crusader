@@ -9,7 +9,8 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
-* Added support for local discovery of servers using UDP port 35483
+* Added support for local discovery of server and peers using UDP port 35483
+* The `test` command line option `--latency-peer` is renamed to `--latency-peer-server`. A new flag `--latency-peer` will instead search for a local peer.
 * Improved error messages
 * Fix date/time display in remote web page
 * Rename the `Latency` tab to `Monitor`
@@ -18,6 +19,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Change default load duration from 5 s to 10 s.
 * Change default grace duration from 5 s to 10 s.
 * Fix serving from link-local interfaces on Linux
+* Fix peers on link-local interfaces
 * Show download and upload plots for aggregate tests in the GUI
 
 ## 0.1 - 2024-08-21

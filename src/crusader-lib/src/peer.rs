@@ -1,5 +1,7 @@
 #[cfg(feature = "client")]
 use crate::common::{Config, Msg};
+#[cfg(feature = "client")]
+use crate::discovery;
 use crate::protocol::PeerLatency;
 use crate::serve::State;
 use crate::{
@@ -7,6 +9,7 @@ use crate::{
     protocol::{codec, receive, send, ClientMessage, RawLatency, ServerMessage},
 };
 use anyhow::bail;
+use anyhow::Context;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
@@ -71,11 +74,24 @@ impl Peer {
 pub async fn connect_to_peer(
     config: Config,
     server: SocketAddr,
-    latency_peer_server: &str,
+    latency_peer_server: Option<&str>,
     estimated_duration: Duration,
     msg: Msg,
 ) -> Result<Peer, anyhow::Error> {
-    let control = net::TcpStream::connect((latency_peer_server, config.port)).await?;
+    let control = if let Some(server) = latency_peer_server {
+        net::TcpStream::connect((server, config.port))
+            .await
+            .context("Failed to connect to peer")?
+    } else {
+        let server = discovery::locate(true).await?;
+        msg(&format!(
+            "Found peer at {} running version {}",
+            server.at, server.software_version
+        ));
+        net::TcpStream::connect(server.socket)
+            .await
+            .context("Failed to connect to peer")?
+    };
     control.set_nodelay(true)?;
 
     let peer_server = control.peer_addr()?;
@@ -118,14 +134,15 @@ pub async fn connect_to_peer(
 
 pub async fn run_peer(
     state: Arc<State>,
-    server: IpAddr,
-    port: u16,
+    server: SocketAddr,
     ping_interval: Duration,
     estimated_duration: Duration,
     stream_rx: &mut FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     stream_tx: &mut FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
 ) -> Result<(), anyhow::Error> {
-    let control = net::TcpStream::connect((server, port)).await?;
+    let control = net::TcpStream::connect(server)
+        .await
+        .context("Peer failed to connect to server")?;
     control.set_nodelay(true)?;
 
     let server = control.peer_addr()?;

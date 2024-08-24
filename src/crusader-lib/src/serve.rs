@@ -18,7 +18,7 @@ use tokio::task::{self};
 use tokio::{signal, time, time::Instant};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-use crate::common::{fresh_socket_addr, read_data, write_data};
+use crate::common::{fresh_socket_addr, inherit_local, read_data, write_data};
 use crate::peer::run_peer;
 use crate::protocol::{
     self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage, TestStream,
@@ -164,11 +164,11 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), anyhow::Erro
                     "Serving as peer for {}, version {}",
                     addr, hello.version
                 ));
-
+                let ip = Ipv6Addr::from(server).to_canonical();
+                (state.msg)(&format!("Server for peer is {ip}:{port}",));
                 run_peer(
                     state,
-                    Ipv6Addr::from(server).to_canonical(),
-                    port,
+                    inherit_local(local_addr, ip, port),
                     Duration::from_millis(ping_interval),
                     Duration::from_millis(estimated_duration as u64),
                     &mut stream_rx,
@@ -618,7 +618,11 @@ async fn start_pong_server(
     .clone())
 }
 
-async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<(), anyhow::Error> {
+async fn serve_async(
+    port: u16,
+    peer_server: bool,
+    msg: Box<dyn Fn(&str) + Send + Sync>,
+) -> Result<(), anyhow::Error> {
     let state = Arc::new(State {
         port,
         started: Instant::now(),
@@ -650,17 +654,22 @@ async fn serve_async(port: u16, msg: Box<dyn Fn(&str) + Send + Sync>) -> Result<
     task::spawn(listen(state.clone(), v6));
     task::spawn(listen(state.clone(), v4));
 
-    if let Err(error) = discovery::serve(state.clone(), port) {
+    if let Err(error) = discovery::serve(state.clone(), port, peer_server) {
         (state.msg)(&format!("Failed to run discovery: {:?}", error));
     }
 
     (state.msg)(&format!("Server version {} running...", version()));
+
+    if peer_server {
+        (state.msg)("Server is in peer mode");
+    }
 
     Ok(())
 }
 
 pub fn serve_until(
     port: u16,
+    peer_server: bool,
     msg: Box<dyn Fn(&str) + Send + Sync>,
     started: Box<dyn FnOnce(Result<(), String>) + Send>,
     done: Box<dyn FnOnce() + Send>,
@@ -671,7 +680,7 @@ pub fn serve_until(
 
     thread::spawn(move || {
         rt.block_on(async move {
-            match serve_async(port, msg).await {
+            match serve_async(port, peer_server, msg).await {
                 Ok(()) => {
                     started(Ok(()));
                     rx.await.ok();
@@ -686,11 +695,12 @@ pub fn serve_until(
     Ok(tx)
 }
 
-pub fn serve(port: u16) -> Result<(), anyhow::Error> {
+pub fn serve(port: u16, peer_server: bool) -> Result<(), anyhow::Error> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         serve_async(
             port,
+            peer_server,
             Box::new(|msg: &str| {
                 let msg = msg.to_owned();
                 task::spawn_blocking(move || println!("{}", with_time(&msg)));
