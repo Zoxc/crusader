@@ -12,6 +12,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Added support for local discovery of servers using UDP port 35483
 * Improved error messages
 * Fix date/time display in remote web page
+* Rename the `Latency` tab to `Monitor`
 
 ## 0.1 - 2024-08-21
 

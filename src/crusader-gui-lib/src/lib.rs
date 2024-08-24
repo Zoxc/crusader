@@ -76,7 +76,7 @@ enum Tab {
     Client,
     Server,
     Remote,
-    Latency,
+    Monitor,
     Result,
 }
 
@@ -1262,7 +1262,7 @@ impl Tester {
         }
     }
 
-    fn start_latency(&mut self, ctx: &egui::Context) {
+    fn start_monitor(&mut self, ctx: &egui::Context) {
         self.save_settings();
 
         let (signal_done, done) = oneshot::channel();
@@ -1304,22 +1304,23 @@ impl Tester {
         self.latency_plot_reset = true;
     }
 
-    fn latency(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+    fn monitor(&mut self, ctx: &egui::Context, ui: &mut Ui) {
         let active = self.latency_state == ClientState::Stopped;
 
         if self.latency_state == ClientState::Stopped {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Server address:");
-                ui.add(
+                let response = ui.add(
                     TextEdit::singleline(&mut self.settings.latency_monitor.server)
                         .hint_text("(Locate local server)"),
                 );
+                let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
                 match self.latency_state {
                     ClientState::Running | ClientState::Stopping => {}
                     ClientState::Stopped => {
-                        if ui.button("Start test").clicked() {
-                            self.start_latency(ctx)
+                        if ui.button("Start test").clicked() || enter {
+                            self.start_monitor(ctx)
                         }
                     }
                 }
@@ -1543,7 +1544,7 @@ impl Tester {
             ui.selectable_value(&mut self.tab, Tab::Client, "Client");
             ui.selectable_value(&mut self.tab, Tab::Server, "Server");
             ui.selectable_value(&mut self.tab, Tab::Remote, "Remote");
-            ui.selectable_value(&mut self.tab, Tab::Latency, "Latency");
+            ui.selectable_value(&mut self.tab, Tab::Monitor, "Monitor");
             ui.selectable_value(&mut self.tab, Tab::Result, "Result");
         });
         ui.separator();
@@ -1552,7 +1553,7 @@ impl Tester {
             Tab::Client => self.client(ctx, ui, compact),
             Tab::Server => self.server(ctx, ui),
             Tab::Remote => self.remote(ctx, ui),
-            Tab::Latency => self.latency(ctx, ui),
+            Tab::Monitor => self.monitor(ctx, ui),
             Tab::Result => self.result(ctx, ui),
         }
     }
