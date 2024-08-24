@@ -959,7 +959,7 @@ impl Tester {
                     }
 
                     plot.show(ui, |plot_ui| {
-                        if result.result.raw_result.download() {
+                        if result.result.raw_result.download() || result.result.raw_result.both() {
                             let download = result.download.iter().map(|v| [v.0, v.1]);
                             let download = Line::new(PlotPoints::from_iter(download))
                                 .color(Color32::from_rgb(95, 145, 62))
@@ -967,7 +967,7 @@ impl Tester {
 
                             plot_ui.line(download);
                         }
-                        if result.result.raw_result.upload() {
+                        if result.result.raw_result.upload() || result.result.raw_result.both() {
                             let upload = result.upload.iter().map(|v| [v.0, v.1]);
                             let upload = Line::new(PlotPoints::from_iter(upload))
                                 .color(Color32::from_rgb(37, 83, 169))

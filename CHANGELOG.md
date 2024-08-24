@@ -18,6 +18,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Change default load duration from 5 s to 10 s.
 * Change default grace duration from 5 s to 10 s.
 * Fix serving from link-local interfaces on Linux
+* Show download and upload plots for aggregate tests in the GUI
 
 ## 0.1 - 2024-08-21
 
