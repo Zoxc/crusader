@@ -1,6 +1,6 @@
 use crate::common::{
-    data, hello, measure_latency, ping_recv, ping_send, read_data, wait_for_state, write_data,
-    Config, Msg, TestState,
+    data, fresh_socket_addr, hello, measure_latency, ping_recv, ping_send, read_data,
+    wait_for_state, write_data, Config, Msg, TestState,
 };
 use crate::file_format::{
     RawConfig, RawHeader, RawPing, RawPoint, RawResult, RawStream, RawStreamGroup,
@@ -109,6 +109,7 @@ pub(crate) async fn test_async(
     control.set_nodelay(true)?;
 
     let server = control.peer_addr()?;
+    let server = fresh_socket_addr(server, server.port());
 
     msg(&format!("Connected to server {}", server));
 
