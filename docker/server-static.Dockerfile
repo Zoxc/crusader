@@ -27,5 +27,5 @@ RUN cp target/$(cat /target)/$PROFILE/crusader /
 FROM scratch
 COPY --from=build /crusader /
 
-EXPOSE 35481/tcp 35481/udp
+EXPOSE 35481/tcp 35481/udp 35483/udp
 ENTRYPOINT [ "/crusader", "serve" ]
