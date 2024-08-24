@@ -998,13 +998,6 @@ impl Tester {
     }
 
     fn server(&mut self, ctx: &egui::Context, ui: &mut Ui) {
-        ui.label(format!(
-            "A server listens on TCP and UDP port {}. It allows clients \
-            to run tests and measure latency against it. It can also act as a latency peer for tests connecting to another server.",
-            protocol::PORT
-        ));
-        ui.separator();
-
         match self.server_state {
             ServerState::Stopped(ref error) => {
                 let button = ui
@@ -1054,6 +1047,12 @@ impl Tester {
                         self.server_state = ServerState::Starting;
                     }
                 };
+                ui.separator();
+                ui.label(format!(
+                    "A server listens on TCP and UDP port {}. It allows clients \
+                    to run tests and measure latency against it. It can also act as a latency peer for tests connecting to another server.",
+                    protocol::PORT
+                ));
             }
             ServerState::Running => {
                 let server = self.server.as_mut().unwrap();
@@ -1129,13 +1128,6 @@ impl Tester {
     }
 
     fn remote(&mut self, ctx: &egui::Context, ui: &mut Ui) {
-        ui.label(format!(
-            "A remote server runs a web server on TCP port {}. It allows web clients to remotely start \
-            tests against other servers.",
-            protocol::PORT + 1
-        ));
-        ui.separator();
-
         match self.remote_state {
             ServerState::Stopped(ref error) => {
                 let button = ui
@@ -1185,6 +1177,12 @@ impl Tester {
                         self.remote_state = ServerState::Starting;
                     }
                 };
+                ui.separator();
+                ui.label(format!(
+                    "A remote server runs a web server on TCP port {}. It allows web clients to remotely start \
+                    tests against other servers.",
+                    protocol::PORT + 1
+                ));
             }
             ServerState::Running => {
                 let remote_server = self.remote_server.as_mut().unwrap();
