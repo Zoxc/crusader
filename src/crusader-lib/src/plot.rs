@@ -181,14 +181,20 @@ pub(crate) fn save_graph_to_mem(
 ) -> Result<ImageBuffer<Rgb<u8>, Vec<u8>>, anyhow::Error> {
     let mut throughput = Vec::new();
 
-    result.both_bytes.as_ref().map(|both_bytes| {
+    if result.download_bytes.is_some() || result.both_download_bytes.is_some() {
         throughput.push((
-            "Aggregate",
-            RGBColor(149, 96, 153),
-            to_rates(both_bytes),
-            vec![both_bytes.as_slice()],
+            "Download",
+            DOWN_COLOR,
+            to_rates(&result.combined_download_bytes),
+            [
+                result.download_bytes.as_deref(),
+                result.both_download_bytes.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
         ));
-    });
+    }
 
     if result.upload_bytes.is_some() || result.both_upload_bytes.is_some() {
         throughput.push((
@@ -205,20 +211,14 @@ pub(crate) fn save_graph_to_mem(
         ));
     }
 
-    if result.download_bytes.is_some() || result.both_download_bytes.is_some() {
+    result.both_bytes.as_ref().map(|both_bytes| {
         throughput.push((
-            "Download",
-            DOWN_COLOR,
-            to_rates(&result.combined_download_bytes),
-            [
-                result.download_bytes.as_deref(),
-                result.both_download_bytes.as_deref(),
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>(),
+            "Aggregate",
+            RGBColor(149, 96, 153),
+            to_rates(both_bytes),
+            vec![both_bytes.as_slice()],
         ));
-    }
+    });
 
     graph(
         config,
