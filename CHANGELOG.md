@@ -10,7 +10,8 @@ This file lists the changes that have occurred since January 2024 in the project
 ## Unreleased
 
 * Added support for local discovery of server and peers using UDP port 35483
-* The `test` command line option `--latency-peer` is renamed to `--latency-peer-server`. A new flag `--latency-peer` will instead search for a local peer.
+* The `test` command line option `--latency-peer` is renamed to `--latency-peer-server`.
+  A new flag `--latency-peer` will instead search for a local peer.
 * Improved error messages
 * Fix date/time display in remote web page
 * Rename the `Latency` tab to `Monitor`
@@ -25,7 +26,8 @@ This file lists the changes that have occurred since January 2024 in the project
 ## 0.1 - 2024-08-21
 
 * Added `crusader remote` command to start a web server listening on port 35482.
-   It allows starting tests on a separate machine and displays the resulting charts in the web page.
+   It allows starting tests on a separate machine and
+   displays the resulting charts in the web page.
 * Use system fonts in GUI
 * Improved error handling and error messages
 * Added `--idle` option to the client to test without traffic
