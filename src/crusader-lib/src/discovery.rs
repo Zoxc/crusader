@@ -48,6 +48,7 @@ enum Message {
         protocol_version: u64,
         software_version: String,
         hostname: Option<String>,
+        ips: Vec<[u8; 16]>,
     },
 }
 
@@ -105,6 +106,7 @@ pub async fn locate(peer_server: bool) -> Result<Server, anyhow::Error> {
             protocol_version,
             software_version,
             hostname,
+            ips: _,
         } = data.message
         {
             if peer != peer_server {
@@ -210,6 +212,7 @@ pub fn serve(state: Arc<State>, port: u16, peer_server: bool) -> Result<(), anyh
                     protocol_version: protocol::VERSION,
                     software_version: version(),
                     hostname: hostname.clone(),
+                    ips: Vec::new(),
                 },
             };
             let buf = bincode::serialize(&data)?;
