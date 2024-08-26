@@ -301,7 +301,7 @@ async fn ping_send(
         bincode::serialize_into(&mut cursor, &ping).unwrap();
         let buf = &cursor.get_ref()[0..(cursor.position() as usize)];
 
-        udp_handle(socket.send(buf).await.map(|_| ())).context("Unable to UDP ping")?;
+        udp_handle(socket.send(buf).await.map(|_| ())).context("Unable to send UDP ping packet")?;
 
         event_tx
             .send(Event {

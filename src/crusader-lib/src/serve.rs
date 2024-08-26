@@ -537,7 +537,7 @@ async fn handle_ping(
             .send_to(packet, &src)
             .await
             .map_err(|error| {
-                (state.msg)(&format!("Unable to reply to UDP ping: {:?}", error));
+                (state.msg)(&format!("Unable to send UDP pong packet: {:?}", error));
             })
             .ok();
     }
