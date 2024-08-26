@@ -1352,7 +1352,9 @@ impl Tester {
             ui.horizontal_wrapped(|ui| {
                 match self.latency_state {
                     ClientState::Running => {
-                        if ui.button("Stop test").clicked() {
+                        if ui.button("Stop test").clicked()
+                            || ui.input(|i| i.key_pressed(egui::Key::Space))
+                        {
                             let latency = self.latency.as_mut().unwrap();
                             mem::take(&mut latency.abort).unwrap().send(()).unwrap();
                             self.latency_state = ClientState::Stopping;
