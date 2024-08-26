@@ -48,6 +48,7 @@ enum Message {
         protocol_version: u64,
         software_version: String,
         hostname: Option<String>,
+        label: Option<String>,
         ips: Vec<[u8; 16]>,
     },
 }
@@ -107,6 +108,7 @@ pub async fn locate(peer_server: bool) -> Result<Server, anyhow::Error> {
             software_version,
             hostname,
             ips: _,
+            label: _,
         } = data.message
         {
             if peer != peer_server {
@@ -212,6 +214,7 @@ pub fn serve(state: Arc<State>, port: u16, peer_server: bool) -> Result<(), anyh
                     protocol_version: protocol::VERSION,
                     software_version: version(),
                     hostname: hostname.clone(),
+                    label: None,
                     ips: Vec::new(),
                 },
             };
