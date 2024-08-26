@@ -22,14 +22,14 @@ use tokio::{
     net::{
         self,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpStream, UdpSocket,
+        TcpStream, ToSocketAddrs, UdpSocket,
     },
     sync::{
         oneshot,
         watch::{self, error::RecvError},
     },
     task::yield_now,
-    time::{self, Instant},
+    time::{self, timeout, Instant},
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
@@ -64,6 +64,13 @@ pub struct Config {
     pub stream_stagger: Duration,
     pub ping_interval: Duration,
     pub throughput_interval: Duration,
+}
+
+pub async fn connect<A: ToSocketAddrs>(addr: A, name: &str) -> Result<TcpStream, anyhow::Error> {
+    match timeout(Duration::from_secs(8), net::TcpStream::connect(addr)).await {
+        Ok(v) => v.with_context(|| format!("Failed to connect to {name}")),
+        Err(_) => bail!("Timed out trying to connect to {name}. Is the {name} running?"),
+    }
 }
 
 pub fn is_unicast_link_local(ip: Ipv6Addr) -> bool {

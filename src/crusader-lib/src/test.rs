@@ -1,5 +1,5 @@
 use crate::common::{
-    data, fresh_socket_addr, hello, measure_latency, ping_recv, ping_send, read_data,
+    connect, data, fresh_socket_addr, hello, measure_latency, ping_recv, ping_send, read_data,
     wait_for_state, write_data, Config, Msg, TestState,
 };
 use crate::file_format::{
@@ -92,18 +92,14 @@ pub(crate) async fn test_async(
     msg(&format!("Client version {} running", version()));
 
     let control = if let Some(server) = server {
-        net::TcpStream::connect((server, config.port))
-            .await
-            .context("Failed to connect to server")?
+        connect((server, config.port), "server").await?
     } else {
         let server = discovery::locate(false).await?;
         msg(&format!(
             "Found server at {} running version {}",
             server.at, server.software_version
         ));
-        net::TcpStream::connect(server.socket)
-            .await
-            .context("Failed to connect to server")?
+        connect(server.socket, "server").await?
     };
 
     control.set_nodelay(true)?;
@@ -632,7 +628,7 @@ fn setup_loaders(
             tokio::spawn(async move {
                 let stream = TcpStream::connect(server)
                     .await
-                    .context("unable to bind TCP socket")?;
+                    .context("Failed connect to server for throughput connection")?;
                 stream.set_nodelay(true)?;
                 let mut stream = Framed::new(stream, codec());
                 hello_combined(&mut stream).await?;

@@ -21,7 +21,7 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-use crate::common::{hello, measure_latency, udp_handle};
+use crate::common::{connect, hello, measure_latency, udp_handle};
 use crate::discovery;
 use crate::protocol::{codec, receive, send, ClientMessage, Ping, ServerMessage};
 
@@ -92,19 +92,12 @@ async fn test_async(
 ) -> Result<(), anyhow::Error> {
     let (control, at) = if let Some(server) = server {
         (
-            net::TcpStream::connect((server, config.port))
-                .await
-                .context("Failed to connect to server")?,
+            connect((server, config.port), "server").await?,
             server.to_owned(),
         )
     } else {
         let server = discovery::locate(false).await?;
-        (
-            net::TcpStream::connect(server.socket)
-                .await
-                .context("Failed to connect to server")?,
-            server.at,
-        )
+        (connect(server.socket, "server").await?, server.at)
     };
 
     control.set_nodelay(true)?;
