@@ -13,7 +13,7 @@ It also incorporates a continuous latency tester for
 monitoring background responsiveness.
 It produces plots of the traffic rates, latency and packet loss.
 Crusader uses TCP and UDP ports 35481 (only) for its tests.
-The Remote web server option uses TCP port 35482.
+The remote web server option uses TCP port 35482.
 Local server discovery uses UDP port 35483.
 
 **Pre-built binaries** for Windows, Mac, Linux,
@@ -62,8 +62,8 @@ The Crusader GUI has five tabs:
 
 * **Remote tab**
   Starts a webserver (default port 35482).
-  A browser that connects to that port can initiate a test
-  against a remote Crusader server.
+  A browser that connects to that port can initiate
+  a test to a Crusader server.
   
 * **Latency tab**
   Continually tests the latency to the selected
@@ -236,10 +236,10 @@ docker build .. -t crusader -f server-static.Dockerfile
   to permit Crusader to run.
   
 * Crusader requires that TCP and UDP ports 35481 are open for its tests.
-  Check that your firewall is letting those ports through.
   Crusader also uses ports 35482 for the remote webserver
   and port 35483 for discovering other Crusader Servers.
-  
+  Check that your firewall is letting those ports through.
+
 * The [Releases](https://github.com/Zoxc/crusader/releases) page
   has pre-built binaries.
   You can build your own using the instructions above.
@@ -250,7 +250,7 @@ docker build .. -t crusader -f server-static.Dockerfile
 
 * Current binaries display the full commit hash in the log files.
   To get the git commit hash of the current checkout,
-  use `git rev-parse --short master`.
+  use `git rev-parse HEAD`.
   
 * "I sometimes see this message. Should I be concerned?"
 `Warning: Load termination timed out. There may be residual untracked traffic in the background.`
