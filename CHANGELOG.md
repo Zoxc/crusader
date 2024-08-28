@@ -23,6 +23,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Show download and upload plots for aggregate tests in the GUI
 * Added a shortcut (space) to stop the latency monitor
 * Change timeout when connecting to servers and peers to 8 seconds
+* Added average lines to the plot output
 
 ## 0.1 - 2024-08-21
 
