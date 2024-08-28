@@ -175,6 +175,13 @@ pub fn save_graph_to_path(
         .context("Unable to write plot to file")
 }
 
+pub(crate) struct ThroughputPlot<'a> {
+    name: &'static str,
+    color: RGBColor,
+    rates: Vec<(u64, f64)>,
+    bytes: Vec<&'a [(u64, f64)]>,
+}
+
 pub(crate) fn save_graph_to_mem(
     config: &PlotConfig,
     result: &TestResult,
@@ -182,42 +189,42 @@ pub(crate) fn save_graph_to_mem(
     let mut throughput = Vec::new();
 
     if result.download_bytes.is_some() || result.both_download_bytes.is_some() {
-        throughput.push((
-            "Download",
-            DOWN_COLOR,
-            to_rates(&result.combined_download_bytes),
-            [
+        throughput.push(ThroughputPlot {
+            name: "Download",
+            color: DOWN_COLOR,
+            rates: to_rates(&result.combined_download_bytes),
+            bytes: [
                 result.download_bytes.as_deref(),
                 result.both_download_bytes.as_deref(),
             ]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>(),
-        ));
+        });
     }
 
     if result.upload_bytes.is_some() || result.both_upload_bytes.is_some() {
-        throughput.push((
-            "Upload",
-            UP_COLOR,
-            to_rates(&result.combined_upload_bytes),
-            [
+        throughput.push(ThroughputPlot {
+            name: "Upload",
+            color: UP_COLOR,
+            rates: to_rates(&result.combined_upload_bytes),
+            bytes: [
                 result.upload_bytes.as_deref(),
                 result.both_upload_bytes.as_deref(),
             ]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>(),
-        ));
+        });
     }
 
     result.both_bytes.as_ref().map(|both_bytes| {
-        throughput.push((
-            "Aggregate",
-            RGBColor(149, 96, 153),
-            to_rates(both_bytes),
-            vec![both_bytes.as_slice()],
-        ));
+        throughput.push(ThroughputPlot {
+            name: "Aggregate",
+            color: RGBColor(149, 96, 153),
+            rates: to_rates(both_bytes),
+            bytes: vec![both_bytes.as_slice()],
+        });
     });
 
     graph(
@@ -647,15 +654,15 @@ fn plot_split_throughput(
 
 fn plot_throughput(
     config: &PlotConfig,
-    throughput: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
+    throughputs: &[ThroughputPlot],
     start: f64,
     duration: f64,
     area: &DrawingArea<BitMapBackend, Shift>,
 ) {
     let max_throughput = float_max(
-        throughput
+        throughputs
             .iter()
-            .flat_map(|list| list.2.iter())
+            .flat_map(|list| list.rates.iter())
             .map(|e| e.1),
     );
 
@@ -676,32 +683,34 @@ fn plot_throughput(
         area,
     );
 
-    for (name, color, rates, _) in throughput {
+    for throughput in throughputs {
         chart
             .draw_series(LineSeries::new(
-                rates.iter().map(|(time, rate)| {
+                throughput.rates.iter().map(|(time, rate)| {
                     (Duration::from_micros(*time).as_secs_f64() - start, *rate)
                 }),
-                color,
+                throughput.color,
             ))
             .unwrap()
-            .label(*name)
-            .legend(move |(x, y)| Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled()));
+            .label(throughput.name)
+            .legend(move |(x, y)| {
+                Rectangle::new([(x, y - 5), (x + 18, y + 3)], throughput.color.filled())
+            });
     }
 
     legends(&mut chart);
 }
 
 pub(crate) fn bytes_transferred(
-    throughput: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
+    throughputs: &[ThroughputPlot],
     start: f64,
     duration: f64,
     area: &DrawingArea<BitMapBackend, Shift>,
 ) {
     let max_bytes = float_max(
-        throughput
+        throughputs
             .iter()
-            .flat_map(|list| list.3.iter())
+            .flat_map(|list| list.bytes.iter())
             .flat_map(|list| list.iter())
             .map(|e| e.1),
     );
@@ -719,8 +728,8 @@ pub(crate) fn bytes_transferred(
         area,
     );
 
-    for (name, color, _, bytes) in throughput {
-        for (i, bytes) in bytes.iter().enumerate() {
+    for throughput in throughputs {
+        for (i, bytes) in throughput.bytes.iter().enumerate() {
             let series = chart
                 .draw_series(LineSeries::new(
                     bytes.iter().map(|(time, bytes)| {
@@ -729,13 +738,13 @@ pub(crate) fn bytes_transferred(
                             *bytes / (1024.0 * 1024.0 * 1024.0),
                         )
                     }),
-                    &color,
+                    &throughput.color,
                 ))
                 .unwrap();
 
             if i == 0 {
-                series.label(*name).legend(move |(x, y)| {
-                    Rectangle::new([(x, y - 5), (x + 18, y + 3)], color.filled())
+                series.label(throughput.name).legend(move |(x, y)| {
+                    Rectangle::new([(x, y - 5), (x + 18, y + 3)], throughput.color.filled())
                 });
             }
         }
@@ -748,7 +757,7 @@ pub(crate) fn graph(
     config: &PlotConfig,
     result: &TestResult,
     pings: &[RawPing],
-    throughput: &[(&str, RGBColor, Vec<(u64, f64)>, Vec<&[(u64, f64)]>)],
+    throughput: &[ThroughputPlot],
     start: f64,
     duration: f64,
 ) -> Result<ImageBuffer<Rgb<u8>, Vec<u8>>, anyhow::Error> {
