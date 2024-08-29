@@ -164,9 +164,11 @@ crusader remote
 * **`--plot-width <PIXELS>`**
 * **`--plot-height <PIXELS>`**
 * **`--plot-title <PLOT_TITLE>`**
-* **`--latency-peer <LATENCY_PEER>`**
+* **`--latency-peer-server <LATENCY_PEER_SERVER>`**
           Specifies another server (peer) which will
           also measure the latency to the server independently of the client
+* **`--latency-peer`**
+          Use another server (peer) which will also measure the latency to the server independently of the client
 * **`-h, --help`**
           Print help (see a summary with '-h')
           
