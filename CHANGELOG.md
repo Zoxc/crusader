@@ -9,6 +9,8 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
+## 0.2 - 2024-08-29
+
 * Added support for local discovery of server and peers using UDP port 35483
 * The `test` command line option `--latency-peer` is renamed to `--latency-peer-server`. A new flag `--latency-peer` will instead search for a local peer.
 * Improved error messages
