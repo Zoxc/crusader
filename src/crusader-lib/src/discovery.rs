@@ -178,7 +178,7 @@ pub async fn locate(peer_server: bool) -> Result<Server, anyhow::Error> {
 
     timeout(Duration::from_secs(1), find).await.map_err(|_| {
         if peer_server {
-            anyhow!("Failed to locate local peer")
+            anyhow!("Failed to locate local latency peer")
         } else {
             anyhow!("Failed to locate local server")
         }

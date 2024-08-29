@@ -79,14 +79,14 @@ pub async fn connect_to_peer(
     msg: Msg,
 ) -> Result<Peer, anyhow::Error> {
     let control = if let Some(server) = latency_peer_server {
-        connect((server, config.port), "peer").await?
+        connect((server, config.port), "latency peer").await?
     } else {
         let server = discovery::locate(true).await?;
         msg(&format!(
             "Found peer at {} running version {}",
             server.at, server.software_version
         ));
-        connect(server.socket, "peer").await?
+        connect(server.socket, "latency peer").await?
     };
     control.set_nodelay(true)?;
 
