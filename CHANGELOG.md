@@ -24,6 +24,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Added a shortcut (space) to stop the latency monitor
 * Change timeout when connecting to servers and peers to 8 seconds
 * Added average lines to the plot output
+* Show interface IPs when starting servers
 
 ## 0.1 - 2024-08-21
 

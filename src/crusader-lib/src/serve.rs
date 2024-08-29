@@ -18,7 +18,7 @@ use tokio::task::{self};
 use tokio::{signal, time, time::Instant};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-use crate::common::{fresh_socket_addr, inherit_local, read_data, write_data};
+use crate::common::{fresh_socket_addr, inherit_local, interface_ips, read_data, write_data};
 use crate::peer::run_peer;
 use crate::protocol::{
     self, codec, receive, send, ClientMessage, LatencyMeasure, ServerMessage, TestStream,
@@ -659,6 +659,10 @@ async fn serve_async(
     }
 
     (state.msg)(&format!("Server version {} running...", version()));
+
+    for (name, ip) in interface_ips() {
+        (state.msg)(&format!("Listening on `{name}` - {ip}"));
+    }
 
     if peer_server {
         (state.msg)("Server is in peer mode");

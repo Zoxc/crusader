@@ -73,6 +73,59 @@ pub async fn connect<A: ToSocketAddrs>(addr: A, name: &str) -> Result<TcpStream,
     }
 }
 
+pub fn interface_ips() -> Vec<(String, IpAddr)> {
+    let mut _result = Vec::new();
+
+    #[cfg(target_family = "unix")]
+    {
+        use nix::net::if_::InterfaceFlags;
+
+        if let Ok(interfaces) = nix::ifaddrs::getifaddrs() {
+            for interface in interfaces {
+                if interface.flags.contains(InterfaceFlags::IFF_LOOPBACK) {
+                    continue;
+                }
+                if !interface.flags.contains(InterfaceFlags::IFF_RUNNING) {
+                    continue;
+                }
+                if let Some(addr) = interface.address.as_ref().and_then(|i| i.as_sockaddr_in()) {
+                    _result.push((interface.interface_name.clone(), IpAddr::V4(addr.ip())));
+                }
+                if let Some(addr) = interface.address.as_ref().and_then(|i| i.as_sockaddr_in6()) {
+                    if is_unicast_link_local(addr.ip()) {
+                        continue;
+                    }
+                    _result.push((interface.interface_name.clone(), IpAddr::V6(addr.ip())));
+                }
+            }
+        }
+    }
+
+    #[cfg(target_family = "windows")]
+    {
+        if let Ok(adapters) = ipconfig::get_adapters() {
+            for adapter in adapters {
+                if adapter.oper_status() != ipconfig::OperStatus::IfOperStatusUp {
+                    continue;
+                }
+                for &addr in adapter.ip_addresses() {
+                    if let IpAddr::V6(ip) = addr {
+                        if is_unicast_link_local(ip) {
+                            continue;
+                        }
+                    }
+                    if addr.is_loopback() {
+                        continue;
+                    }
+                    _result.push((adapter.friendly_name().to_owned(), addr));
+                }
+            }
+        }
+    }
+
+    _result
+}
+
 pub fn is_unicast_link_local(ip: Ipv6Addr) -> bool {
     (ip.segments()[0] & 0xffc0) == 0xfe80
 }

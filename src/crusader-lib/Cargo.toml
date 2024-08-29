@@ -40,3 +40,7 @@ axum = { version = "0.7.5", features = [
     "http1",
 ], default-features = false, optional = true }
 image = { version = "0.24.9", optional = true }
+
+[target."cfg(target_os = \"windows\")".dependencies]
+ipconfig = { version = "=0.3.2", default-features = false }
+widestring = "=1.1.0"
