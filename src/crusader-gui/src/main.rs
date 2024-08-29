@@ -5,7 +5,7 @@
 )]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{error::Error, sync::Arc};
+use std::{error::Error, process, sync::Arc};
 
 use crusader_gui_lib::Tester;
 use crusader_lib::version;
@@ -34,7 +34,7 @@ fn main() {
         .ok()
         .map(|exe| exe.with_extension("toml"));
 
-    eframe::run_native(
+    let result = eframe::run_native(
         &format!("Crusader Network Tester {}", version()),
         options,
         Box::new(move |cc| {
@@ -81,8 +81,11 @@ fn main() {
                 tester: Tester::new(settings),
             }))
         }),
-    )
-    .unwrap()
+    );
+    if let Err(e) = result {
+        eprintln!("Failed to run GUI: {}", e);
+        process::exit(1);
+    }
 }
 
 fn load_system_font(ctx: &Context) -> Result<(), Box<dyn Error>> {
