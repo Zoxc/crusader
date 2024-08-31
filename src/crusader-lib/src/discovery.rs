@@ -48,6 +48,8 @@ enum Message {
         protocol_version: u64,
         software_version: String,
         hostname: Option<String>,
+        label: Option<String>,
+        ips: Vec<[u8; 16]>,
     },
 }
 
@@ -105,6 +107,8 @@ pub async fn locate(peer_server: bool) -> Result<Server, anyhow::Error> {
             protocol_version,
             software_version,
             hostname,
+            ips: _,
+            label: _,
         } = data.message
         {
             if peer != peer_server {
@@ -174,7 +178,7 @@ pub async fn locate(peer_server: bool) -> Result<Server, anyhow::Error> {
 
     timeout(Duration::from_secs(1), find).await.map_err(|_| {
         if peer_server {
-            anyhow!("Failed to locate local peer")
+            anyhow!("Failed to locate local latency peer")
         } else {
             anyhow!("Failed to locate local server")
         }
@@ -210,6 +214,8 @@ pub fn serve(state: Arc<State>, port: u16, peer_server: bool) -> Result<(), anyh
                     protocol_version: protocol::VERSION,
                     software_version: version(),
                     hostname: hostname.clone(),
+                    label: None,
+                    ips: Vec::new(),
                 },
             };
             let buf = bincode::serialize(&data)?;

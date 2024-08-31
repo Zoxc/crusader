@@ -9,6 +9,8 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
+## 0.2 - 2024-08-29
+
 * Added support for local discovery of server and peers using UDP port 35483
 * The `test` command line option `--latency-peer` is renamed to `--latency-peer-server`.
   A new flag `--latency-peer` will instead search for a local peer.
@@ -22,6 +24,10 @@ This file lists the changes that have occurred since January 2024 in the project
 * Fix serving from link-local interfaces on Linux
 * Fix peers on link-local interfaces
 * Show download and upload plots for aggregate tests in the GUI
+* Added a shortcut (space) to stop the latency monitor
+* Change timeout when connecting to servers and peers to 8 seconds
+* Added average lines to the plot output
+* Show interface IPs when starting servers
 
 ## 0.1 - 2024-08-21
 

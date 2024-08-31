@@ -1,7 +1,5 @@
 #[cfg(feature = "client")]
 use crate::common::{Config, Msg};
-#[cfg(feature = "client")]
-use crate::discovery;
 use crate::protocol::PeerLatency;
 use crate::serve::State;
 use crate::{
@@ -23,6 +21,8 @@ use tokio::{
     time,
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+#[cfg(feature = "client")]
+use {crate::common::connect, crate::discovery};
 
 #[cfg(feature = "client")]
 pub struct Peer {
@@ -79,18 +79,14 @@ pub async fn connect_to_peer(
     msg: Msg,
 ) -> Result<Peer, anyhow::Error> {
     let control = if let Some(server) = latency_peer_server {
-        net::TcpStream::connect((server, config.port))
-            .await
-            .context("Failed to connect to peer")?
+        connect((server, config.port), "latency peer").await?
     } else {
         let server = discovery::locate(true).await?;
         msg(&format!(
             "Found peer at {} running version {}",
             server.at, server.software_version
         ));
-        net::TcpStream::connect(server.socket)
-            .await
-            .context("Failed to connect to peer")?
+        connect(server.socket, "latency peer").await?
     };
     control.set_nodelay(true)?;
 

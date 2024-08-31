@@ -22,14 +22,14 @@ use tokio::{
     net::{
         self,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpStream, UdpSocket,
+        TcpStream, ToSocketAddrs, UdpSocket,
     },
     sync::{
         oneshot,
         watch::{self, error::RecvError},
     },
     task::yield_now,
-    time::{self, Instant},
+    time::{self, timeout, Instant},
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
@@ -64,6 +64,66 @@ pub struct Config {
     pub stream_stagger: Duration,
     pub ping_interval: Duration,
     pub throughput_interval: Duration,
+}
+
+pub async fn connect<A: ToSocketAddrs>(addr: A, name: &str) -> Result<TcpStream, anyhow::Error> {
+    match timeout(Duration::from_secs(8), net::TcpStream::connect(addr)).await {
+        Ok(v) => v.with_context(|| format!("Failed to connect to {name}")),
+        Err(_) => bail!("Timed out trying to connect to {name}. Is the {name} running?"),
+    }
+}
+
+pub fn interface_ips() -> Vec<(String, IpAddr)> {
+    let mut _result = Vec::new();
+
+    #[cfg(target_family = "unix")]
+    {
+        use nix::net::if_::InterfaceFlags;
+
+        if let Ok(interfaces) = nix::ifaddrs::getifaddrs() {
+            for interface in interfaces {
+                if interface.flags.contains(InterfaceFlags::IFF_LOOPBACK) {
+                    continue;
+                }
+                if !interface.flags.contains(InterfaceFlags::IFF_RUNNING) {
+                    continue;
+                }
+                if let Some(addr) = interface.address.as_ref().and_then(|i| i.as_sockaddr_in()) {
+                    _result.push((interface.interface_name.clone(), IpAddr::V4(addr.ip())));
+                }
+                if let Some(addr) = interface.address.as_ref().and_then(|i| i.as_sockaddr_in6()) {
+                    if is_unicast_link_local(addr.ip()) {
+                        continue;
+                    }
+                    _result.push((interface.interface_name.clone(), IpAddr::V6(addr.ip())));
+                }
+            }
+        }
+    }
+
+    #[cfg(target_family = "windows")]
+    {
+        if let Ok(adapters) = ipconfig::get_adapters() {
+            for adapter in adapters {
+                if adapter.oper_status() != ipconfig::OperStatus::IfOperStatusUp {
+                    continue;
+                }
+                for &addr in adapter.ip_addresses() {
+                    if let IpAddr::V6(ip) = addr {
+                        if is_unicast_link_local(ip) {
+                            continue;
+                        }
+                    }
+                    if addr.is_loopback() {
+                        continue;
+                    }
+                    _result.push((adapter.friendly_name().to_owned(), addr));
+                }
+            }
+        }
+    }
+
+    _result
 }
 
 pub fn is_unicast_link_local(ip: Ipv6Addr) -> bool {
@@ -493,7 +553,7 @@ pub(crate) async fn ping_send(
         bincode::serialize_into(&mut cursor, &ping).unwrap();
         let buf = &cursor.get_ref()[0..(cursor.position() as usize)];
 
-        udp_handle(socket.send(buf).await.map(|_| ())).context("unable to UDP ping")?;
+        udp_handle(socket.send(buf).await.map(|_| ())).context("Unable to send UDP ping packet")?;
 
         storage.push(current);
     }

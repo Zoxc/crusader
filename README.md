@@ -173,10 +173,11 @@ crusader remote
 * **`--plot-width <PIXELS>`**
 * **`--plot-height <PIXELS>`**
 * **`--plot-title <PLOT_TITLE>`**
-* **`--latency-peer <LATENCY_PEER>`**
-  Specifies the IP address of another Crusader server (peer).
-  During the test, Crusader measures the latency to this peer
-  along with the latency measurements to the client.
+* **`--latency-peer-server <LATENCY_PEER_SERVER>`**
+          Specifies another server (peer) which will
+          also measure the latency to the server independently of the client
+* **`--latency-peer`**
+          Use another server (peer) which will also measure the latency to the server independently of the client
 * **`-h, --help`**
           Print help (see a summary with '-h')
 
