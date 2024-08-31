@@ -119,9 +119,9 @@ crusader test <server-ip>
 
 ### Remote
 
-To host a web server allowing remote control of a Crusader client,
-run this command, then connect to
-[http://this-ip-address:35482](http://this-ip-address:38452)
+To host a web server that provides remote control of a Crusader client,
+run the command below, then connect to
+`http://ip-of-the-crusader-device:35482`
 
 ```sh
 crusader remote
