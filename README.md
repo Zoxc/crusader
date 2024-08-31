@@ -65,34 +65,34 @@ The Crusader GUI has five tabs:
   A browser that connects to that port can initiate
   a test to a Crusader server.
   
-* **Latency tab**
-  Continually tests the latency to the selected
+* **Monitor tab**
+  Continually displays the latency to the selected
   Crusader server until stopped.
 
 * **Result tab**
   Displays the result of the most recent client run
 
-## Understanding the Result Tab
+## The Result Tab
 
 ![Crusader Results Screenshot](./media/Crusader-Results.png)
 
 A Crusader test creates three bursts of traffic.
-By default, it generates five seconds each of
+By default, it generates ten seconds each of
 download only, upload only, then bi-directional traffic.
 Each burst is separated by several seconds of idle time.
 
 The Crusader Result tab displays the results of the test with
 three plots (see image above):
 
-* The **Throughput** plot shows the bursts of traffic:
-green is download (from server to client),
+* The **Throughput** plot shows the bursts of traffic.
+Green is download (from server to client),
 blue is upload, and
 the purple line is the instantaneous
 sum of the download plus upload.
 
 * The **Latency** plot shows the corresponding latency.
+Green shows the  (uni-directional) time from the server to the client.
 Blue is the (uni-directional) time from the client to the server.
-Green shows the time from the server to the client (one direction).
 Black shows the sum from the client to the server
 and back (round-trip time).
 
