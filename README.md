@@ -5,7 +5,7 @@
 [![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/Zoxc/crusader/blob/master/LICENSE-MIT)
 [![Apache](https://img.shields.io/badge/license-Apache-blue.svg)](https://github.com/Zoxc/crusader/blob/master/LICENSE-APACHE)
 
-![Crusader Results Screenshot](./media/Crusader-Results.png)
+![Crusader Results Screenshot](./media/Crusader-Result.png)
 
 The **Crusader Network Tester** measures network rates and latency
 in the presence of upload and download traffic.
@@ -74,7 +74,7 @@ The Crusader GUI has five tabs:
 
 ## The Result Tab
 
-![Crusader Results Screenshot](./media/Crusader-Results.png)
+![Crusader Results Screenshot](./media/Crusader-Result.png)
 
 A Crusader test creates three bursts of traffic.
 By default, it generates ten seconds each of
