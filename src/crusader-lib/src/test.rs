@@ -3,7 +3,8 @@ use crate::common::{
     wait_for_state, write_data, Config, Msg, TestState,
 };
 use crate::file_format::{
-    RawConfig, RawHeader, RawPing, RawPoint, RawResult, RawStream, RawStreamGroup,
+    RawConfig, RawHeader, RawPing, RawPoint, RawResult, RawStream, RawStreamGroup, TestData,
+    TestKind,
 };
 use crate::peer::connect_to_peer;
 use crate::plot::save_graph;
@@ -352,6 +353,8 @@ pub(crate) async fn test_async(
 
     let load_delay = (Duration::from_millis(50) + latency).as_micros() as u64;
 
+    let mut test_data = Vec::new();
+
     if let Some((semaphore, _)) = download.as_ref() {
         send(
             &mut control_tx,
@@ -365,11 +368,17 @@ pub(crate) async fn test_async(
             .recv()
             .await
             .ok_or(anyhow!("Failed to receive"))?;
+        let start = load.time;
         state_tx.send((TestState::LoadFromServer, load.time))?;
         msg(&format!("Testing download..."));
         let _ = semaphore.acquire_many(loading_streams).await?;
-
-        state_tx.send((TestState::Grace2, Instant::now()))?;
+        let end = Instant::now();
+        test_data.push(TestData {
+            start: start.duration_since(setup_start),
+            end: end.duration_since(setup_start),
+            kind: TestKind::Download,
+        });
+        state_tx.send((TestState::Grace2, end))?;
         time::sleep(grace).await;
     }
 
@@ -386,6 +395,7 @@ pub(crate) async fn test_async(
             .recv()
             .await
             .ok_or(anyhow!("Failed to receive"))?;
+        let start = load.time;
         state_tx.send((TestState::LoadFromClient, load.time))?;
         msg(&format!("Testing upload..."));
 
@@ -399,7 +409,14 @@ pub(crate) async fn test_async(
 
         let _ = upload_semaphore.acquire_many(loading_streams).await?;
 
-        state_tx.send((TestState::Grace3, Instant::now()))?;
+        let end = Instant::now();
+        test_data.push(TestData {
+            start: start.duration_since(setup_start),
+            end: end.duration_since(setup_start),
+            kind: TestKind::Upload,
+        });
+
+        state_tx.send((TestState::Grace3, end))?;
         time::sleep(grace).await;
     }
 
@@ -416,6 +433,7 @@ pub(crate) async fn test_async(
             .recv()
             .await
             .ok_or(anyhow!("Failed to receive"))?;
+        let start = load.time;
         state_tx.send((TestState::LoadFromBoth, load.time))?;
         msg(&format!("Testing both download and upload..."));
 
@@ -430,7 +448,14 @@ pub(crate) async fn test_async(
         let _ = semaphore.acquire_many(loading_streams).await?;
         let _ = both_upload_semaphore.acquire_many(loading_streams).await?;
 
-        state_tx.send((TestState::Grace4, Instant::now()))?;
+        let end = Instant::now();
+        test_data.push(TestData {
+            start: start.duration_since(setup_start),
+            end: end.duration_since(setup_start),
+            kind: TestKind::Bidirectional,
+        });
+
+        state_tx.send((TestState::Grace4, end))?;
         time::sleep(grace).await;
     }
 
@@ -606,6 +631,7 @@ pub(crate) async fn test_async(
         stream_groups: raw_streams,
         pings,
         peer_pings: peer_latencies,
+        test_data,
     };
 
     Ok(raw_result)

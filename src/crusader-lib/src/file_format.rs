@@ -88,8 +88,23 @@ impl RawResultV0 {
             server_overload: false,
             load_termination_timeout: false,
             peer_pings: None,
+            test_data: Vec::new(),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub enum TestKind {
+    Download,
+    Upload,
+    Bidirectional,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct TestData {
+    pub start: Duration,
+    pub end: Duration,
+    pub kind: TestKind,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -168,6 +183,8 @@ pub struct RawResult {
     pub pings: Vec<RawPing>,
     #[serde(default)]
     pub peer_pings: Option<Vec<RawPing>>, // Added in V2
+    #[serde(default)] // Added in V2
+    pub test_data: Vec<TestData>,
 }
 
 impl RawResult {
