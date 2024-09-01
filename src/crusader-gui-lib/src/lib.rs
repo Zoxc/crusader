@@ -14,7 +14,7 @@ use std::{
 };
 
 use crusader_lib::{
-    file_format::{RawPing, RawResult},
+    file_format::{RawPing, RawResult, TestKind},
     latency,
     plot::{self, float_max, to_rates},
     protocol, remote, serve,
@@ -22,7 +22,7 @@ use crusader_lib::{
     with_time, Config,
 };
 use eframe::{
-    egui::{self, Grid, Id, ScrollArea, TextEdit, TextStyle, Ui, Vec2b},
+    egui::{self, Grid, Id, RichText, ScrollArea, TextEdit, TextStyle, Ui, Vec2b},
     emath::{vec2, Align},
     epaint::Color32,
 };
@@ -939,7 +939,71 @@ impl Tester {
 
             if result.result.raw_result.streams() > 0 {
                 strip.cell(|ui| {
-                    ui.label("Throughput");
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Throughput");
+
+                        ui.add_space(20.0);
+
+                        ui.spacing_mut().item_spacing.x = 0.0;
+
+                        if let Some(throughput) = result
+                            .result
+                            .throughputs
+                            .get(&(TestKind::Download, TestKind::Download))
+                        {
+                            ui.label(
+                                RichText::new("Download: ").color(Color32::from_rgb(95, 145, 62)),
+                            );
+                            ui.label(format!("{:.02} Mbps", throughput));
+                            ui.add_space(20.0);
+                        }
+
+                        if let Some(throughput) = result
+                            .result
+                            .throughputs
+                            .get(&(TestKind::Upload, TestKind::Upload))
+                        {
+                            ui.label(
+                                RichText::new("Upload: ").color(Color32::from_rgb(37, 83, 169)),
+                            );
+                            ui.label(format!("{:.02} Mbps", throughput));
+                            ui.add_space(20.0);
+                        }
+
+                        if let Some(throughput) = result
+                            .result
+                            .throughputs
+                            .get(&(TestKind::Bidirectional, TestKind::Bidirectional))
+                        {
+                            ui.spacing_mut().item_spacing.x = 0.0;
+                            ui.label(
+                                RichText::new("Aggregate: ").color(Color32::from_rgb(149, 96, 153)),
+                            );
+                            ui.label(format!("{:.02} Mbps ", throughput));
+                            if let Some(down) = result
+                                .result
+                                .throughputs
+                                .get(&(TestKind::Bidirectional, TestKind::Download))
+                            {
+                                if let Some(up) = result
+                                    .result
+                                    .throughputs
+                                    .get(&(TestKind::Bidirectional, TestKind::Upload))
+                                {
+                                    ui.label(" (");
+                                    ui.label(format!("{:.02} Mbps ", down));
+                                    ui.label(
+                                        RichText::new("down").color(Color32::from_rgb(95, 145, 62)),
+                                    );
+                                    ui.label(format!(", {:.02} Mbps ", up));
+                                    ui.label(
+                                        RichText::new("up").color(Color32::from_rgb(37, 83, 169)),
+                                    );
+                                    ui.label(")");
+                                }
+                            }
+                        }
+                    });
 
                     // Throughput
                     let mut plot = Plot::new("result")

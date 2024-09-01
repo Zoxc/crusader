@@ -93,7 +93,7 @@ impl RawResultV0 {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub enum TestKind {
     Download,
     Upload,

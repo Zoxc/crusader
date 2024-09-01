@@ -6,11 +6,12 @@ use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
 use plotters::style::{register_font, RGBColor};
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 use std::{cmp, mem};
 
-use crate::file_format::{RawPing, RawResult};
+use crate::file_format::{RawPing, RawResult, TestData, TestKind};
 use crate::protocol::RawLatency;
 use crate::test::{unique, PlotConfig};
 
@@ -111,6 +112,37 @@ impl RawResult {
 
         let pings = self.pings.clone();
 
+        let mut throughputs = HashMap::new();
+
+        let mut add_throughput =
+            |stream: &Option<Vec<(u64, f64)>>, kind: TestKind, sub: TestKind| {
+                if let Some(stream) = stream {
+                    if let Some(test_data) = self.test_data.iter().find(|d| d.kind == kind) {
+                        if let Some(t) = throughput(stream, test_data, self.config.load_duration) {
+                            throughputs.insert((kind, sub), t);
+                        }
+                    }
+                }
+            };
+
+        add_throughput(&download_bytes_sum, TestKind::Download, TestKind::Download);
+        add_throughput(&upload_bytes_sum, TestKind::Upload, TestKind::Upload);
+        add_throughput(
+            &both_download_bytes_sum,
+            TestKind::Bidirectional,
+            TestKind::Download,
+        );
+        add_throughput(
+            &both_upload_bytes_sum,
+            TestKind::Bidirectional,
+            TestKind::Upload,
+        );
+        add_throughput(
+            &both_bytes,
+            TestKind::Bidirectional,
+            TestKind::Bidirectional,
+        );
+
         TestResult {
             raw_result: self.clone(),
             start: self.start,
@@ -124,6 +156,7 @@ impl RawResult {
             combined_download_bytes,
             combined_upload_bytes,
             stream_groups,
+            throughputs,
         }
     }
 }
@@ -151,6 +184,7 @@ pub struct TestResult {
     pub both_bytes: Option<Vec<(u64, f64)>>,
     pub pings: Vec<RawPing>,
     pub stream_groups: Vec<TestStreamGroup>,
+    pub throughputs: HashMap<(TestKind, TestKind), f64>,
 }
 
 pub fn save_graph(
@@ -285,6 +319,41 @@ pub fn to_rates(stream: &[(u64, f64)]) -> Vec<(u64, f64)> {
     }
 
     result
+}
+
+fn throughput(stream: &[(u64, f64)], test_data: &TestData, load_duration: Duration) -> Option<f64> {
+    if stream.is_empty() {
+        return None;
+    }
+
+    let start_offset = (load_duration.as_secs_f64() * 0.2).max(2.0);
+    let end_offset = load_duration.as_secs_f64() - (load_duration.as_secs_f64() * 0.1).max(0.5);
+
+    let start = (test_data.start + Duration::from_secs_f64(start_offset)).as_micros() as u64;
+    let end = (test_data.start + Duration::from_secs_f64(end_offset)).as_micros() as u64;
+    let end = cmp::min(test_data.end.as_micros() as u64, end);
+
+    if start >= end {
+        return None;
+    }
+
+    let lookup = |point: u64| {
+        let i = stream.partition_point(|e| e.0 < point);
+        if i == stream.len() {
+            stream[i - 1]
+        } else {
+            stream[i]
+        }
+    };
+
+    let end = lookup(end);
+    let start = lookup(start);
+
+    let bytes = end.1 - start.1;
+    let time = end.0 - start.0;
+    let duration = Duration::from_micros(time).as_secs_f64();
+    let mbits = (bytes * 8.0) / (1000.0 * 1000.0);
+    Some(mbits / duration)
 }
 
 pub fn smooth(
