@@ -9,6 +9,8 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
+* Rename both option to bidirectional
+
 ## 0.2 - 2024-08-29
 
 * Added support for local discovery of server and peers using UDP port 35483

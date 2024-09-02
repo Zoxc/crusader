@@ -104,7 +104,7 @@ pub struct ClientSettings {
     pub server: String,
     pub download: bool,
     pub upload: bool,
-    pub both: bool,
+    pub bidirectional: bool,
     pub streams: u64,
     pub load_duration: f64,
     pub grace_duration: f64,
@@ -121,7 +121,7 @@ impl Default for ClientSettings {
             server: String::new(),
             download: true,
             upload: true,
-            both: true,
+            bidirectional: true,
             streams: 8,
             load_duration: 10.0,
             grace_duration: 2.0,
@@ -404,7 +404,7 @@ impl Tester {
             stream_stagger: Duration::from_secs_f64(self.settings.client.stream_stagger),
             download: self.settings.client.download,
             upload: self.settings.client.upload,
-            both: self.settings.client.both,
+            both: self.settings.client.bidirectional,
             ping_interval: Duration::from_millis(self.settings.client.latency_sample_interval),
             throughput_interval: Duration::from_millis(
                 self.settings.client.throughput_sample_interval,
@@ -530,7 +530,7 @@ impl Tester {
                             ui.add_space(10.0);
                             ui.checkbox(&mut self.settings.client.upload, "Upload");
                             ui.add_space(10.0);
-                            ui.checkbox(&mut self.settings.client.both, "Both");
+                            ui.checkbox(&mut self.settings.client.bidirectional, "Bidirectional");
                         });
                         Grid::new("settings-compact").show(ui, |ui| {
                             ui.label("Streams: ");
@@ -629,7 +629,7 @@ impl Tester {
                             ui.label("milliseconds");
                             ui.end_row();
 
-                            ui.checkbox(&mut self.settings.client.both, "Both");
+                            ui.checkbox(&mut self.settings.client.bidirectional, "Bidirectional");
                             ui.label("");
                             ui.label("Grace duration: ");
                             ui.add(

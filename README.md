@@ -130,7 +130,7 @@ crusader remote
           Run a download test
 * **`--upload`**
           Run an upload test
-* **`--both`**
+* **`--bidirectional`**
           Run a test doing both download and upload
 * **`--port <PORT>`**
           Specifies the TCP and UDP port used by the server

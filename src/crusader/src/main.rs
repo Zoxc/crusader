@@ -80,7 +80,7 @@ enum Commands {
         #[arg(long, help = "Run an upload test")]
         upload: bool,
         #[arg(long, help = "Run a test doing both download and upload")]
-        both: bool,
+        bidirectional: bool,
         #[arg(
             long,
             long_help = "Run a test only measuring latency. The duration is specified by `grace_duration`"
@@ -160,7 +160,7 @@ fn run() -> Result<(), anyhow::Error> {
             ref server,
             download,
             upload,
-            both,
+            bidirectional,
             idle,
             throughput_sample_interval,
             latency_sample_interval,
@@ -186,14 +186,14 @@ fn run() -> Result<(), anyhow::Error> {
                 throughput_interval: Duration::from_millis(throughput_sample_interval),
             };
 
-            if download || upload || both {
+            if download || upload || bidirectional {
                 if idle {
                     println!("Cannot run `idle` test with a load test");
                     process::exit(1);
                 }
                 config.download = download;
                 config.upload = upload;
-                config.both = both;
+                config.both = bidirectional;
             }
 
             crusader_lib::test::test(
