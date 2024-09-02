@@ -687,10 +687,10 @@ impl Tester {
                                 }
                             }
                             Some(Err(error)) => {
-                                self.msgs.push(format!("Error: {error}"));
+                                self.msgs.push(with_time(&format!("Error: {error}")));
                             }
                             None => {
-                                self.msgs.push("Aborted...".to_owned());
+                                self.msgs.push(with_time("Aborted..."));
                             }
                         }
                         self.client = None;
