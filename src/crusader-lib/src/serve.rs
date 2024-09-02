@@ -661,7 +661,7 @@ async fn serve_async(
     (state.msg)(&format!("Server version {} running...", version()));
 
     for (name, ip) in interface_ips() {
-        (state.msg)(&format!("Listening on `{name}` - {ip}"));
+        (state.msg)(&format!("Address on `{name}`: {ip}"));
     }
 
     if peer_server {
