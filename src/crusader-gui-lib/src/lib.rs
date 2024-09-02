@@ -678,7 +678,7 @@ impl Tester {
                     if let Ok(result) = client.done.as_mut().unwrap().try_recv() {
                         match result {
                             Some(Ok(result)) => {
-                                self.msgs.push("Test complete.".to_owned());
+                                self.msgs.push(with_time("Test complete"));
                                 self.result = Some(TestResult::new(result.to_test_result()));
                                 self.result_plot_reset = true;
                                 self.raw_result = Some(result);
