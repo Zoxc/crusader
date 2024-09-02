@@ -67,6 +67,7 @@ fn interfaces() -> Vec<u32> {
     {
         if let Ok(interfaces) = nix::ifaddrs::getifaddrs() {
             for interface in interfaces {
+                println!("discover-interface {}", interface.interface_name);
                 if interface.flags.contains(InterfaceFlags::IFF_LOOPBACK) {
                     continue;
                 }
@@ -77,6 +78,11 @@ fn interfaces() -> Vec<u32> {
                     if !is_unicast_link_local(addr.ip()) {
                         continue;
                     }
+                    println!(
+                        "discover-adding-interface {} scope {}",
+                        interface.interface_name,
+                        addr.scope_id()
+                    );
                     _result.push(addr.scope_id());
                 }
             }
@@ -153,11 +159,11 @@ pub async fn locate(peer_server: bool) -> Result<Server, anyhow::Error> {
 
     let mut any = false;
     for interface in interfaces() {
-        if socket
+        let r = socket
             .send_to(&buf, SocketAddrV6::new(ip, DISCOVER_PORT, 0, interface))
-            .await
-            .is_ok()
-        {
+            .await;
+        println!("discover-sent {interface} = {:?}", r);
+        if r.is_ok() {
             any = true;
         }
     }
