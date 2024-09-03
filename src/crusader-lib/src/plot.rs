@@ -6,7 +6,7 @@ use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
 use plotters::style::{register_font, RGBColor};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Duration;
 use std::{cmp, mem};
@@ -239,47 +239,59 @@ pub(crate) fn save_graph_to_mem(
     );
     let interval = result.raw_result.config.bandwidth_interval;
 
-    if result.download_bytes.is_some() || result.both_download_bytes.is_some() {
+    result.download_bytes.as_ref().map(|bytes| {
         throughput.push(ThroughputPlot {
             name: "Download",
             color: DOWN_COLOR,
-            rates: to_rates(&result.combined_download_bytes),
-            smooth: smooth(&result.combined_download_bytes, interval, smooth_interval),
-            bytes: [
-                result.download_bytes.as_deref(),
-                result.both_download_bytes.as_deref(),
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>(),
+            rates: to_rates(bytes),
+            smooth: smooth(bytes, interval, smooth_interval),
+            bytes: vec![bytes.as_slice()],
             rate: result
                 .throughputs
                 .get(&(TestKind::Download, TestKind::Download))
                 .cloned(),
             dual_rates: None,
         });
-    }
+    });
 
-    if result.upload_bytes.is_some() || result.both_upload_bytes.is_some() {
+    result.upload_bytes.as_ref().map(|bytes| {
         throughput.push(ThroughputPlot {
             name: "Upload",
             color: UP_COLOR,
-            rates: to_rates(&result.combined_upload_bytes),
-            smooth: smooth(&result.combined_upload_bytes, interval, smooth_interval),
-            bytes: [
-                result.upload_bytes.as_deref(),
-                result.both_upload_bytes.as_deref(),
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>(),
+            rates: to_rates(bytes),
+            smooth: smooth(bytes, interval, smooth_interval),
+            bytes: vec![bytes.as_slice()],
             rate: result
                 .throughputs
                 .get(&(TestKind::Upload, TestKind::Upload))
                 .cloned(),
             dual_rates: None,
         });
-    }
+    });
+
+    result.both_download_bytes.as_ref().map(|bytes| {
+        throughput.push(ThroughputPlot {
+            name: "Download",
+            color: DOWN_COLOR,
+            rates: to_rates(bytes),
+            smooth: smooth(bytes, interval, smooth_interval),
+            bytes: vec![bytes.as_slice()],
+            rate: None,
+            dual_rates: None,
+        });
+    });
+
+    result.both_upload_bytes.as_ref().map(|bytes| {
+        throughput.push(ThroughputPlot {
+            name: "Upload",
+            color: UP_COLOR,
+            rates: to_rates(bytes),
+            smooth: smooth(bytes, interval, smooth_interval),
+            bytes: vec![bytes.as_slice()],
+            rate: None,
+            dual_rates: None,
+        });
+    });
 
     result.both_bytes.as_ref().map(|both_bytes| {
         throughput.push(ThroughputPlot {
@@ -869,12 +881,12 @@ fn plot_throughput(
     let center = text_height / 2 + 10;
 
     let side = 107;
-    let width =
-        (area.dim_in_pixel().0.saturating_sub(side * 2) as f64 / 1.14) / throughputs.len() as f64;
+    let width = (area.dim_in_pixel().0.saturating_sub(side * 2) as f64 / 1.14)
+        / (throughputs.iter().filter(|t| t.rate.is_some()).count() as f64);
 
     let (area, textarea) = area.split_vertically(area.dim_in_pixel().1 - (text_height as u32 + 10));
 
-    for (i, throughput) in throughputs.iter().enumerate() {
+    for (i, throughput) in throughputs.iter().filter(|t| t.rate.is_some()).enumerate() {
         if let Some(rate) = throughput.rate {
             let mut text = Vec::new();
 
@@ -907,19 +919,21 @@ fn plot_throughput(
         &area,
     );
 
+    let mut seen = HashSet::new();
     for throughput in throughputs {
-        chart
+        let series = chart
             .draw_series(LineSeries::new(
                 throughput.rates.iter().map(|(time, rate)| {
                     (Duration::from_micros(*time).as_secs_f64() - start, *rate)
                 }),
                 throughput.color,
             ))
-            .unwrap()
-            .label(throughput.name)
-            .legend(move |(x, y)| {
+            .unwrap();
+        if seen.insert(throughput.name.to_owned()) {
+            series.label(throughput.name).legend(move |(x, y)| {
                 Rectangle::new([(x, y - 5), (x + 18, y + 3)], throughput.color.filled())
             });
+        }
     }
 
     for throughput in throughputs {
