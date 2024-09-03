@@ -125,10 +125,12 @@ impl RawResult {
         let mut add_throughput =
             |stream: &Option<Vec<(u64, f64)>>, kind: TestKind, sub: TestKind| {
                 if let Some(stream) = stream {
-                    if let Some(test_data) = self.test_data.iter().find(|d| d.kind == kind) {
-                        if let Some(t) = throughput(stream, test_data, self.config.load_duration) {
-                            throughputs.insert((kind, sub), t);
-                        }
+                    if let Some(t) = throughput(
+                        stream,
+                        self.test_data.iter().find(|d| d.kind == kind),
+                        self.config.load_duration,
+                    ) {
+                        throughputs.insert((kind, sub), t);
                     }
                 }
             };
@@ -368,7 +370,11 @@ pub fn to_rates(stream: &[(u64, f64)]) -> Vec<(u64, f64)> {
     result
 }
 
-fn throughput(stream: &[(u64, f64)], test_data: &TestData, load_duration: Duration) -> Option<f64> {
+fn throughput(
+    stream: &[(u64, f64)],
+    test_data: Option<&TestData>,
+    load_duration: Duration,
+) -> Option<f64> {
     if stream.is_empty() {
         return None;
     }
@@ -376,9 +382,18 @@ fn throughput(stream: &[(u64, f64)], test_data: &TestData, load_duration: Durati
     let start_offset = (load_duration.as_secs_f64() * 0.2).max(2.0);
     let end_offset = load_duration.as_secs_f64() - (load_duration.as_secs_f64() * 0.1).max(0.5);
 
-    let start = (test_data.start + Duration::from_secs_f64(start_offset)).as_micros() as u64;
-    let end = (test_data.start + Duration::from_secs_f64(end_offset)).as_micros() as u64;
-    let end = cmp::min(test_data.end.as_micros() as u64, end);
+    let test_start = if let Some(test_data) = test_data {
+        test_data.start
+    } else {
+        Duration::from_micros(stream.iter().find(|e| e.1 > 0.0)?.0)
+    };
+    let start = (test_start + Duration::from_secs_f64(start_offset)).as_micros() as u64;
+    let end = (test_start + Duration::from_secs_f64(end_offset)).as_micros() as u64;
+    let end = if let Some(test_data) = test_data {
+        cmp::min(test_data.end.as_micros() as u64, end)
+    } else {
+        end
+    };
 
     if start >= end {
         return None;
