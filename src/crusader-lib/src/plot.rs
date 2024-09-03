@@ -18,6 +18,14 @@ use crate::test::{unique, PlotConfig};
 const UP_COLOR: RGBColor = RGBColor(37, 83, 169);
 const DOWN_COLOR: RGBColor = RGBColor(95, 145, 62);
 
+fn darken(color: RGBColor, d: f64) -> RGBColor {
+    RGBColor(
+        (color.0 as f64 * d).round() as u8,
+        (color.1 as f64 * d).round() as u8,
+        (color.2 as f64 * d).round() as u8,
+    )
+}
+
 pub fn register_fonts() {
     register_font(
         "sans-serif",
@@ -215,6 +223,8 @@ pub(crate) struct ThroughputPlot<'a> {
     rates: Vec<(u64, f64)>,
     smooth: Vec<(u64, f64)>,
     bytes: Vec<&'a [(u64, f64)]>,
+    rate: Option<f64>,
+    dual_rates: Option<(f64, f64)>,
 }
 
 pub(crate) fn save_graph_to_mem(
@@ -242,6 +252,11 @@ pub(crate) fn save_graph_to_mem(
             .into_iter()
             .flatten()
             .collect::<Vec<_>>(),
+            rate: result
+                .throughputs
+                .get(&(TestKind::Download, TestKind::Download))
+                .cloned(),
+            dual_rates: None,
         });
     }
 
@@ -258,6 +273,11 @@ pub(crate) fn save_graph_to_mem(
             .into_iter()
             .flatten()
             .collect::<Vec<_>>(),
+            rate: result
+                .throughputs
+                .get(&(TestKind::Upload, TestKind::Upload))
+                .cloned(),
+            dual_rates: None,
         });
     }
 
@@ -268,6 +288,21 @@ pub(crate) fn save_graph_to_mem(
             rates: to_rates(both_bytes),
             smooth: smooth(both_bytes, interval, smooth_interval),
             bytes: vec![both_bytes.as_slice()],
+            rate: result
+                .throughputs
+                .get(&(TestKind::Bidirectional, TestKind::Bidirectional))
+                .cloned(),
+            dual_rates: result
+                .throughputs
+                .get(&(TestKind::Bidirectional, TestKind::Download))
+                .cloned()
+                .and_then(|down| {
+                    result
+                        .throughputs
+                        .get(&(TestKind::Bidirectional, TestKind::Upload))
+                        .cloned()
+                        .map(|up| (down, up))
+                }),
         });
     });
 
@@ -470,6 +505,36 @@ fn interpolate(input: &[(u64, f64)], interval: u64) -> Vec<(u64, f64)> {
     }
 
     data
+}
+
+fn draw_centered(
+    x: i32,
+    y: i32,
+    text: &[(String, RGBColor)],
+    area: &DrawingArea<BitMapBackend<'_>, Shift>,
+) {
+    let small_style: TextStyle = (FontFamily::SansSerif, 14).into();
+
+    let size: i32 = text
+        .iter()
+        .map(|t| area.estimate_text_size(&t.0, &small_style).unwrap().0 as i32)
+        .sum::<i32>()
+        / 2;
+
+    let mut x = x + -size;
+
+    for (text, color) in text {
+        area.draw_text(
+            text,
+            &small_style
+                .pos(Pos::new(HPos::Left, VPos::Center))
+                .color(&color),
+            (x, y),
+        )
+        .unwrap();
+
+        x += area.estimate_text_size(text, &small_style).unwrap().0 as i32;
+    }
 }
 
 fn new_chart<'a, 'b, 'c>(
@@ -780,7 +845,7 @@ fn plot_throughput(
     throughputs: &[ThroughputPlot],
     start: f64,
     duration: f64,
-    area: &DrawingArea<BitMapBackend, Shift>,
+    area: &DrawingArea<BitMapBackend<'_>, Shift>,
 ) {
     let max_throughput = float_max(
         throughputs
@@ -797,13 +862,49 @@ fn plot_throughput(
         }
     }
 
+    let small_style: TextStyle = (FontFamily::SansSerif, 14).into();
+
+    let text_height = area.estimate_text_size("Wg", &small_style).unwrap().1 as i32 + 5;
+
+    let center = text_height / 2 + 10;
+
+    let side = 107;
+    let width =
+        (area.dim_in_pixel().0.saturating_sub(side * 2) as f64 / 1.14) / throughputs.len() as f64;
+
+    let (area, textarea) = area.split_vertically(area.dim_in_pixel().1 - (text_height as u32 + 10));
+
+    for (i, throughput) in throughputs.iter().enumerate() {
+        if let Some(rate) = throughput.rate {
+            let mut text = Vec::new();
+
+            text.push((
+                format!("{}", throughput.name),
+                darken(throughput.color, 0.6),
+            ));
+            text.push((format!(": {:.02} Mbps", rate), RGBColor(0, 0, 0)));
+
+            if let Some((down, up)) = throughput.dual_rates {
+                text.push((format!(" ({:.02} Mbps ", down), RGBColor(0, 0, 0)));
+                text.push(("down".to_owned(), darken(DOWN_COLOR, 0.7)));
+                text.push((format!(", {:.02} Mbps ", up), RGBColor(0, 0, 0)));
+                text.push(("up".to_owned(), darken(UP_COLOR, 0.7)));
+                text.push((")".to_owned(), RGBColor(0, 0, 0)));
+            }
+
+            let x = side as f64 + width * (i as f64) + width / 2.0;
+
+            draw_centered(x.round() as i32, center, &text, &textarea);
+        }
+    }
+
     let mut chart = new_chart(
         duration,
         None,
         max_throughput,
         "Throughput (Mbps)",
         None,
-        area,
+        &area,
     );
 
     for throughput in throughputs {
@@ -822,19 +923,13 @@ fn plot_throughput(
     }
 
     for throughput in throughputs {
-        let d = 0.5;
-        let color = RGBColor(
-            (throughput.color.0 as f64 * d).round() as u8,
-            (throughput.color.1 as f64 * d).round() as u8,
-            (throughput.color.2 as f64 * d).round() as u8,
-        );
         chart
             .draw_series(LineSeries::new(
                 throughput.smooth.iter().map(|(time, rate)| {
                     (Duration::from_micros(*time).as_secs_f64() - start, *rate)
                 }),
                 ShapeStyle {
-                    color: color.mix(0.5),
+                    color: darken(throughput.color, 0.5).mix(0.5),
                     filled: true,
                     stroke_width: 2,
                 },
