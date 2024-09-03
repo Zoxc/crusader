@@ -62,12 +62,16 @@ pub struct Server {
 
 fn interfaces() -> Vec<u32> {
     let mut _result = vec![0];
+    let mut theaddress: String = String::from("");
 
     #[cfg(target_family = "unix")]
     {
         if let Ok(interfaces) = nix::ifaddrs::getifaddrs() {
             for interface in interfaces {
-                println!("discover-interface {}", interface.interface_name);
+                if let Some(addr) = interface.address.as_ref().and_then(|i| i.as_sockaddr_in6()) {
+                    theaddress = format!("{}", addr);
+                };
+                println!("discover-interface {} address {}", interface.interface_name, theaddress);
                 if interface.flags.contains(InterfaceFlags::IFF_LOOPBACK) {
                     continue;
                 }
@@ -79,9 +83,10 @@ fn interfaces() -> Vec<u32> {
                         continue;
                     }
                     println!(
-                        "discover-adding-interface {} scope {}",
+                        "discover-adding-interface *** {} scope {} address {}",
                         interface.interface_name,
-                        addr.scope_id()
+                        addr.scope_id(),
+                        theaddress
                     );
                     _result.push(addr.scope_id());
                 }
