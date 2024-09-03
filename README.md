@@ -253,10 +253,7 @@ docker build .. -t crusader -f server-static.Dockerfile
   To get the git commit hash of the current checkout,
   use `git rev-parse HEAD`.
   
-* "I sometimes see this message. Should I be concerned?"
-`Warning: Load termination timed out. There may be residual untracked traffic in the background.`
-  
-  No. That may happen due to the TCP termination being lost
+* The message `Warning: Load termination timed out. There may be residual untracked traffic in the background.` is not harmful. It may happen due to the TCP termination being lost
   or TCP incompatibilities between OSes.
   It's likely benign if you see throughput and latency drop
   to idle values after the tests in the graph.
