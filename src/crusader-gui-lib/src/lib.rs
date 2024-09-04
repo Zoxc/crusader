@@ -991,11 +991,11 @@ impl Tester {
                                     .get(&(TestKind::Bidirectional, TestKind::Upload))
                                 {
                                     ui.label(" (");
-                                    ui.label(format!("{:.02} Mbps ", down));
+                                    ui.label(format!("{:.02} ", down));
                                     ui.label(
                                         RichText::new("down").color(Color32::from_rgb(95, 145, 62)),
                                     );
-                                    ui.label(format!(", {:.02} Mbps ", up));
+                                    ui.label(format!(", {:.02} ", up));
                                     ui.label(
                                         RichText::new("up").color(Color32::from_rgb(37, 83, 169)),
                                     );

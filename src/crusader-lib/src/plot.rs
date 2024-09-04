@@ -153,6 +153,45 @@ impl RawResult {
             TestKind::Bidirectional,
         );
 
+        let add_latency = |map: &mut HashMap<TestKind, LatencySummary>,
+                           stream: &Option<Vec<(u64, f64)>>,
+                           kind: TestKind,
+                           pings: &[RawPing]| {
+            if let Some(stream) = stream {
+                if let Some(t) = ping_peak(
+                    stream,
+                    self.test_data.iter().find(|d| d.kind == kind),
+                    self.config.load_duration,
+                    pings,
+                ) {
+                    map.insert(kind, t);
+                }
+            }
+        };
+
+        let latency_map = |pings: &[RawPing]| {
+            let mut latencies = HashMap::new();
+
+            let pings = smooth_ping(pings, Duration::from_millis(200));
+
+            add_latency(
+                &mut latencies,
+                &download_bytes_sum,
+                TestKind::Download,
+                &pings,
+            );
+            add_latency(&mut latencies, &upload_bytes_sum, TestKind::Upload, &pings);
+            add_latency(&mut latencies, &both_bytes, TestKind::Bidirectional, &pings);
+            latencies
+        };
+
+        let latencies = latency_map(&pings);
+        let peer_latencies = self
+            .peer_pings
+            .as_ref()
+            .map(|peer_pings| latency_map(peer_pings))
+            .unwrap_or_default();
+
         TestResult {
             raw_result: self.clone(),
             start: self.start,
@@ -167,6 +206,8 @@ impl RawResult {
             combined_upload_bytes,
             stream_groups,
             throughputs,
+            latencies,
+            peer_latencies,
         }
     }
 }
@@ -179,6 +220,13 @@ pub struct TestStreamGroup {
     pub download: bool,
     pub both: bool,
     pub streams: Vec<TestStream>,
+}
+
+#[derive(Debug)]
+pub struct LatencySummary {
+    pub total: Duration,
+    pub down: Duration,
+    pub up: Duration,
 }
 
 pub struct TestResult {
@@ -195,6 +243,8 @@ pub struct TestResult {
     pub pings: Vec<RawPing>,
     pub stream_groups: Vec<TestStreamGroup>,
     pub throughputs: HashMap<(TestKind, TestKind), f64>,
+    pub latencies: HashMap<TestKind, LatencySummary>,
+    pub peer_latencies: HashMap<TestKind, LatencySummary>,
 }
 
 pub fn save_graph(
@@ -226,6 +276,7 @@ pub(crate) struct ThroughputPlot<'a> {
     smooth: Vec<(u64, f64)>,
     bytes: Vec<&'a [(u64, f64)]>,
     rate: Option<f64>,
+    phase: Option<TestKind>,
     dual_rates: Option<(f64, f64)>,
 }
 
@@ -253,6 +304,7 @@ pub(crate) fn save_graph_to_mem(
                 .get(&(TestKind::Download, TestKind::Download))
                 .cloned(),
             dual_rates: None,
+            phase: Some(TestKind::Download),
         });
     });
 
@@ -268,6 +320,7 @@ pub(crate) fn save_graph_to_mem(
                 .get(&(TestKind::Upload, TestKind::Upload))
                 .cloned(),
             dual_rates: None,
+            phase: Some(TestKind::Upload),
         });
     });
 
@@ -280,6 +333,7 @@ pub(crate) fn save_graph_to_mem(
             bytes: vec![bytes.as_slice()],
             rate: None,
             dual_rates: None,
+            phase: None,
         });
     });
 
@@ -292,6 +346,7 @@ pub(crate) fn save_graph_to_mem(
             bytes: vec![bytes.as_slice()],
             rate: None,
             dual_rates: None,
+            phase: None,
         });
     });
 
@@ -317,6 +372,7 @@ pub(crate) fn save_graph_to_mem(
                         .cloned()
                         .map(|up| (down, up))
                 }),
+            phase: Some(TestKind::Bidirectional),
         });
     });
 
@@ -418,6 +474,48 @@ fn throughput(
     Some(mbits / duration)
 }
 
+fn ping_peak(
+    stream: &[(u64, f64)],
+    test_data: Option<&TestData>,
+    load_duration: Duration,
+    pings: &[RawPing],
+) -> Option<LatencySummary> {
+    if stream.is_empty() {
+        return None;
+    }
+
+    let test_start = if let Some(test_data) = test_data {
+        test_data.start
+    } else {
+        Duration::from_micros(stream.iter().find(|e| e.1 > 0.0)?.0)
+    };
+    let start = test_start.as_micros() as u64;
+    let end = (test_start + load_duration).as_micros() as u64;
+    let end = if let Some(test_data) = test_data {
+        cmp::min(test_data.end.as_micros() as u64, end)
+    } else {
+        end
+    };
+
+    if start >= end {
+        return None;
+    }
+
+    let start = pings.partition_point(|p| (p.sent.as_micros() as u64) < start);
+    let end = pings.partition_point(|p| (p.sent.as_micros() as u64) <= end);
+    let values = pings.get(start..end)?;
+
+    let point = values
+        .iter()
+        .max_by_key(|v| v.latency.unwrap().total.unwrap())?;
+
+    Some(LatencySummary {
+        total: point.latency.unwrap().total.unwrap(),
+        down: point.latency.unwrap().down().unwrap(),
+        up: point.latency.unwrap().up,
+    })
+}
+
 pub fn smooth(
     stream: &[(u64, f64)],
     interval: Duration,
@@ -460,6 +558,55 @@ pub fn smooth(
     }
 
     to_rates(&data)
+}
+
+fn smooth_ping(pings: &[RawPing], interval: Duration) -> Vec<RawPing> {
+    if pings.is_empty() {
+        return Vec::new();
+    }
+
+    let interval = interval.as_micros() as u64;
+    let step = interval / 4;
+
+    let min = (pings.first().unwrap().sent.as_micros() as u64).saturating_sub(interval);
+    let max = (pings.last().unwrap().sent.as_micros() as u64) + interval;
+
+    let mut data = Vec::new();
+
+    for (i, point) in (min..=max).step_by(step as usize).enumerate() {
+        let start =
+            pings.partition_point(|p| (p.sent.as_micros() as u64) < point.saturating_sub(interval));
+        let stop = pings.partition_point(|p| (p.sent.as_micros() as u64) <= point + interval);
+        let values = pings.get(start..stop);
+
+        if let Some(points) = values {
+            let values: Vec<_> = points
+                .iter()
+                .filter_map(|v| {
+                    v.latency.and_then(|l| {
+                        l.total
+                            .map(|total| (total.as_secs_f64(), l.up.as_secs_f64()))
+                    })
+                })
+                .collect();
+            if values.len() > 2 {
+                data.push(RawPing {
+                    sent: Duration::from_micros(point),
+                    index: i as u64,
+                    latency: Some(RawLatency {
+                        total: Some(Duration::from_secs_f64(
+                            values.iter().map(|v| v.0).sum::<f64>() / (values.len() as f64),
+                        )),
+                        up: Duration::from_secs_f64(
+                            values.iter().map(|v| v.1).sum::<f64>() / (values.len() as f64),
+                        ),
+                    }),
+                });
+            }
+        }
+    }
+
+    data
 }
 
 fn sum_bytes(input: &[&[(u64, f64)]], interval: Duration) -> Vec<(u64, f64)> {
@@ -626,6 +773,8 @@ fn latency<'a>(
     config: &PlotConfig,
     result: &TestResult,
     pings: &[RawPing],
+    throughputs: &[ThroughputPlot],
+    summaries: &HashMap<TestKind, LatencySummary>,
     start: f64,
     duration: f64,
     area: &DrawingArea<BitMapBackend<'a>, Shift>,
@@ -641,6 +790,53 @@ fn latency<'a>(
             area.split_vertically(area.relative_to_height(1.0) - 70.0);
         (&new_packet_loss_area, &new_area)
     };
+
+    // Draw latency summaries
+
+    let small_style: TextStyle = (FontFamily::SansSerif, 14).into();
+
+    let text_height = area.estimate_text_size("Wg", &small_style).unwrap().1 as i32 + 5;
+
+    let center = text_height / 2 + 5;
+
+    let side = 107;
+    let width = (area.dim_in_pixel().0.saturating_sub(side * 2) as f64 / 1.14)
+        / (throughputs.iter().filter(|t| t.phase.is_some()).count() as f64);
+
+    let (area, textarea) = area.split_vertically(area.dim_in_pixel().1 - (text_height as u32 + 10));
+
+    for (i, throughput) in throughputs.iter().filter(|t| t.phase.is_some()).enumerate() {
+        if let Some(latency) = throughput.phase.and_then(|phase| summaries.get(&phase)) {
+            let mut text = Vec::new();
+
+            text.push((
+                format!("{}", throughput.name),
+                darken(throughput.color, 0.5),
+            ));
+            text.push((
+                format!(": {:.01} ms", latency.total.as_secs_f64() * 1000.0),
+                RGBColor(0, 0, 0),
+            ));
+
+            text.push((
+                format!(" ({:.01} ", latency.down.as_secs_f64() * 1000.0),
+                RGBColor(0, 0, 0),
+            ));
+            text.push(("down".to_owned(), darken(DOWN_COLOR, 0.5)));
+            text.push((
+                format!(", {:.01} ", latency.up.as_secs_f64() * 1000.0),
+                RGBColor(0, 0, 0),
+            ));
+            text.push(("up".to_owned(), darken(UP_COLOR, 0.5)));
+            text.push((")".to_owned(), RGBColor(0, 0, 0)));
+
+            let x = side as f64 + width * (i as f64) + width / 2.0;
+
+            draw_centered(x.round() as i32, center, &text, &textarea);
+        }
+    }
+
+    // Draw latency plot
 
     let max_latency = pings
         .iter()
@@ -659,8 +855,6 @@ fn latency<'a>(
         }
     }
 
-    // Latency
-
     let mut chart = new_chart(
         duration,
         None,
@@ -671,7 +865,7 @@ fn latency<'a>(
             "Latency (ms)"
         },
         None,
-        area,
+        &area,
     );
 
     let mut draw_latency =
@@ -893,29 +1087,29 @@ fn plot_throughput(
 
     let text_height = area.estimate_text_size("Wg", &small_style).unwrap().1 as i32 + 5;
 
-    let center = text_height / 2 + 10;
+    let center = text_height / 2 + 5;
 
     let side = 107;
     let width = (area.dim_in_pixel().0.saturating_sub(side * 2) as f64 / 1.14)
-        / (throughputs.iter().filter(|t| t.rate.is_some()).count() as f64);
+        / (throughputs.iter().filter(|t| t.phase.is_some()).count() as f64);
 
     let (area, textarea) = area.split_vertically(area.dim_in_pixel().1 - (text_height as u32 + 10));
 
-    for (i, throughput) in throughputs.iter().filter(|t| t.rate.is_some()).enumerate() {
+    for (i, throughput) in throughputs.iter().filter(|t| t.phase.is_some()).enumerate() {
         if let Some(rate) = throughput.rate {
             let mut text = Vec::new();
 
             text.push((
                 format!("{}", throughput.name),
-                darken(throughput.color, 0.6),
+                darken(throughput.color, 0.5),
             ));
             text.push((format!(": {:.02} Mbps", rate), RGBColor(0, 0, 0)));
 
             if let Some((down, up)) = throughput.dual_rates {
-                text.push((format!(" ({:.02} Mbps ", down), RGBColor(0, 0, 0)));
-                text.push(("down".to_owned(), darken(DOWN_COLOR, 0.7)));
-                text.push((format!(", {:.02} Mbps ", up), RGBColor(0, 0, 0)));
-                text.push(("up".to_owned(), darken(UP_COLOR, 0.7)));
+                text.push((format!(" ({:.02} ", down), RGBColor(0, 0, 0)));
+                text.push(("down".to_owned(), darken(DOWN_COLOR, 0.5)));
+                text.push((format!(", {:.02} ", up), RGBColor(0, 0, 0)));
+                text.push(("up".to_owned(), darken(UP_COLOR, 0.5)));
                 text.push((")".to_owned(), RGBColor(0, 0, 0)));
             }
 
@@ -1192,6 +1386,8 @@ pub(crate) fn graph(
             config,
             result,
             pings,
+            throughput,
+            &result.latencies,
             start,
             duration,
             &areas[chart_index],
@@ -1205,6 +1401,8 @@ pub(crate) fn graph(
                 config,
                 result,
                 peer_pings,
+                throughput,
+                &result.peer_latencies,
                 start,
                 duration,
                 &areas[chart_index],
