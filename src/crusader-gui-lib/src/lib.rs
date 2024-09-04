@@ -977,7 +977,8 @@ impl Tester {
                         {
                             ui.spacing_mut().item_spacing.x = 0.0;
                             ui.label(
-                                RichText::new("Aggregate: ").color(Color32::from_rgb(149, 96, 153)),
+                                RichText::new("Bidirectional: ")
+                                    .color(Color32::from_rgb(149, 96, 153)),
                             );
                             ui.label(format!("{:.02} Mbps ", throughput));
                             if let Some(down) = result

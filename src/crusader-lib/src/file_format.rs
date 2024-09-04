@@ -100,6 +100,16 @@ pub enum TestKind {
     Bidirectional,
 }
 
+impl TestKind {
+    pub fn name(&self) -> &'static str {
+        match *self {
+            Self::Download => "Download",
+            Self::Upload => "Upload",
+            Self::Bidirectional => "Bidirectional",
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TestData {
     pub start: Duration,

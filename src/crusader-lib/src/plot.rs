@@ -806,13 +806,13 @@ fn latency<'a>(
     let (area, textarea) = area.split_vertically(area.dim_in_pixel().1 - (text_height as u32 + 10));
 
     for (i, throughput) in throughputs.iter().filter(|t| t.phase.is_some()).enumerate() {
-        if let Some(latency) = throughput.phase.and_then(|phase| summaries.get(&phase)) {
+        if let Some((phase, latency)) = throughput
+            .phase
+            .and_then(|phase| summaries.get(&phase).map(|latency| (phase, latency)))
+        {
             let mut text = Vec::new();
 
-            text.push((
-                format!("{}", throughput.name),
-                darken(throughput.color, 0.5),
-            ));
+            text.push((format!("{}", phase.name()), darken(throughput.color, 0.5)));
             text.push((
                 format!(": {:.01} ms", latency.total.as_secs_f64() * 1000.0),
                 RGBColor(0, 0, 0),
@@ -1100,7 +1100,7 @@ fn plot_throughput(
             let mut text = Vec::new();
 
             text.push((
-                format!("{}", throughput.name),
+                format!("{}", throughput.phase.unwrap().name()),
                 darken(throughput.color, 0.5),
             ));
             text.push((format!(": {:.02} Mbps", rate), RGBColor(0, 0, 0)));
