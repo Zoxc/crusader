@@ -728,10 +728,63 @@ impl Tester {
             &result.local_latency
         };
 
+        let latencies = if peer {
+            &result.result.peer_latencies
+        } else {
+            &result.result.latencies
+        };
+
         let duration = result.result.duration.as_secs_f64() * 1.1;
 
         strip.cell(|ui| {
-            ui.label(if peer { "Peer latency" } else { "Latency" });
+            ui.horizontal_wrapped(|ui| {
+                ui.label(if peer { "Peer latency" } else { "Latency" });
+
+                ui.spacing_mut().item_spacing.x = 0.0;
+
+                if let Some(latency) = latencies.get(&TestKind::Upload) {
+                    ui.add_space(20.0);
+
+                    ui.label(RichText::new("Download: ").color(Color32::from_rgb(95, 145, 62)));
+                    ui.label(format!("{:.01} ms", latency.total.as_secs_f64() * 1000.0));
+                    ui.label(" (");
+                    ui.label(format!("{:.01} ", latency.down.as_secs_f64() * 1000.0));
+                    ui.label(RichText::new("down").color(Color32::from_rgb(95, 145, 62)));
+                    ui.label(format!(", {:.01} ", latency.up.as_secs_f64() * 1000.0));
+                    ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
+                    ui.label(")");
+                }
+
+                if let Some(latency) = latencies.get(&TestKind::Upload) {
+                    ui.add_space(20.0);
+
+                    ui.label(RichText::new("Upload: ").color(Color32::from_rgb(37, 83, 169)));
+
+                    ui.label(format!("{:.01} ms", latency.total.as_secs_f64() * 1000.0));
+                    ui.label(" (");
+                    ui.label(format!("{:.01} ", latency.down.as_secs_f64() * 1000.0));
+                    ui.label(RichText::new("down").color(Color32::from_rgb(95, 145, 62)));
+                    ui.label(format!(", {:.01} ", latency.up.as_secs_f64() * 1000.0));
+                    ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
+                    ui.label(")");
+                }
+
+                if let Some(latency) = latencies.get(&TestKind::Bidirectional) {
+                    ui.add_space(20.0);
+
+                    ui.label(
+                        RichText::new("Bidirectional: ").color(Color32::from_rgb(149, 96, 153)),
+                    );
+                    ui.label(format!("{:.01} ms", latency.total.as_secs_f64() * 1000.0));
+                    ui.label(" (");
+                    ui.label(format!("{:.01} ", latency.down.as_secs_f64() * 1000.0));
+                    ui.label(RichText::new("down").color(Color32::from_rgb(95, 145, 62)));
+                    ui.label(format!(", {:.01} ", latency.up.as_secs_f64() * 1000.0));
+                    ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
+                    ui.label(")");
+                }
+            });
+
             // Latency
             let mut plot = Plot::new((peer, "ping"))
                 .legend(Legend::default())
@@ -942,8 +995,6 @@ impl Tester {
                     ui.horizontal_wrapped(|ui| {
                         ui.label("Throughput");
 
-                        ui.add_space(20.0);
-
                         ui.spacing_mut().item_spacing.x = 0.0;
 
                         if let Some(throughput) = result
@@ -951,6 +1002,8 @@ impl Tester {
                             .throughputs
                             .get(&(TestKind::Download, TestKind::Download))
                         {
+                            ui.add_space(20.0);
+
                             ui.label(
                                 RichText::new("Download: ").color(Color32::from_rgb(95, 145, 62)),
                             );
@@ -963,11 +1016,12 @@ impl Tester {
                             .throughputs
                             .get(&(TestKind::Upload, TestKind::Upload))
                         {
+                            ui.add_space(20.0);
+
                             ui.label(
                                 RichText::new("Upload: ").color(Color32::from_rgb(37, 83, 169)),
                             );
                             ui.label(format!("{:.02} Mbps", throughput));
-                            ui.add_space(20.0);
                         }
 
                         if let Some(throughput) = result
@@ -975,7 +1029,8 @@ impl Tester {
                             .throughputs
                             .get(&(TestKind::Bidirectional, TestKind::Bidirectional))
                         {
-                            ui.spacing_mut().item_spacing.x = 0.0;
+                            ui.add_space(20.0);
+
                             ui.label(
                                 RichText::new("Bidirectional: ")
                                     .color(Color32::from_rgb(149, 96, 153)),
