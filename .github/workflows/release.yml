@@ -37,42 +37,49 @@ jobs:
         build:
           - os: ubuntu-latest
             target: arm-unknown-linux-musleabihf
+            friendly: Linux-ARM-32-bit
             exe_postfix:
             cargo: cross
             gui: false
 
           - os: ubuntu-latest
             target: aarch64-unknown-linux-musl
+            friendly: Linux-ARM-64-bit
             exe_postfix:
             cargo: cross
             gui: false
 
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
+            friendly: Linux-X86-64-bit
             exe_postfix:
             cargo: cargo
             gui: false
 
           - os: macos-latest
             target: aarch64-apple-darwin
+            friendly: macOS-ARM-64-bit
             exe_postfix:
             cargo: cargo
             gui: true
 
           - os: macos-latest
             target: x86_64-apple-darwin
+            friendly: macOS-X86-64-bit
             exe_postfix:
             cargo: cargo
             gui: true
 
           - os: windows-latest
             target: i686-pc-windows-msvc
+            friendly: Windows-X86-32-bit
             exe_postfix: .exe
             cargo: cargo
             gui: true
 
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            friendly: Windows-X86-64-bit
             exe_postfix: .exe
             cargo: cargo
             gui: true
@@ -113,7 +120,7 @@ jobs:
       - name: Build output
         shell: bash
         run: |
-          staging="crusader-${{ matrix.build.target }}"
+          staging="Crusader-${{ matrix.build.friendly }}"
           mkdir -p "$staging"
           cp src/target/${{ matrix.build.target }}/release/crusader${{ matrix.build.exe_postfix }} "$staging/"
 
@@ -127,7 +134,7 @@ jobs:
         if: matrix.build.os == 'windows-latest'
         shell: bash
         run: |
-          staging="crusader-${{ matrix.build.target }}"
+          staging="Crusader-${{ matrix.build.friendly }}"
           7z a "$staging.zip" "$staging"
           echo "ASSET=$staging.zip" >> $GITHUB_ENV
 
@@ -135,7 +142,7 @@ jobs:
         if: matrix.build.os != 'windows-latest'
         shell: bash
         run: |
-          staging="crusader-${{ matrix.build.target }}"
+          staging="Crusader-${{ matrix.build.friendly }}"
           tar czf "$staging.tar.gz" "$staging"
           echo "ASSET=$staging.tar.gz" >> $GITHUB_ENV
 
@@ -210,6 +217,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_name: crusader-android.apk
+          asset_name: Crusader-Android.apk
           asset_path: android/app/build/outputs/apk/release/app-release.apk
           asset_content_type: application/octet-stream
