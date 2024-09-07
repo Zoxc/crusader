@@ -404,7 +404,7 @@ impl Tester {
             stream_stagger: Duration::from_secs_f64(self.settings.client.stream_stagger),
             download: self.settings.client.download,
             upload: self.settings.client.upload,
-            both: self.settings.client.bidirectional,
+            bidirectional: self.settings.client.bidirectional,
             ping_interval: Duration::from_millis(self.settings.client.latency_sample_interval),
             throughput_interval: Duration::from_millis(
                 self.settings.client.throughput_sample_interval,

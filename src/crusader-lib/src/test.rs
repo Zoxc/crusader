@@ -137,7 +137,7 @@ pub(crate) async fn test_async(
     let load_duration = config.load_duration;
     let ping_interval = config.ping_interval;
 
-    let loads = config.both as u32 + config.download as u32 + config.upload as u32;
+    let loads = config.bidirectional as u32 + config.download as u32 + config.upload as u32;
 
     let estimated_duration = load_duration * loads + grace * 2;
 
@@ -205,7 +205,7 @@ pub(crate) async fn test_async(
         );
     }
 
-    if config.both {
+    if config.bidirectional {
         loader_count += config.streams;
         upload_loaders(
             all_loaders.clone(),
@@ -236,7 +236,7 @@ pub(crate) async fn test_async(
         )
     });
 
-    let both_download = config.both.then(|| {
+    let both_download = config.bidirectional.then(|| {
         loader_count += config.streams;
         download_loaders(
             state.clone(),
@@ -586,7 +586,7 @@ pub(crate) async fn test_async(
         })
     });
 
-    config.both.then(|| {
+    config.bidirectional.then(|| {
         raw_streams.push(RawStreamGroup {
             download: false,
             both: true,

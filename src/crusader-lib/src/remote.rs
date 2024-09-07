@@ -51,7 +51,7 @@ struct TestArgs {
     server: Option<String>,
     download: bool,
     upload: bool,
-    both: bool,
+    bidirectional: bool,
     port: u16,
 
     streams: u64,
@@ -84,7 +84,7 @@ async fn handle_client(
         load_duration: Duration::from_secs_f64(args.load_duration),
         download: args.download,
         upload: args.upload,
-        both: args.both,
+        bidirectional: args.bidirectional,
         ping_interval: Duration::from_millis(args.latency_sample_interval),
         throughput_interval: Duration::from_millis(args.throughput_sample_interval),
     };

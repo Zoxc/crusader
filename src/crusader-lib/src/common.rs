@@ -56,7 +56,7 @@ pub(crate) enum TestState {
 pub struct Config {
     pub download: bool,
     pub upload: bool,
-    pub both: bool,
+    pub bidirectional: bool,
     pub port: u16,
     pub load_duration: Duration,
     pub grace_duration: Duration,

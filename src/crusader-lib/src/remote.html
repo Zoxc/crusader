@@ -107,8 +107,8 @@
                         </td>
                     </tr>
                     <tr>
-                        <td class="tspacer"><input type="checkbox" v-model="config.both" id="both"><label
-                                for="both">Both</label></td>
+                        <td class="tspacer"><input type="checkbox" v-model="config.bidirectional"
+                                id="bidirectional"><label for="bidirectional">Bidirectional</label></td>
                         <td>Grace duration:</td>
                         <td class="tspacer"><input type="number" v-model="config.grace_duration"> seconds</td>
                         <td>Throughput sample interval:</td>
@@ -149,7 +149,7 @@
                 server: "",
                 download: true,
                 upload: true,
-                both: true,
+                bidirectional: true,
                 port: 35481,
                 streams: 8,
                 stream_stagger: 0,

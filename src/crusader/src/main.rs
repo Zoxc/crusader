@@ -181,7 +181,7 @@ fn run() -> Result<(), anyhow::Error> {
                 load_duration: Duration::from_secs_f64(load_duration),
                 download: !idle,
                 upload: !idle,
-                both: !idle,
+                bidirectional: !idle,
                 ping_interval: Duration::from_millis(latency_sample_interval),
                 throughput_interval: Duration::from_millis(throughput_sample_interval),
             };
@@ -193,7 +193,7 @@ fn run() -> Result<(), anyhow::Error> {
                 }
                 config.download = download;
                 config.upload = upload;
-                config.both = bidirectional;
+                config.bidirectional = bidirectional;
             }
 
             crusader_lib::test::test(
