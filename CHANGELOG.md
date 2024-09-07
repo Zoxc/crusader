@@ -9,6 +9,7 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
+* Show throughput and latency summaries in plots
 * Rename both option to bidirectional
 
 ## 0.2 - 2024-08-29
