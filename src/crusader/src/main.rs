@@ -125,7 +125,7 @@ enum Commands {
             long,
             long_help = "Specifies another server (peer) which will also measure the latency to the server independently of the client"
         )]
-        latency_peer_server: Option<String>,
+        latency_peer_address: Option<String>,
         #[arg(
             long,
             help = "Use another server (peer) which will also measure the latency to the server independently of the client"
@@ -170,7 +170,7 @@ fn run() -> Result<(), anyhow::Error> {
             stream_stagger,
             grace_duration,
             load_duration,
-            ref latency_peer_server,
+            ref latency_peer_address,
             latency_peer,
         } => {
             let mut config = Config {
@@ -200,8 +200,8 @@ fn run() -> Result<(), anyhow::Error> {
                 config,
                 plot.config(),
                 server.as_deref(),
-                (latency_peer || latency_peer_server.is_some())
-                    .then_some(latency_peer_server.as_deref()),
+                (latency_peer || latency_peer_address.is_some())
+                    .then_some(latency_peer_address.as_deref()),
             )
         }
         &Commands::Serve { port, peer } => crusader_lib::serve::serve(port, peer),

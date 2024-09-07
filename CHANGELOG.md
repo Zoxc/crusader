@@ -11,6 +11,7 @@ This file lists the changes that have occurred since January 2024 in the project
 
 * Show throughput and latency summaries in plots
 * Rename both option to bidirectional
+* Rename `--latency-peer-server` to `--latency-peer-address`
 
 ## 0.2 - 2024-08-29
 

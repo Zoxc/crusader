@@ -173,7 +173,7 @@ crusader remote
 * **`--plot-width <PIXELS>`**
 * **`--plot-height <PIXELS>`**
 * **`--plot-title <PLOT_TITLE>`**
-* **`--latency-peer-server <LATENCY_PEER_SERVER>`**
+* **`--latency-peer-address <LATENCY_PEER_ADDRESS>`**
           Specifies another server (peer) which will
           also measure the latency to the server independently of the client
 * **`--latency-peer`**
