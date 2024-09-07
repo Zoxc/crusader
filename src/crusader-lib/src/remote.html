@@ -210,7 +210,7 @@
                         }
                         if (data.type == "result") {
                             time.value = data.time;
-                            log.value.push("Test completed.");
+                            log.value.push(`[${data.time.trim().replaceAll(".", ":")}] Test completed`);
                         }
                     }
                 };
