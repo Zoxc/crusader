@@ -920,9 +920,6 @@ impl Tester {
                     }
                 }
             });
-            self.result_saved
-                .as_ref()
-                .map(|file| ui.label(format!("Saved as: {file}")));
 
             ui.add_enabled_ui(self.raw_result_saved.is_none(), |ui| {
                 if ui.button("Save raw data").clicked() {
@@ -941,15 +938,21 @@ impl Tester {
                     }
                 }
             });
-            self.raw_result_saved
-                .as_ref()
-                .map(|file| ui.label(format!("Saved as: {file}")));
 
             if ui.button("Load raw data").clicked() {
                 self.load_result();
             }
         });
         ui.separator();
+
+        self.result_saved.as_ref().map(|file| {
+            ui.label(format!("Saved image as: {file}"));
+            ui.separator();
+        });
+        self.raw_result_saved.as_ref().map(|file| {
+            ui.label(format!("Saved raw data as: {file}"));
+            ui.separator();
+        });
 
         let result = self.result.as_ref().unwrap();
 
