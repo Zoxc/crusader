@@ -742,7 +742,7 @@ impl Tester {
 
                 ui.spacing_mut().item_spacing.x = 0.0;
 
-                if let Some(latency) = latencies.get(&TestKind::Upload) {
+                if let Some(latency) = latencies.get(&TestKind::Download) {
                     ui.add_space(20.0);
 
                     ui.label(RichText::new("Download: ").color(Color32::from_rgb(95, 145, 62)));
