@@ -1631,9 +1631,14 @@ impl Tester {
             ui.label("Latency");
             plot.show(ui, |plot_ui| {
                 let latency = points.iter().filter_map(|point| {
-                    point
-                        .up
-                        .map(|up| [point.sent.as_secs_f64() - now, 1000.0 * up.as_secs_f64()])
+                    point.up.map(|up| {
+                        let up = if let Some(total) = point.total {
+                            up.min(total)
+                        } else {
+                            up
+                        };
+                        [point.sent.as_secs_f64() - now, 1000.0 * up.as_secs_f64()]
+                    })
                 });
                 let latency = Line::new(PlotPoints::from_iter(latency))
                     .color(Color32::from_rgb(37, 83, 169))

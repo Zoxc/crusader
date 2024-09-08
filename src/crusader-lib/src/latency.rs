@@ -3,13 +3,13 @@ use futures::future::FutureExt;
 use futures::select;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
-use std::thread;
 use std::{
     io::Cursor,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
+use std::{iter, thread};
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc::{channel, Sender};
 use tokio::sync::oneshot;
@@ -35,17 +35,16 @@ pub struct Config {
 
 #[derive(Debug, Copy, Clone)]
 pub enum EventKind {
-    Sent,
+    Sent { sent: Duration },
     Timeout,
-    AtServer,
-    Pong,
+    AtServer { server_time: u64 },
+    Pong { recv: Duration },
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct Event {
     pub ping_index: u64,
     pub kind: EventKind,
-    pub time: Duration,
 }
 
 #[derive(Clone)]
@@ -55,6 +54,8 @@ pub struct Point {
     pub sent: Duration,
     pub total: Option<Duration>,
     pub up: Option<Duration>,
+    at_server: Option<u64>, // In server time
+    recv: Option<Duration>,
 }
 
 #[derive(Debug, Clone)]
@@ -132,7 +133,7 @@ async fn test_async(
 
     let mut ping_index = 0;
 
-    let (_latency, server_time_offset, mut control_rx) = measure_latency(
+    let (latency, mut server_time_offset, mut control_rx) = measure_latency(
         id,
         &mut ping_index,
         &mut control_tx,
@@ -142,6 +143,19 @@ async fn test_async(
         setup_start,
     )
     .await?;
+
+    let sample_interval = Duration::from_secs(2);
+    let sample_count =
+        (((sample_interval.as_secs_f64() * 0.6) / config.ping_interval.as_secs_f64()).round()
+            as usize)
+            .clamp(10, 1000);
+
+    let latency_filter =
+        Duration::from_secs_f64(latency.as_secs_f64() * 1.01) + Duration::from_micros(500);
+
+    let mut samples: VecDeque<u64> = iter::repeat(server_time_offset)
+        .take(sample_count)
+        .collect();
 
     let udp_socket = Arc::new(net::UdpSocket::bind(local_udp).await?);
     udp_socket.connect(server).await?;
@@ -165,10 +179,9 @@ async fn test_async(
                         event_tx_
                             .send(Event {
                                 ping_index: measure.index,
-                                kind: EventKind::AtServer,
-                                time: Duration::from_micros(
-                                    measure.time.wrapping_add(server_time_offset),
-                                ),
+                                kind: EventKind::AtServer {
+                                    server_time: measure.time,
+                                },
                             })
                             .await?;
                     }
@@ -205,6 +218,38 @@ async fn test_async(
     ));
 
     tokio::spawn(async move {
+        let mut sync_time = |server_time_offset: &mut u64, point: &Point| {
+            if let Some(at_server) = point.at_server {
+                if let Some(recv) = point.recv {
+                    let sent = point.sent;
+                    let latency = recv.saturating_sub(sent);
+
+                    if latency > latency_filter {
+                        return;
+                    }
+
+                    let server_time = at_server;
+                    let server_pong = sent + latency / 2;
+
+                    let server_offset = (server_pong.as_micros() as u64).wrapping_sub(server_time);
+
+                    samples.push_front(server_offset);
+                    samples.pop_back();
+
+                    let current = *server_time_offset;
+
+                    let sum: i64 = samples
+                        .iter()
+                        .map(|server_offset| server_offset.wrapping_sub(current) as i64)
+                        .sum();
+
+                    let offset = sum / (samples.len() as i64);
+
+                    *server_time_offset = current.wrapping_add(offset as u64);
+                }
+            }
+        };
+
         while let Some(event) = event_rx.recv().await {
             {
                 let mut points = data.points.lock().await;
@@ -214,27 +259,35 @@ async fn test_async(
                     .find(|r| r.1.index == event.ping_index)
                     .map(|r| r.0);
                 match event.kind {
-                    EventKind::Sent => {
+                    EventKind::Sent { sent } => {
                         while points.len() > data.limit {
                             points.pop_back();
                         }
                         points.push_front(Point {
                             pending: true,
                             index: event.ping_index,
-                            sent: event.time,
+                            sent,
                             up: None,
                             total: None,
+                            at_server: None,
+                            recv: None,
                         });
                     }
-                    EventKind::AtServer => {
+                    EventKind::AtServer { server_time } => {
                         i.map(|i| {
-                            points[i].up = Some(event.time.saturating_sub(points[i].sent));
+                            let time =
+                                Duration::from_micros(server_time.wrapping_add(server_time_offset));
+                            points[i].up = Some(time.saturating_sub(points[i].sent));
+                            points[i].at_server = Some(server_time);
+                            sync_time(&mut server_time_offset, &points[i]);
                         });
                     }
-                    EventKind::Pong => {
+                    EventKind::Pong { recv } => {
                         i.map(|i| {
                             points[i].pending = false;
-                            points[i].total = Some(event.time.saturating_sub(points[i].sent));
+                            points[i].recv = Some(recv);
+                            points[i].total = Some(recv.saturating_sub(points[i].sent));
+                            sync_time(&mut server_time_offset, &points[i]);
                         });
                     }
                     EventKind::Timeout => {
@@ -299,8 +352,7 @@ async fn ping_send(
         event_tx
             .send(Event {
                 ping_index,
-                kind: EventKind::Sent,
-                time: current,
+                kind: EventKind::Sent { sent: current },
             })
             .await?;
 
@@ -311,7 +363,6 @@ async fn ping_send(
                 .send(Event {
                     ping_index,
                     kind: EventKind::Timeout,
-                    time: Duration::from_secs(0),
                 })
                 .await
                 .ok();
@@ -341,8 +392,7 @@ async fn ping_recv(
         event_tx
             .send(Event {
                 ping_index: ping.index,
-                kind: EventKind::Pong,
-                time: current,
+                kind: EventKind::Pong { recv: current },
             })
             .await?;
     }

@@ -12,6 +12,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Show throughput, latency, and packet loss summaries in plots
 * Rename both option to bidirectional
 * Rename `--latency-peer-server` to `--latency-peer-address`
+* Continuous clock synchronization with the latency monitor
 
 ## 0.2 - 2024-08-29
 
