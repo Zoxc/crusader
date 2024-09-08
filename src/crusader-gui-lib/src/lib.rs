@@ -742,7 +742,7 @@ impl Tester {
 
                 ui.spacing_mut().item_spacing.x = 0.0;
 
-                if let Some(latency) = latencies.get(&TestKind::Download) {
+                if let Some(latency) = latencies.latencies.get(&TestKind::Download) {
                     ui.add_space(20.0);
 
                     ui.label(RichText::new("Download: ").color(Color32::from_rgb(95, 145, 62)));
@@ -755,7 +755,7 @@ impl Tester {
                     ui.label(")");
                 }
 
-                if let Some(latency) = latencies.get(&TestKind::Upload) {
+                if let Some(latency) = latencies.latencies.get(&TestKind::Upload) {
                     ui.add_space(20.0);
 
                     ui.label(RichText::new("Upload: ").color(Color32::from_rgb(37, 83, 169)));
@@ -769,7 +769,7 @@ impl Tester {
                     ui.label(")");
                 }
 
-                if let Some(latency) = latencies.get(&TestKind::Bidirectional) {
+                if let Some(latency) = latencies.latencies.get(&TestKind::Bidirectional) {
                     ui.add_space(20.0);
 
                     ui.label(
@@ -830,6 +830,72 @@ impl Tester {
         });
 
         strip.cell(|ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(if peer {
+                    "Peer packet loss"
+                } else {
+                    "Packet loss"
+                });
+
+                ui.spacing_mut().item_spacing.x = 0.0;
+
+                if let Some((down, up)) = latencies.loss.get(&TestKind::Download) {
+                    ui.add_space(20.0);
+
+                    ui.label(RichText::new("Download: ").color(Color32::from_rgb(95, 145, 62)));
+                    ui.label(format!(
+                        "{:.1$}% ",
+                        down * 100.0,
+                        if *down == 0.0 { 0 } else { 2 }
+                    ));
+                    ui.label(RichText::new("down").color(Color32::from_rgb(95, 145, 62)));
+                    ui.label(format!(
+                        ", {:.1$}% ",
+                        up * 100.0,
+                        if *up == 0.0 { 0 } else { 2 }
+                    ));
+                    ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
+                }
+
+                if let Some((down, up)) = latencies.loss.get(&TestKind::Upload) {
+                    ui.add_space(20.0);
+
+                    ui.label(RichText::new("Upload: ").color(Color32::from_rgb(37, 83, 169)));
+                    ui.label(format!(
+                        "{:.1$}% ",
+                        down * 100.0,
+                        if *down == 0.0 { 0 } else { 2 }
+                    ));
+                    ui.label(RichText::new("down").color(Color32::from_rgb(95, 145, 62)));
+                    ui.label(format!(
+                        ", {:.1$}% ",
+                        up * 100.0,
+                        if *up == 0.0 { 0 } else { 2 }
+                    ));
+                    ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
+                }
+
+                if let Some((down, up)) = latencies.loss.get(&TestKind::Bidirectional) {
+                    ui.add_space(20.0);
+
+                    ui.label(
+                        RichText::new("Bidirectional: ").color(Color32::from_rgb(149, 96, 153)),
+                    );
+                    ui.label(format!(
+                        "{:.1$}% ",
+                        down * 100.0,
+                        if *down == 0.0 { 0 } else { 2 }
+                    ));
+                    ui.label(RichText::new("down").color(Color32::from_rgb(95, 145, 62)));
+                    ui.label(format!(
+                        ", {:.1$}% ",
+                        up * 100.0,
+                        if *up == 0.0 { 0 } else { 2 }
+                    ));
+                    ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
+                }
+            });
+
             // Packet loss
             let mut plot = Plot::new((peer, "loss"))
                 .legend(Legend::default())
@@ -853,11 +919,6 @@ impl Tester {
                 plot = plot.reset();
             }
 
-            ui.label(if peer {
-                "Peer packet loss"
-            } else {
-                "Packet loss"
-            });
             plot.show(ui, |plot_ui| {
                 for &(loss, down_loss) in &data.loss {
                     let (color, s, e) = down_loss

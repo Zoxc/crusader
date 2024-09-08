@@ -9,7 +9,7 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
-* Show throughput and latency summaries in plots
+* Show throughput, latency, and packet loss summaries in plots
 * Rename both option to bidirectional
 * Rename `--latency-peer-server` to `--latency-peer-address`
 

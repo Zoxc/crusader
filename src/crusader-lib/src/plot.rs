@@ -154,35 +154,63 @@ impl RawResult {
         );
 
         let add_latency = |map: &mut HashMap<TestKind, LatencySummary>,
+                           loss: &mut HashMap<TestKind, (f64, f64)>,
                            stream: &Option<Vec<(u64, f64)>>,
                            kind: TestKind,
+                           smooth_pings: &[RawPing],
                            pings: &[RawPing]| {
             if let Some(stream) = stream {
                 if let Some(t) = ping_peak(
                     stream,
                     self.test_data.iter().find(|d| d.kind == kind),
                     self.config.load_duration,
-                    pings,
+                    smooth_pings,
                 ) {
                     map.insert(kind, t);
+                }
+                if let Some(t) = ping_loss(
+                    stream,
+                    self.test_data.iter().find(|d| d.kind == kind),
+                    self.config.load_duration,
+                    pings,
+                ) {
+                    loss.insert(kind, t);
                 }
             }
         };
 
         let latency_map = |pings: &[RawPing]| {
             let mut latencies = HashMap::new();
+            let mut loss = HashMap::new();
 
-            let pings = smooth_ping(pings, Duration::from_millis(200));
+            let smooth_pings = smooth_ping(pings, Duration::from_millis(200));
 
             add_latency(
                 &mut latencies,
+                &mut loss,
                 &download_bytes_sum,
                 TestKind::Download,
-                &pings,
+                &smooth_pings,
+                pings,
             );
-            add_latency(&mut latencies, &upload_bytes_sum, TestKind::Upload, &pings);
-            add_latency(&mut latencies, &both_bytes, TestKind::Bidirectional, &pings);
-            latencies
+            add_latency(
+                &mut latencies,
+                &mut loss,
+                &upload_bytes_sum,
+                TestKind::Upload,
+                &smooth_pings,
+                pings,
+            );
+            add_latency(
+                &mut latencies,
+                &mut loss,
+                &both_bytes,
+                TestKind::Bidirectional,
+                &smooth_pings,
+                pings,
+            );
+
+            LatencyLossSummary { latencies, loss }
         };
 
         let latencies = latency_map(&pings);
@@ -229,6 +257,12 @@ pub struct LatencySummary {
     pub up: Duration,
 }
 
+#[derive(Default)]
+pub struct LatencyLossSummary {
+    pub latencies: HashMap<TestKind, LatencySummary>,
+    pub loss: HashMap<TestKind, (f64, f64)>,
+}
+
 pub struct TestResult {
     pub raw_result: RawResult,
     pub start: Duration,
@@ -243,8 +277,8 @@ pub struct TestResult {
     pub pings: Vec<RawPing>,
     pub stream_groups: Vec<TestStreamGroup>,
     pub throughputs: HashMap<(TestKind, TestKind), f64>,
-    pub latencies: HashMap<TestKind, LatencySummary>,
-    pub peer_latencies: HashMap<TestKind, LatencySummary>,
+    pub latencies: LatencyLossSummary,
+    pub peer_latencies: LatencyLossSummary,
 }
 
 pub fn save_graph(
@@ -516,6 +550,49 @@ fn ping_peak(
     })
 }
 
+fn ping_loss(
+    stream: &[(u64, f64)],
+    test_data: Option<&TestData>,
+    load_duration: Duration,
+    pings: &[RawPing],
+) -> Option<(f64, f64)> {
+    if stream.is_empty() {
+        return None;
+    }
+
+    let test_start = if let Some(test_data) = test_data {
+        test_data.start
+    } else {
+        Duration::from_micros(stream.iter().find(|e| e.1 > 0.0)?.0)
+    };
+    let start = test_start.as_micros() as u64;
+    let end = (test_start + load_duration).as_micros() as u64;
+    let end = if let Some(test_data) = test_data {
+        cmp::min(test_data.end.as_micros() as u64, end)
+    } else {
+        end
+    };
+
+    if start >= end {
+        return None;
+    }
+
+    let start = pings.partition_point(|p| (p.sent.as_micros() as u64) < start);
+    let end = pings.partition_point(|p| (p.sent.as_micros() as u64) <= end);
+    let values = pings.get(start..end)?;
+
+    let loss_up = values.iter().filter(|v| v.latency.is_none()).count();
+
+    let loss_down = values
+        .iter()
+        .filter(|v| v.latency.map(|l| l.total.is_none()).unwrap_or(false))
+        .count();
+
+    let count = values.len() as f64;
+
+    Some(((loss_down as f64) / count, (loss_up as f64) / count))
+}
+
 pub fn smooth(
     stream: &[(u64, f64)],
     interval: Duration,
@@ -711,12 +788,12 @@ fn draw_centered(
     }
 }
 
-fn new_chart<'a, 'b, 'c>(
+fn new_chart<'a, 'c>(
     duration: f64,
     padding_bottom: Option<i32>,
     max: f64,
-    label: &'b str,
-    x_label: Option<&'b str>,
+    label: &str,
+    x_labels: bool,
     area: &'a DrawingArea<BitMapBackend<'c>, Shift>,
 ) -> ChartContext<'a, BitMapBackend<'c>, Cartesian2d<RangedCoordf64, RangedCoordf64>> {
     let font = (FontFamily::SansSerif, 16);
@@ -738,17 +815,13 @@ fn new_chart<'a, 'b, 'c>(
 
     mesh.disable_x_mesh().disable_y_mesh();
 
-    if x_label.is_none() {
+    if x_labels {
         mesh.x_labels(20).y_labels(10);
     } else {
         mesh.x_labels(0).y_labels(0);
     }
 
     mesh.x_label_style(font).y_label_style(font).y_desc(label);
-
-    if let Some(label) = x_label {
-        mesh.x_desc(label);
-    }
 
     mesh.draw().unwrap();
 
@@ -769,12 +842,14 @@ fn legends<'a, 'b: 'a>(
         .unwrap();
 }
 
+const PACKET_LOSS_AREA_SIZE: f64 = 70.0;
+
 fn latency<'a>(
     config: &PlotConfig,
     result: &TestResult,
     pings: &[RawPing],
     throughputs: &[ThroughputPlot],
-    summaries: &HashMap<TestKind, LatencySummary>,
+    summary: &LatencyLossSummary,
     start: f64,
     duration: f64,
     area: &DrawingArea<BitMapBackend<'a>, Shift>,
@@ -787,7 +862,7 @@ fn latency<'a>(
         (packet_loss_area, area)
     } else {
         (new_area, new_packet_loss_area) =
-            area.split_vertically(area.relative_to_height(1.0) - 70.0);
+            area.split_vertically(area.relative_to_height(1.0) - PACKET_LOSS_AREA_SIZE);
         (&new_packet_loss_area, &new_area)
     };
 
@@ -806,10 +881,12 @@ fn latency<'a>(
     let (area, textarea) = area.split_vertically(area.dim_in_pixel().1 - (text_height as u32 + 10));
 
     for (i, throughput) in throughputs.iter().filter(|t| t.phase.is_some()).enumerate() {
-        if let Some((phase, latency)) = throughput
-            .phase
-            .and_then(|phase| summaries.get(&phase).map(|latency| (phase, latency)))
-        {
+        if let Some((phase, latency)) = throughput.phase.and_then(|phase| {
+            summary
+                .latencies
+                .get(&phase)
+                .map(|latency| (phase, latency))
+        }) {
             let mut text = Vec::new();
 
             text.push((format!("{}", phase.name()), darken(throughput.color, 0.5)));
@@ -833,6 +910,35 @@ fn latency<'a>(
             let x = side as f64 + width * (i as f64) + width / 2.0;
 
             draw_centered(x.round() as i32, center, &text, &textarea);
+        }
+    }
+
+    // Draw packet loss summaries
+
+    let (packet_loss_area, textarea) =
+        packet_loss_area.split_vertically(packet_loss_area.dim_in_pixel().1);
+    for (i, throughput) in throughputs.iter().filter(|t| t.phase.is_some()).enumerate() {
+        if let Some((phase, (down, up))) = throughput
+            .phase
+            .and_then(|phase| summary.loss.get(&phase).map(|latency| (phase, latency)))
+        {
+            let mut text = Vec::new();
+
+            text.push((format!("{}", phase.name()), darken(throughput.color, 0.5)));
+            text.push((
+                format!(": {:.1$}% ", down * 100.0, if *down == 0.0 { 0 } else { 2 }),
+                RGBColor(0, 0, 0),
+            ));
+            text.push(("down".to_owned(), darken(DOWN_COLOR, 0.5)));
+            text.push((
+                format!(", {:.1$}% ", up * 100.0, if *up == 0.0 { 0 } else { 2 }),
+                RGBColor(0, 0, 0),
+            ));
+            text.push(("up".to_owned(), darken(UP_COLOR, 0.5)));
+
+            let x = side as f64 + width * (i as f64) + width / 2.0;
+
+            draw_centered(x.round() as i32, -16, &text, &textarea);
         }
     }
 
@@ -864,7 +970,7 @@ fn latency<'a>(
         } else {
             "Latency (ms)"
         },
-        None,
+        true,
         &area,
     );
 
@@ -933,8 +1039,8 @@ fn latency<'a>(
         Some(30),
         1.0,
         if peer { "Peer loss" } else { "Packet loss" },
-        Some("Elapsed time (seconds)"),
-        packet_loss_area,
+        false,
+        &packet_loss_area,
     );
 
     for ping in pings {
@@ -1021,7 +1127,7 @@ fn plot_split_throughput(
         } else {
             "Upload (Mbps)"
         },
-        None,
+        true,
         area,
     );
 
@@ -1124,7 +1230,7 @@ fn plot_throughput(
         None,
         max_throughput,
         "Throughput (Mbps)",
-        None,
+        true,
         &area,
     );
 
@@ -1186,7 +1292,7 @@ pub(crate) fn bytes_transferred(
         Some(50),
         max_bytes,
         "Data transferred (GiB)",
-        None,
+        true,
         area,
     );
 
@@ -1245,6 +1351,8 @@ pub(crate) fn graph(
         root.fill(&WHITE).unwrap();
 
         let style: TextStyle = (FontFamily::SansSerif, 26).into();
+
+        let medium_style: TextStyle = (FontFamily::SansSerif, 16).into();
 
         let small_style: TextStyle = (FontFamily::SansSerif, 14).into();
 
@@ -1313,11 +1421,22 @@ pub(crate) fn graph(
             .unwrap();
         }
 
+        let (root, textarea) = root.split_vertically(root.dim_in_pixel().1 - 24);
+
+        textarea
+            .draw_text(
+                "Elapsed time (seconds)",
+                &medium_style.pos(Pos::new(HPos::Center, VPos::Center)),
+                ((width as i32) / 2, 12),
+            )
+            .unwrap();
+
         let mut root = root.split_vertically(text_height + 10).1;
 
         let loss = if !peer_latency {
             let loss;
-            (root, loss) = root.split_vertically(root.relative_to_height(1.0) - 70.0);
+            (root, loss) =
+                root.split_vertically(root.relative_to_height(1.0) - PACKET_LOSS_AREA_SIZE);
             Some(loss)
         } else {
             None
