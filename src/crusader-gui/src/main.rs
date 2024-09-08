@@ -25,9 +25,6 @@ fn main() {
     options.follow_system_theme = false;
     options.default_theme = Theme::Light;
 
-    // VSync causes performance issues so turn it off.
-    options.vsync = false;
-
     crusader_lib::plot::register_fonts();
 
     let settings = std::env::current_exe()
