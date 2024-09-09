@@ -1726,7 +1726,7 @@ impl Tester {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, ui: &mut Ui) {
-        let compact = ui.available_width() < 620.0;
+        let compact = ui.available_width() < 660.0;
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Client, "Client");
             ui.selectable_value(&mut self.tab, Tab::Server, "Server");
