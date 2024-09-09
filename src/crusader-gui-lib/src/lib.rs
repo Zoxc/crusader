@@ -1488,9 +1488,9 @@ impl Tester {
     }
 
     fn monitor(&mut self, ctx: &egui::Context, ui: &mut Ui) {
-        let active = self.latency_state == ClientState::Stopped;
+        let running = self.latency_state != ClientState::Stopped;
 
-        if self.latency_state == ClientState::Stopped {
+        if !running {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Server address:");
                 let response = ui.add(
@@ -1499,41 +1499,14 @@ impl Tester {
                 );
                 let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
-                match self.latency_state {
-                    ClientState::Running | ClientState::Stopping => {}
-                    ClientState::Stopped => {
-                        if ui.button("Start test").clicked() || enter {
-                            self.start_monitor(ctx)
-                        }
-                    }
+                if ui.button("Start test").clicked() || enter {
+                    self.start_monitor(ctx)
                 }
-            });
-
-            ui.separator();
-
-            Grid::new("latency-settings-compact").show(ui, |ui| {
-                ui.label("History: ");
-                ui.add(
-                    egui::DragValue::new(&mut self.settings.latency_monitor.history)
-                        .range(0..=1000)
-                        .speed(0.05),
-                );
-                ui.label("seconds");
-                ui.end_row();
-                ui.label("Latency sample interval:");
-                ui.add(
-                    egui::DragValue::new(
-                        &mut self.settings.latency_monitor.latency_sample_interval,
-                    )
-                    .range(1..=1000)
-                    .speed(0.05),
-                );
-                ui.label("milliseconds");
             });
         }
 
-        if !active {
-            ui.horizontal_wrapped(|ui| {
+        if running {
+            ui.horizontal(|ui| {
                 match self.latency_state {
                     ClientState::Running => {
                         if ui.button("Stop test").clicked()
@@ -1573,6 +1546,30 @@ impl Tester {
                 }
             });
         }
+
+        ui.separator();
+
+        ui.add_enabled_ui(!running, |ui| {
+            Grid::new("latency-settings-compact").show(ui, |ui| {
+                ui.label("History: ");
+                ui.add(
+                    egui::DragValue::new(&mut self.settings.latency_monitor.history)
+                        .range(0..=1000)
+                        .speed(0.05),
+                );
+                ui.label("seconds");
+                ui.end_row();
+                ui.label("Latency sample interval:");
+                ui.add(
+                    egui::DragValue::new(
+                        &mut self.settings.latency_monitor.latency_sample_interval,
+                    )
+                    .range(1..=1000)
+                    .speed(0.05),
+                );
+                ui.label("milliseconds");
+            });
+        });
 
         ui.separator();
 
