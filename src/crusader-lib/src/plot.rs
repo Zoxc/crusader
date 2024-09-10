@@ -920,21 +920,25 @@ fn latency<'a>(
     for (i, throughput) in throughputs.iter().filter(|t| t.phase.is_some()).enumerate() {
         if let Some((phase, (down, up))) = throughput
             .phase
-            .and_then(|phase| summary.loss.get(&phase).map(|latency| (phase, latency)))
+            .and_then(|phase| summary.loss.get(&phase).map(|latency| (phase, *latency)))
         {
             let mut text = Vec::new();
 
             text.push((format!("{}", phase.name()), darken(throughput.color, 0.5)));
-            text.push((
-                format!(": {:.1$}% ", down * 100.0, if *down == 0.0 { 0 } else { 2 }),
-                RGBColor(0, 0, 0),
-            ));
-            text.push(("down".to_owned(), darken(DOWN_COLOR, 0.5)));
-            text.push((
-                format!(", {:.1$}% ", up * 100.0, if *up == 0.0 { 0 } else { 2 }),
-                RGBColor(0, 0, 0),
-            ));
-            text.push(("up".to_owned(), darken(UP_COLOR, 0.5)));
+            if down == 0.0 && up == 0.0 {
+                text.push((": 0%".to_owned(), RGBColor(0, 0, 0)));
+            } else {
+                text.push((
+                    format!(": {:.1$}% ", down * 100.0, if down == 0.0 { 0 } else { 2 }),
+                    RGBColor(0, 0, 0),
+                ));
+                text.push(("down".to_owned(), darken(DOWN_COLOR, 0.5)));
+                text.push((
+                    format!(", {:.1$}% ", up * 100.0, if up == 0.0 { 0 } else { 2 }),
+                    RGBColor(0, 0, 0),
+                ));
+                text.push(("up".to_owned(), darken(UP_COLOR, 0.5)));
+            }
 
             let x = side as f64 + width * (i as f64) + width / 2.0;
 
