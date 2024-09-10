@@ -22,7 +22,9 @@ use crusader_lib::{
     with_time, Config,
 };
 use eframe::{
-    egui::{self, Grid, Id, RichText, ScrollArea, TextEdit, TextStyle, Ui, Vec2b},
+    egui::{
+        self, Grid, Id, PopupCloseBehavior, RichText, ScrollArea, TextEdit, TextStyle, Ui, Vec2b,
+    },
     emath::{vec2, Align},
     epaint::Color32,
 };
@@ -1059,73 +1061,105 @@ impl Tester {
 
             if result.result.raw_result.streams() > 0 {
                 strip.cell(|ui| {
-                    ui.horizontal_wrapped(|ui| {
+                    ui.horizontal(|ui| {
                         ui.label("Throughput");
 
-                        ui.spacing_mut().item_spacing.x = 0.0;
+                        ui.style_mut().visuals.widgets.inactive.rounding = 50.0.into();
+                        ui.style_mut().visuals.widgets.hovered.rounding = 50.0.into();
+                        ui.style_mut().visuals.widgets.active.rounding = 50.0.into();
+                        ui.style_mut().visuals.widgets.inactive.fg_stroke.color =
+                            Color32::from_gray(140);
 
-                        if let Some(throughput) = result
-                            .result
-                            .throughputs
-                            .get(&(TestKind::Download, TestKind::Download))
-                        {
-                            ui.add_space(20.0);
+                        ui.spacing_mut().interact_size.y = 18.0;
 
-                            ui.label(
-                                RichText::new("Download: ").color(Color32::from_rgb(95, 145, 62)),
-                            );
-                            ui.label(format!("{:.02} Mbps", throughput));
-                            ui.add_space(20.0);
+                        let stats = ui.button("i");
+                        let popup_id = ui.make_persistent_id("my_unique_id");
+
+                        if stats.clicked() {
+                            ui.memory_mut(|mem| mem.toggle_popup(popup_id));
                         }
 
-                        if let Some(throughput) = result
-                            .result
-                            .throughputs
-                            .get(&(TestKind::Upload, TestKind::Upload))
-                        {
-                            ui.add_space(20.0);
+                        egui::popup::popup_below_widget(
+                            ui,
+                            popup_id,
+                            &stats,
+                            PopupCloseBehavior::CloseOnClickOutside,
+                            |ui| {
+                                //    ui.set_min_width(300.0);
 
-                            ui.label(
-                                RichText::new("Upload: ").color(Color32::from_rgb(37, 83, 169)),
-                            );
-                            ui.label(format!("{:.02} Mbps", throughput));
-                        }
-
-                        if let Some(throughput) = result
-                            .result
-                            .throughputs
-                            .get(&(TestKind::Bidirectional, TestKind::Bidirectional))
-                        {
-                            ui.add_space(20.0);
-
-                            ui.label(
-                                RichText::new("Bidirectional: ")
-                                    .color(Color32::from_rgb(149, 96, 153)),
-                            );
-                            ui.label(format!("{:.02} Mbps ", throughput));
-                            if let Some(down) = result
-                                .result
-                                .throughputs
-                                .get(&(TestKind::Bidirectional, TestKind::Download))
-                            {
-                                if let Some(up) = result
+                                if let Some(throughput) = result
                                     .result
                                     .throughputs
-                                    .get(&(TestKind::Bidirectional, TestKind::Upload))
+                                    .get(&(TestKind::Download, TestKind::Download))
                                 {
-                                    ui.label(" (");
-                                    ui.label(format!("{:.02} ", down));
-                                    ui.label(
-                                        RichText::new("down").color(Color32::from_rgb(95, 145, 62)),
-                                    );
-                                    ui.label(format!(", {:.02} ", up));
-                                    ui.label(
-                                        RichText::new("up").color(Color32::from_rgb(37, 83, 169)),
-                                    );
-                                    ui.label(")");
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 0.0;
+
+                                        ui.label(
+                                            RichText::new("Download: ")
+                                                .color(Color32::from_rgb(95, 145, 62)),
+                                        );
+                                        ui.label(format!("{:.02} Mbps", throughput));
+                                    });
                                 }
-                            }
-                        }
+
+                                if let Some(throughput) = result
+                                    .result
+                                    .throughputs
+                                    .get(&(TestKind::Upload, TestKind::Upload))
+                                {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 0.0;
+
+                                        ui.label(
+                                            RichText::new("Upload: ")
+                                                .color(Color32::from_rgb(37, 83, 169)),
+                                        );
+                                        ui.label(format!("{:.02} Mbps", throughput));
+                                    });
+                                }
+
+                                if let Some(throughput) = result
+                                    .result
+                                    .throughputs
+                                    .get(&(TestKind::Bidirectional, TestKind::Bidirectional))
+                                {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 0.0;
+
+                                        ui.label(
+                                            RichText::new("Bidirectional: ")
+                                                .color(Color32::from_rgb(149, 96, 153)),
+                                        );
+                                        ui.label(format!("{:.02} Mbps ", throughput));
+                                        if let Some(down) = result
+                                            .result
+                                            .throughputs
+                                            .get(&(TestKind::Bidirectional, TestKind::Download))
+                                        {
+                                            if let Some(up) = result
+                                                .result
+                                                .throughputs
+                                                .get(&(TestKind::Bidirectional, TestKind::Upload))
+                                            {
+                                                ui.label(" (");
+                                                ui.label(format!("{:.02} ", down));
+                                                ui.label(
+                                                    RichText::new("down")
+                                                        .color(Color32::from_rgb(95, 145, 62)),
+                                                );
+                                                ui.label(format!(", {:.02} ", up));
+                                                ui.label(
+                                                    RichText::new("up")
+                                                        .color(Color32::from_rgb(37, 83, 169)),
+                                                );
+                                                ui.label(")");
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                        );
                     });
 
                     // Throughput
