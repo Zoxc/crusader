@@ -1726,6 +1726,27 @@ impl Tester {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        ctx.input(|input| {
+            if let Some(file) = input
+                .raw
+                .dropped_files
+                .first()
+                .and_then(|file| file.path.as_deref())
+            {
+                RawResult::load(file).map(|raw| {
+                    self.load_file(
+                        file.file_name()
+                            .unwrap_or_default()
+                            .to_str()
+                            .unwrap_or_default()
+                            .to_string(),
+                        raw,
+                    );
+                    self.tab = Tab::Result;
+                });
+            }
+        });
+
         let compact = ui.available_width() < 660.0;
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Client, "Client");
