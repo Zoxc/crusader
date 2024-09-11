@@ -23,7 +23,7 @@ use crusader_lib::{
     test::{self, PlotConfig},
     with_time, Config,
 };
-use eframe::egui::AboveOrBelow;
+use eframe::egui::{AboveOrBelow, Label, TextWrapMode};
 use eframe::{
     egui::{
         self, Grid, Id, PopupCloseBehavior, RichText, ScrollArea, TextEdit, TextStyle, Ui, Vec2b,
@@ -1626,7 +1626,7 @@ impl Tester {
                     latency::State::Monitoring { ref at } => format!("Connected to {at}"),
                     latency::State::Syncing => "Synchronizing clocks..".to_owned(),
                 };
-                ui.label(state);
+                ui.add(Label::new(state).wrap_mode(TextWrapMode::Truncate));
 
                 let latency = self.latency.as_mut().unwrap();
 
