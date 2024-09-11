@@ -19,6 +19,7 @@ jobs:
       - name: Get the release version from the tag
         shell: bash
         run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
       - name: Create GitHub release
         id: release
         uses: actions/create-release@v1.1.4
@@ -28,7 +29,7 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           release_name: Automated build of ${{ env.TAG_NAME }}
           prerelease: true
-          body_path: src/.github/worksflows/release.md
+          body_path: .github/workflows/release.md
 
   release-assets:
     name: Release assets
