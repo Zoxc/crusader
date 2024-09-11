@@ -6,6 +6,7 @@
 )]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+use std::hash::Hash;
 use std::{
     fs, mem,
     path::{Path, PathBuf},
@@ -13,6 +14,7 @@ use std::{
     time::Duration,
 };
 
+use crusader_lib::plot::LatencySummary;
 use crusader_lib::{
     file_format::{RawPing, RawResult, TestKind},
     latency,
@@ -21,6 +23,7 @@ use crusader_lib::{
     test::{self, PlotConfig},
     with_time, Config,
 };
+use eframe::egui::AboveOrBelow;
 use eframe::{
     egui::{
         self, Grid, Id, PopupCloseBehavior, RichText, ScrollArea, TextEdit, TextStyle, Ui, Vec2b,
@@ -296,6 +299,94 @@ pub fn handle_bytes(data: &[(u64, f64)], start: f64) -> Vec<(f64, f64)> {
         .into_iter()
         .map(|(time, speed)| (Duration::from_micros(time).as_secs_f64() - start, speed))
         .collect()
+}
+
+fn hover_popup(
+    ui: &mut Ui,
+    id_source: impl Hash,
+    position: AboveOrBelow,
+    popup: impl FnOnce(&mut Ui),
+) {
+    ui.scope(|ui| {
+        let id = ui.make_persistent_id(id_source);
+
+        ui.spacing_mut().interact_size.y = 18.0;
+        let active = id.with("active");
+
+        let active_value = ui.memory_mut(|mem| {
+            let active = mem.data.get_temp_mut_or_default(active);
+            *active
+        });
+
+        let style = ui.style_mut();
+
+        style.visuals.widgets.inactive.rounding = 50.0.into();
+        style.visuals.widgets.hovered.rounding = 50.0.into();
+        style.visuals.widgets.active.rounding = 50.0.into();
+        style.visuals.widgets.inactive.fg_stroke.color = Color32::from_gray(140);
+
+        if active_value {
+            style.visuals.widgets.inactive.weak_bg_fill = style.visuals.selection.bg_fill;
+            style.visuals.widgets.hovered.weak_bg_fill = style.visuals.selection.bg_fill;
+        }
+
+        let stats = ui.button("i");
+        let popup_id = id.with("popup");
+
+        let contains_pointer =
+            if let Some(pointer) = ui.ctx().input(|input| input.pointer.latest_pos()) {
+                stats.interact_rect.expand(5.0).contains(pointer)
+            } else {
+                false
+            };
+
+        if stats.hovered() && contains_pointer {
+            ui.memory_mut(|mem| {
+                if !mem.any_popup_open() {
+                    mem.open_popup(popup_id);
+                }
+            });
+        } else if !active_value && !contains_pointer {
+            ui.memory_mut(|mem| {
+                if mem.is_popup_open(popup_id) {
+                    mem.close_popup();
+                }
+            });
+        }
+
+        if stats.clicked() {
+            ui.memory_mut(|mem| {
+                let active: &mut bool = mem.data.get_temp_mut_or_default(active);
+                *active = !*active;
+                if *active {
+                    mem.open_popup(popup_id);
+                } else {
+                    mem.close_popup();
+                }
+            });
+        }
+
+        egui::popup::popup_above_or_below_widget(
+            ui,
+            popup_id,
+            &stats,
+            position,
+            PopupCloseBehavior::CloseOnClickOutside,
+            |ui| {
+                popup(ui);
+            },
+        );
+
+        ui.memory_mut(|mem| {
+            if !mem.is_popup_open(popup_id) {
+                let active: &mut bool = mem.data.get_temp_mut_or_default(active);
+                if *active {
+                    //    ui.ctx().request_repaint();
+                }
+                *active = false;
+            }
+        });
+    });
 }
 
 impl Drop for Tester {
@@ -742,52 +833,60 @@ impl Tester {
         let duration = result.result.duration.as_secs_f64() * 1.1;
 
         strip.cell(|ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(if peer { "Peer latency" } else { "Latency" });
+            ui.horizontal(|ui| {
+                let label = if peer { "Peer latency" } else { "Latency" };
+                ui.label(label);
 
-                ui.spacing_mut().item_spacing.x = 0.0;
+                hover_popup(ui, (label, "Popup"), AboveOrBelow::Above, |ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
 
-                if let Some(latency) = latencies.latencies.get(&TestKind::Download) {
-                    ui.add_space(20.0);
+                    let stats = |ui: &mut Ui, name, color, latency: &LatencySummary| {
+                        ui.vertical(|ui| {
+                            ui.add_space(5.0);
+                            ui.spacing_mut().interact_size.y = 10.0;
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("{name}: ")).color(color));
+                                ui.label(format!(
+                                    "{:.01} ms",
+                                    latency.total.as_secs_f64() * 1000.0
+                                ));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(format!(
+                                    "\t\t{:.01} ms ",
+                                    latency.down.as_secs_f64() * 1000.0
+                                ));
+                                ui.label(
+                                    RichText::new("down").color(Color32::from_rgb(95, 145, 62)),
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(format!(
+                                    "\t\t{:.01} ms ",
+                                    latency.up.as_secs_f64() * 1000.0
+                                ));
+                                ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
+                            });
+                        });
+                    };
 
-                    ui.label(RichText::new("Download: ").color(Color32::from_rgb(95, 145, 62)));
-                    ui.label(format!("{:.01} ms", latency.total.as_secs_f64() * 1000.0));
-                    ui.label(" (");
-                    ui.label(format!("{:.01} ", latency.down.as_secs_f64() * 1000.0));
-                    ui.label(RichText::new("down").color(Color32::from_rgb(95, 145, 62)));
-                    ui.label(format!(", {:.01} ", latency.up.as_secs_f64() * 1000.0));
-                    ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
-                    ui.label(")");
-                }
+                    if let Some(latency) = latencies.latencies.get(&TestKind::Download) {
+                        stats(ui, "Download", Color32::from_rgb(95, 145, 62), latency);
+                    }
 
-                if let Some(latency) = latencies.latencies.get(&TestKind::Upload) {
-                    ui.add_space(20.0);
+                    if let Some(latency) = latencies.latencies.get(&TestKind::Upload) {
+                        stats(ui, "Upload", Color32::from_rgb(37, 83, 169), latency);
+                    }
 
-                    ui.label(RichText::new("Upload: ").color(Color32::from_rgb(37, 83, 169)));
-
-                    ui.label(format!("{:.01} ms", latency.total.as_secs_f64() * 1000.0));
-                    ui.label(" (");
-                    ui.label(format!("{:.01} ", latency.down.as_secs_f64() * 1000.0));
-                    ui.label(RichText::new("down").color(Color32::from_rgb(95, 145, 62)));
-                    ui.label(format!(", {:.01} ", latency.up.as_secs_f64() * 1000.0));
-                    ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
-                    ui.label(")");
-                }
-
-                if let Some(latency) = latencies.latencies.get(&TestKind::Bidirectional) {
-                    ui.add_space(20.0);
-
-                    ui.label(
-                        RichText::new("Bidirectional: ").color(Color32::from_rgb(149, 96, 153)),
-                    );
-                    ui.label(format!("{:.01} ms", latency.total.as_secs_f64() * 1000.0));
-                    ui.label(" (");
-                    ui.label(format!("{:.01} ", latency.down.as_secs_f64() * 1000.0));
-                    ui.label(RichText::new("down").color(Color32::from_rgb(95, 145, 62)));
-                    ui.label(format!(", {:.01} ", latency.up.as_secs_f64() * 1000.0));
-                    ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
-                    ui.label(")");
-                }
+                    if let Some(latency) = latencies.latencies.get(&TestKind::Bidirectional) {
+                        stats(
+                            ui,
+                            "Bidirectional",
+                            Color32::from_rgb(149, 96, 153),
+                            latency,
+                        );
+                    }
+                });
             });
 
             // Latency
@@ -835,70 +934,53 @@ impl Tester {
         });
 
         strip.cell(|ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(if peer {
+            ui.horizontal(|ui| {
+                let label = if peer {
                     "Peer packet loss"
                 } else {
                     "Packet loss"
+                };
+                ui.label(label);
+
+                hover_popup(ui, (label, "Popup"), AboveOrBelow::Above, |ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+
+                    let stats = |ui: &mut Ui, name, color, (down, up): (f64, f64)| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("{name}: ")).color(color));
+                            if down == 0.0 && up == 0.0 {
+                                ui.label("0%");
+                            } else {
+                                ui.label(format!(
+                                    "{:.1$}% ",
+                                    down * 100.0,
+                                    if down == 0.0 { 0 } else { 2 }
+                                ));
+                                ui.label(
+                                    RichText::new("down").color(Color32::from_rgb(95, 145, 62)),
+                                );
+                                ui.label(format!(
+                                    ", {:.1$}% ",
+                                    up * 100.0,
+                                    if up == 0.0 { 0 } else { 2 }
+                                ));
+                                ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
+                            }
+                        });
+                    };
+
+                    if let Some(loss) = latencies.loss.get(&TestKind::Download) {
+                        stats(ui, "Download", Color32::from_rgb(95, 145, 62), *loss);
+                    }
+
+                    if let Some(loss) = latencies.loss.get(&TestKind::Upload) {
+                        stats(ui, "Upload", Color32::from_rgb(37, 83, 169), *loss);
+                    }
+
+                    if let Some(loss) = latencies.loss.get(&TestKind::Bidirectional) {
+                        stats(ui, "Bidirectional", Color32::from_rgb(149, 96, 153), *loss);
+                    }
                 });
-
-                ui.spacing_mut().item_spacing.x = 0.0;
-
-                if let Some((down, up)) = latencies.loss.get(&TestKind::Download) {
-                    ui.add_space(20.0);
-
-                    ui.label(RichText::new("Download: ").color(Color32::from_rgb(95, 145, 62)));
-                    ui.label(format!(
-                        "{:.1$}% ",
-                        down * 100.0,
-                        if *down == 0.0 { 0 } else { 2 }
-                    ));
-                    ui.label(RichText::new("down").color(Color32::from_rgb(95, 145, 62)));
-                    ui.label(format!(
-                        ", {:.1$}% ",
-                        up * 100.0,
-                        if *up == 0.0 { 0 } else { 2 }
-                    ));
-                    ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
-                }
-
-                if let Some((down, up)) = latencies.loss.get(&TestKind::Upload) {
-                    ui.add_space(20.0);
-
-                    ui.label(RichText::new("Upload: ").color(Color32::from_rgb(37, 83, 169)));
-                    ui.label(format!(
-                        "{:.1$}% ",
-                        down * 100.0,
-                        if *down == 0.0 { 0 } else { 2 }
-                    ));
-                    ui.label(RichText::new("down").color(Color32::from_rgb(95, 145, 62)));
-                    ui.label(format!(
-                        ", {:.1$}% ",
-                        up * 100.0,
-                        if *up == 0.0 { 0 } else { 2 }
-                    ));
-                    ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
-                }
-
-                if let Some((down, up)) = latencies.loss.get(&TestKind::Bidirectional) {
-                    ui.add_space(20.0);
-
-                    ui.label(
-                        RichText::new("Bidirectional: ").color(Color32::from_rgb(149, 96, 153)),
-                    );
-                    ui.label(format!(
-                        "{:.1$}% ",
-                        down * 100.0,
-                        if *down == 0.0 { 0 } else { 2 }
-                    ));
-                    ui.label(RichText::new("down").color(Color32::from_rgb(95, 145, 62)));
-                    ui.label(format!(
-                        ", {:.1$}% ",
-                        up * 100.0,
-                        if *up == 0.0 { 0 } else { 2 }
-                    ));
-                    ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
-                }
             });
 
             // Packet loss
@@ -1032,7 +1114,7 @@ impl Tester {
             ui.separator();
         }
 
-        let packet_loss_size = 55.0;
+        let packet_loss_size = 75.0;
 
         let result = self.result.as_ref().unwrap();
 
@@ -1064,102 +1146,79 @@ impl Tester {
                     ui.horizontal(|ui| {
                         ui.label("Throughput");
 
-                        ui.style_mut().visuals.widgets.inactive.rounding = 50.0.into();
-                        ui.style_mut().visuals.widgets.hovered.rounding = 50.0.into();
-                        ui.style_mut().visuals.widgets.active.rounding = 50.0.into();
-                        ui.style_mut().visuals.widgets.inactive.fg_stroke.color =
-                            Color32::from_gray(140);
+                        hover_popup(ui, "Throughput-Popup", AboveOrBelow::Below, |ui| {
+                            ui.spacing_mut().item_spacing.x = 0.0;
+                            if let Some(throughput) = result
+                                .result
+                                .throughputs
+                                .get(&(TestKind::Download, TestKind::Download))
+                            {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new("Download: ")
+                                            .color(Color32::from_rgb(95, 145, 62)),
+                                    );
+                                    ui.label(format!("{:.02} Mbps", throughput));
+                                });
+                            }
 
-                        ui.spacing_mut().interact_size.y = 18.0;
+                            if let Some(throughput) = result
+                                .result
+                                .throughputs
+                                .get(&(TestKind::Upload, TestKind::Upload))
+                            {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new("Upload: ")
+                                            .color(Color32::from_rgb(37, 83, 169)),
+                                    );
+                                    ui.label(format!("{:.02} Mbps", throughput));
+                                });
+                            }
 
-                        let stats = ui.button("i");
-                        let popup_id = ui.make_persistent_id("my_unique_id");
-
-                        if stats.clicked() {
-                            ui.memory_mut(|mem| mem.toggle_popup(popup_id));
-                        }
-
-                        egui::popup::popup_below_widget(
-                            ui,
-                            popup_id,
-                            &stats,
-                            PopupCloseBehavior::CloseOnClickOutside,
-                            |ui| {
-                                //    ui.set_min_width(300.0);
-
-                                if let Some(throughput) = result
-                                    .result
-                                    .throughputs
-                                    .get(&(TestKind::Download, TestKind::Download))
-                                {
+                            if let Some(throughput) = result
+                                .result
+                                .throughputs
+                                .get(&(TestKind::Bidirectional, TestKind::Bidirectional))
+                            {
+                                ui.vertical(|ui| {
+                                    ui.spacing_mut().interact_size.y = 10.0;
                                     ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 0.0;
-
-                                        ui.label(
-                                            RichText::new("Download: ")
-                                                .color(Color32::from_rgb(95, 145, 62)),
-                                        );
-                                        ui.label(format!("{:.02} Mbps", throughput));
-                                    });
-                                }
-
-                                if let Some(throughput) = result
-                                    .result
-                                    .throughputs
-                                    .get(&(TestKind::Upload, TestKind::Upload))
-                                {
-                                    ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 0.0;
-
-                                        ui.label(
-                                            RichText::new("Upload: ")
-                                                .color(Color32::from_rgb(37, 83, 169)),
-                                        );
-                                        ui.label(format!("{:.02} Mbps", throughput));
-                                    });
-                                }
-
-                                if let Some(throughput) = result
-                                    .result
-                                    .throughputs
-                                    .get(&(TestKind::Bidirectional, TestKind::Bidirectional))
-                                {
-                                    ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 0.0;
-
                                         ui.label(
                                             RichText::new("Bidirectional: ")
                                                 .color(Color32::from_rgb(149, 96, 153)),
                                         );
                                         ui.label(format!("{:.02} Mbps ", throughput));
-                                        if let Some(down) = result
+                                    });
+                                    if let Some(down) = result
+                                        .result
+                                        .throughputs
+                                        .get(&(TestKind::Bidirectional, TestKind::Download))
+                                    {
+                                        if let Some(up) = result
                                             .result
                                             .throughputs
-                                            .get(&(TestKind::Bidirectional, TestKind::Download))
+                                            .get(&(TestKind::Bidirectional, TestKind::Upload))
                                         {
-                                            if let Some(up) = result
-                                                .result
-                                                .throughputs
-                                                .get(&(TestKind::Bidirectional, TestKind::Upload))
-                                            {
-                                                ui.label(" (");
-                                                ui.label(format!("{:.02} ", down));
+                                            ui.horizontal(|ui| {
+                                                ui.label(format!("\t\t{:.02} Mbps ", down));
                                                 ui.label(
                                                     RichText::new("down")
                                                         .color(Color32::from_rgb(95, 145, 62)),
                                                 );
-                                                ui.label(format!(", {:.02} ", up));
+                                            });
+                                            ui.horizontal(|ui| {
+                                                ui.label(format!("\t\t{:.02} Mbps ", up));
                                                 ui.label(
                                                     RichText::new("up")
                                                         .color(Color32::from_rgb(37, 83, 169)),
                                                 );
-                                                ui.label(")");
-                                            }
+                                            });
                                         }
-                                    });
-                                }
-                            },
-                        );
+                                    }
+                                });
+                            }
+                        });
                     });
 
                     // Throughput
