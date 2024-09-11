@@ -29,7 +29,7 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           release_name: Automated build of ${{ env.TAG_NAME }}
           prerelease: true
-          body_path: .github/workflows/release.md
+          body: test
 
   release-assets:
     name: Release assets
