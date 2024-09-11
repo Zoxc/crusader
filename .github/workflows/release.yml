@@ -14,7 +14,6 @@ jobs:
     outputs:
       upload_url: ${{ steps.release.outputs.upload_url }}
     permissions:
-      packages: write
       contents: write
     steps:
       - uses: actions/checkout@v2
@@ -32,6 +31,7 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           release_name: Automated build of ${{ env.TAG_NAME }}
           prerelease: true
+          body_path: .github/workflows/release.md
 
   release-assets:
     name: Release assets
