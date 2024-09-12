@@ -16,6 +16,8 @@ This file lists the changes that have occurred since January 2024 in the project
 * Support opening result files in the GUI by drag and drop
 * Add `--out-name` command line option to specify result filename prefix
 * Change filename prefix for both raw result and plots to `test`
+* Add file dialog to save options in GUI
+* Add buttons to save and load from the `crusader-results` folder in GUI
 
 ## 0.2 - 2024-08-29
 

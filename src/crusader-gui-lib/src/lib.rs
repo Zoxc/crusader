@@ -6,6 +6,7 @@
 )]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+use std::ffi::OsStr;
 use std::hash::Hash;
 use std::{
     fs, mem,
@@ -24,7 +25,7 @@ use crusader_lib::{
     test::{self, PlotConfig},
     with_time, Config,
 };
-use eframe::egui::{AboveOrBelow, Label, TextWrapMode};
+use eframe::egui::{AboveOrBelow, Label, Layout, TextWrapMode};
 use eframe::{
     egui::{
         self, Grid, Id, PopupCloseBehavior, RichText, ScrollArea, TextEdit, TextStyle, Ui, Vec2b,
@@ -169,9 +170,10 @@ pub struct Tester {
     client: Option<Client>,
     result_plot_reset: bool,
     result: Option<TestResult>,
-    result_saved: Option<String>,
-    raw_result: Option<RawResult>,
+    result_plot_saved: Option<String>,
     raw_result_saved: Option<String>,
+    open_result: Vec<PathBuf>,
+    result_name: String,
     msgs: Vec<String>,
     msg_scrolled: usize,
     pub file_loader: Option<Box<dyn Fn(&mut Tester)>>,
@@ -439,10 +441,11 @@ impl Tester {
             client_state: ClientState::Stopped,
             client: None,
             result: None,
-            result_saved: None,
+            result_plot_saved: None,
             result_plot_reset: false,
-            raw_result: None,
             raw_result_saved: None,
+            result_name: "".to_string(),
+            open_result: Vec::new(),
             msgs: Vec::new(),
             msg_scrolled: 0,
             server_state: ServerState::Stopped(None),
@@ -461,12 +464,17 @@ impl Tester {
         }
     }
 
-    pub fn load_file(&mut self, name: String, raw: RawResult) {
+    pub fn set_result(&mut self, raw: RawResult) {
         let result = raw.to_test_result();
         self.result = Some(TestResult::new(result));
-        self.result_saved = None;
+        self.result_name = "test".to_owned();
         self.result_plot_reset = true;
-        self.raw_result = Some(raw);
+        self.result_plot_saved = None;
+        self.raw_result_saved = None;
+    }
+
+    pub fn load_file(&mut self, name: String, raw: RawResult) {
+        self.set_result(raw);
         self.raw_result_saved = Some(name);
     }
 
@@ -475,7 +483,7 @@ impl Tester {
     }
 
     pub fn save_plot(&mut self, name: String) {
-        self.result_saved = Some(name);
+        self.result_plot_saved = Some(name);
     }
 
     fn save_settings(&mut self) {
@@ -541,11 +549,6 @@ impl Tester {
             abort: Some(abort),
         });
         self.client_state = ClientState::Running;
-        self.result = None;
-        self.result_saved = None;
-        self.result_plot_reset = true;
-        self.raw_result = None;
-        self.raw_result_saved = None;
     }
 
     fn load_result(&mut self) {
@@ -776,9 +779,7 @@ impl Tester {
                         match result {
                             Some(Ok(result)) => {
                                 self.msgs.push(with_time("Test complete"));
-                                self.result = Some(TestResult::new(result.to_test_result()));
-                                self.result_plot_reset = true;
-                                self.raw_result = Some(result);
+                                self.set_result(result);
                                 if self.tab == Tab::Client {
                                     self.tab = Tab::Result;
                                 }
@@ -1040,66 +1041,231 @@ impl Tester {
         });
     }
 
+    fn load_popup(&mut self, ui: &mut Ui) {
+        if cfg!(not(target_os = "android")) {
+            let popup_id = ui.make_persistent_id("Load-Popup");
+
+            let button = ui.button("Load from results");
+
+            if button.clicked() {
+                ui.memory_mut(|mem| {
+                    mem.toggle_popup(popup_id);
+                    if mem.is_popup_open(popup_id) {
+                        self.open_result = fs::read_dir("crusader-results")
+                            .ok()
+                            .map(|dir| {
+                                dir.filter_map(|file| {
+                                    file.ok()
+                                        .map(|file| file.path())
+                                        .filter(|path| path.extension() == Some(OsStr::new("crr")))
+                                })
+                                .collect()
+                            })
+                            .unwrap_or_default();
+                    }
+                });
+            }
+
+            egui::popup::popup_below_widget(
+                ui,
+                popup_id,
+                &button,
+                PopupCloseBehavior::CloseOnClickOutside,
+                |ui| {
+                    ui.set_min_width(300.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Results available in the");
+                        if ui.link("crusader-results").clicked() {
+                            open::that("crusader-results").ok();
+                        }
+                        ui.label("folder:");
+                    });
+
+                    ScrollArea::vertical().show(ui, |ui| {
+                        ui.with_layout(Layout::top_down_justified(Align::LEFT), |ui| {
+                            for file in self.open_result.clone() {
+                                if let Some(prefix) =
+                                    file.file_name().and_then(|stem| stem.to_str())
+                                {
+                                    if ui.toggle_value(&mut false, prefix).clicked() {
+                                        ui.memory_mut(|mem| mem.close_popup());
+                                        RawResult::load(&file).map(|raw| {
+                                            self.load_file(
+                                                file.file_name()
+                                                    .unwrap_or_default()
+                                                    .to_str()
+                                                    .unwrap_or_default()
+                                                    .to_string(),
+                                                raw,
+                                            );
+                                        });
+                                    }
+                                }
+                            }
+                        });
+                    });
+                },
+            );
+        }
+    }
+
     fn result(&mut self, _ctx: &egui::Context, ui: &mut Ui) {
         if self.result.is_none() {
-            if ui.button("Load raw data").clicked() {
-                self.load_result();
-            }
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("Load data").clicked() {
+                    self.load_result();
+                }
+                ui.add_space(10.0);
+                self.load_popup(ui);
+            });
             ui.separator();
             ui.label("No result.");
             return;
         }
 
         ui.horizontal_wrapped(|ui| {
-            ui.add_enabled_ui(self.result_saved.is_none(), |ui| {
-                if ui.button("Save as image").clicked() {
-                    match self.plot_saver.as_ref() {
-                        Some(saver) => {
-                            saver(&self.result.as_ref().unwrap().result);
-                        }
-                        None => {
-                            self.result_saved = plot::save_graph(
-                                &PlotConfig::default(),
-                                &self.result.as_ref().unwrap().result,
-                                &timed("test"),
-                                Path::new("crusader-results"),
-                            )
-                            .ok();
+            if ui.button("Save plot").clicked() {
+                match self.plot_saver.as_ref() {
+                    Some(saver) => {
+                        saver(&self.result.as_ref().unwrap().result);
+                    }
+                    None => {
+                        #[cfg(not(target_os = "android"))]
+                        {
+                            FileDialog::new()
+                                .add_filter("Portable Network Graphics", &["png"])
+                                .add_filter("All files", &["*"])
+                                .set_file_name(&format!("{}.png", timed("test")))
+                                .save_file()
+                                .map(|file| {
+                                    if plot::save_graph_to_path(
+                                        &file,
+                                        &PlotConfig::default(),
+                                        &self.result.as_ref().unwrap().result,
+                                    )
+                                    .is_ok()
+                                    {
+                                        self.result_plot_saved = file
+                                            .file_name()
+                                            .unwrap_or_default()
+                                            .to_str()
+                                            .map(|s| s.to_owned());
+                                    }
+                                });
                         }
                     }
                 }
-            });
+            }
 
-            ui.add_enabled_ui(self.raw_result_saved.is_none(), |ui| {
-                if ui.button("Save raw data").clicked() {
-                    match self.raw_saver.as_ref() {
-                        Some(saver) => {
-                            saver(self.raw_result.as_ref().unwrap());
-                        }
-                        None => {
-                            self.raw_result_saved = test::save_raw(
-                                self.raw_result.as_ref().unwrap(),
-                                &timed("test"),
-                                Path::new("crusader-results"),
-                            )
-                            .ok();
+            if ui.button("Save data").clicked() {
+                match self.raw_saver.as_ref() {
+                    Some(saver) => {
+                        saver(&self.result.as_ref().unwrap().result.raw_result);
+                    }
+                    None => {
+                        #[cfg(not(target_os = "android"))]
+                        {
+                            FileDialog::new()
+                                .add_filter("Crusader Raw Result", &["crr"])
+                                .add_filter("All files", &["*"])
+                                .set_file_name(&format!("{}.crr", timed("test")))
+                                .save_file()
+                                .map(|file| {
+                                    if self
+                                        .result
+                                        .as_ref()
+                                        .unwrap()
+                                        .result
+                                        .raw_result
+                                        .save(&file)
+                                        .is_ok()
+                                    {
+                                        self.raw_result_saved = file
+                                            .file_name()
+                                            .unwrap_or_default()
+                                            .to_str()
+                                            .map(|s| s.to_owned());
+                                    }
+                                });
                         }
                     }
                 }
-            });
+            }
 
-            if ui.button("Load raw data").clicked() {
+            if ui.button("Load data").clicked() {
                 self.load_result();
             }
+
+            if cfg!(not(target_os = "android")) {
+                ui.add_space(10.0);
+
+                let popup_id = ui.make_persistent_id("Save-Popup");
+
+                let button = ui.button("Save to results");
+
+                if button.clicked() {
+                    ui.memory_mut(|mem| {
+                        mem.toggle_popup(popup_id);
+                    });
+                }
+
+                egui::popup::popup_below_widget(
+                    ui,
+                    popup_id,
+                    &button,
+                    PopupCloseBehavior::CloseOnClickOutside,
+                    |ui| {
+                        ui.set_min_width(250.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("This saves both the data and plot in the");
+                            if ui.link("crusader-results").clicked() {
+                                open::that("crusader-results").ok();
+                            }
+                            ui.label("folder.");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Name: ");
+                            let mut click = ui
+                                .add(
+                                    TextEdit::singleline(&mut self.result_name)
+                                        .desired_width(175.0),
+                                )
+                                .lost_focus();
+                            click |= ui.button("Save").clicked();
+                            if click {
+                                let name = timed(&self.result_name);
+                                self.raw_result_saved = test::save_raw(
+                                    &self.result.as_ref().unwrap().result.raw_result,
+                                    &name,
+                                    Path::new("crusader-results"),
+                                )
+                                .ok();
+                                self.result_plot_saved = plot::save_graph(
+                                    &PlotConfig::default(),
+                                    &self.result.as_ref().unwrap().result,
+                                    &name,
+                                    Path::new("crusader-results"),
+                                )
+                                .ok();
+                                ui.memory_mut(|mem| {
+                                    mem.close_popup();
+                                });
+                            }
+                        });
+                    },
+                );
+            }
+
+            self.load_popup(ui);
         });
         ui.separator();
 
-        self.result_saved.as_ref().map(|file| {
-            ui.label(format!("Saved image as: {file}"));
+        self.result_plot_saved.as_ref().map(|file| {
+            ui.label(format!("Saved plot as: {file}"));
             ui.separator();
         });
         self.raw_result_saved.as_ref().map(|file| {
-            ui.label(format!("Saved raw data as: {file}"));
+            ui.label(format!("Saved data as: {file}"));
             ui.separator();
         });
 
