@@ -841,11 +841,11 @@ impl Tester {
 
                 hover_popup(ui, (label, "Popup"), AboveOrBelow::Above, |ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.spacing_mut().interact_size.y = 10.0;
 
                     let stats = |ui: &mut Ui, name, color, latency: &LatencySummary| {
                         ui.vertical(|ui| {
                             ui.add_space(5.0);
-                            ui.spacing_mut().interact_size.y = 10.0;
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(format!("{name}: ")).color(color));
                                 ui.label(format!(
@@ -946,28 +946,34 @@ impl Tester {
 
                 hover_popup(ui, (label, "Popup"), AboveOrBelow::Above, |ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.spacing_mut().interact_size.y = 10.0;
 
                     let stats = |ui: &mut Ui, name, color, (down, up): (f64, f64)| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(format!("{name}: ")).color(color));
-                            if down == 0.0 && up == 0.0 {
-                                ui.label("0%");
-                            } else {
-                                ui.label(format!(
-                                    "{:.1$}% ",
-                                    down * 100.0,
-                                    if down == 0.0 { 0 } else { 2 }
-                                ));
-                                ui.label(
-                                    RichText::new("down").color(Color32::from_rgb(95, 145, 62)),
-                                );
-                                ui.label(format!(
-                                    ", {:.1$}% ",
-                                    up * 100.0,
-                                    if up == 0.0 { 0 } else { 2 }
-                                ));
-                                ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
-                            }
+                        ui.vertical(|ui| {
+                            ui.add_space(5.0);
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("{name}: ")).color(color));
+                                if down == 0.0 && up == 0.0 {
+                                    ui.label("0%");
+                                } else {
+                                    ui.label(format!(
+                                        "{:.1$}% ",
+                                        down * 100.0,
+                                        if down == 0.0 { 0 } else { 2 }
+                                    ));
+                                    ui.label(
+                                        RichText::new("down").color(Color32::from_rgb(95, 145, 62)),
+                                    );
+                                    ui.label(format!(
+                                        ", {:.1$}% ",
+                                        up * 100.0,
+                                        if up == 0.0 { 0 } else { 2 }
+                                    ));
+                                    ui.label(
+                                        RichText::new("up").color(Color32::from_rgb(37, 83, 169)),
+                                    );
+                                }
+                            });
                         });
                     };
 
@@ -1315,17 +1321,22 @@ impl Tester {
 
                         hover_popup(ui, "Throughput-Popup", AboveOrBelow::Below, |ui| {
                             ui.spacing_mut().item_spacing.x = 0.0;
+                            ui.spacing_mut().interact_size.y = 10.0;
+
                             if let Some(throughput) = result
                                 .result
                                 .throughputs
                                 .get(&(TestKind::Download, TestKind::Download))
                             {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new("Download: ")
-                                            .color(Color32::from_rgb(95, 145, 62)),
-                                    );
-                                    ui.label(format!("{:.02} Mbps", throughput));
+                                ui.vertical(|ui| {
+                                    ui.add_space(5.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new("Download: ")
+                                                .color(Color32::from_rgb(95, 145, 62)),
+                                        );
+                                        ui.label(format!("{:.02} Mbps", throughput));
+                                    });
                                 });
                             }
 
@@ -1334,12 +1345,15 @@ impl Tester {
                                 .throughputs
                                 .get(&(TestKind::Upload, TestKind::Upload))
                             {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new("Upload: ")
-                                            .color(Color32::from_rgb(37, 83, 169)),
-                                    );
-                                    ui.label(format!("{:.02} Mbps", throughput));
+                                ui.vertical(|ui| {
+                                    ui.add_space(5.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new("Upload: ")
+                                                .color(Color32::from_rgb(37, 83, 169)),
+                                        );
+                                        ui.label(format!("{:.02} Mbps", throughput));
+                                    });
                                 });
                             }
 
@@ -1349,7 +1363,7 @@ impl Tester {
                                 .get(&(TestKind::Bidirectional, TestKind::Bidirectional))
                             {
                                 ui.vertical(|ui| {
-                                    ui.spacing_mut().interact_size.y = 10.0;
+                                    ui.add_space(5.0);
                                     ui.horizontal(|ui| {
                                         ui.label(
                                             RichText::new("Bidirectional: ")
