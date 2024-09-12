@@ -897,7 +897,7 @@ pub fn timed(name: &str) -> String {
 }
 
 pub(crate) fn unique(name: &str, ext: &str) -> String {
-    let stem = timed(name);
+    let stem = name.to_owned();
     let mut i: usize = 0;
     loop {
         let file = if i != 0 {
@@ -918,6 +918,7 @@ pub fn test(
     plot: PlotConfig,
     host: Option<&str>,
     latency_peer_server: Option<Option<&str>>,
+    out_name: &str,
 ) -> Result<(), anyhow::Error> {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let result = rt.block_on(test_async(
@@ -933,14 +934,15 @@ pub fn test(
             return Err(error);
         }
     };
+    let out_name = timed(out_name);
     println!("{}", with_time("Writing data..."));
     let path = Path::new("crusader-results");
-    let raw = save_raw(&result, "data", path)?;
+    let raw = save_raw(&result, &out_name, path)?;
     println!(
         "{}",
         with_time(&format!("Saved raw data as {}", path.join(raw).display()))
     );
-    let plot = save_graph(&plot, &result.to_test_result(), "plot", path)?;
+    let plot = save_graph(&plot, &result.to_test_result(), &out_name, path)?;
     println!(
         "{}",
         with_time(&format!("Saved plot as {}", path.join(plot).display()))

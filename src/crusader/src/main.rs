@@ -131,6 +131,11 @@ enum Commands {
             help = "Use another server (peer) which will also measure the latency to the server independently of the client"
         )]
         latency_peer: bool,
+        #[arg(
+            long,
+            help = "The filename prefix used for the test result raw data and plot filenames"
+        )]
+        out_name: Option<String>,
     },
     #[cfg(feature = "client")]
     #[command(about = "Plots a previous result")]
@@ -172,6 +177,7 @@ fn run() -> Result<(), anyhow::Error> {
             load_duration,
             ref latency_peer_address,
             latency_peer,
+            ref out_name,
         } => {
             let mut config = Config {
                 port,
@@ -202,6 +208,7 @@ fn run() -> Result<(), anyhow::Error> {
                 server.as_deref(),
                 (latency_peer || latency_peer_address.is_some())
                     .then_some(latency_peer_address.as_deref()),
+                out_name.as_deref().unwrap_or("test"),
             )
         }
         &Commands::Serve { port, peer } => crusader_lib::serve::serve(port, peer),

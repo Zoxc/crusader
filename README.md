@@ -178,6 +178,8 @@ crusader remote
           also measure the latency to the server independently of the client
 * **`--latency-peer`**
           Use another server (peer) which will also measure the latency to the server independently of the client
+* **`--out-name <OUT_NAME>`**
+          The filename prefix used for the test result raw data and plot filenames
 * **`-h, --help`**
           Print help (see a summary with '-h')
 

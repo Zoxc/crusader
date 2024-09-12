@@ -15,6 +15,7 @@ use std::{
 };
 
 use crusader_lib::plot::LatencySummary;
+use crusader_lib::test::timed;
 use crusader_lib::{
     file_format::{RawPing, RawResult, TestKind},
     latency,
@@ -1060,7 +1061,7 @@ impl Tester {
                             self.result_saved = plot::save_graph(
                                 &PlotConfig::default(),
                                 &self.result.as_ref().unwrap().result,
-                                "plot",
+                                &timed("test"),
                                 Path::new("crusader-results"),
                             )
                             .ok();
@@ -1078,7 +1079,7 @@ impl Tester {
                         None => {
                             self.raw_result_saved = test::save_raw(
                                 self.raw_result.as_ref().unwrap(),
-                                "data",
+                                &timed("test"),
                                 Path::new("crusader-results"),
                             )
                             .ok();
