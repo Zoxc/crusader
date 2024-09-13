@@ -9,7 +9,8 @@ clap = { version = "4.5.13", features = ["derive", "string"] }
 clap-num = "1.1.1"
 env_logger = "0.10.0"
 anyhow = "1.0.86"
+serde_json = { version = "1.0.122", optional = true }
 
 [features]
 default = ["client"]
-client = ["crusader-lib/client"]
+client = ["crusader-lib/client", "dep:serde_json"]

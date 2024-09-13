@@ -18,6 +18,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Change filename prefix for both raw result and plots to `test`
 * Add file dialog to save options in GUI
 * Add buttons to save and load from the `crusader-results` folder in GUI
+* Add an `export` command line command to convert result files to JSON
 
 ## 0.2 - 2024-08-29
 

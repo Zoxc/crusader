@@ -1,3 +1,4 @@
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 use clap_num::si_number;
 #[cfg(feature = "client")]
@@ -11,7 +12,13 @@ use crusader_lib::{with_time, Config};
 use std::path::PathBuf;
 use std::process;
 #[cfg(feature = "client")]
-use {std::path::Path, std::time::Duration};
+use {
+    anyhow::anyhow,
+    std::fs::OpenOptions,
+    std::io::{BufWriter, Write},
+    std::path::Path,
+    std::time::Duration,
+};
 
 #[derive(Parser)]
 #[command(version = version())]
@@ -154,6 +161,19 @@ enum Commands {
         )]
         port: u16,
     },
+    #[cfg(feature = "client")]
+    #[command(about = "Converts a result file to JSON")]
+    Export {
+        data: PathBuf,
+        #[arg(
+            long,
+            short('o'),
+            help = "The path where the output JSON will be stored"
+        )]
+        output: Option<PathBuf>,
+        #[arg(long, short('f'), help = "Overwrite the file if it exists")]
+        force: bool,
+    },
 }
 
 fn run() -> Result<(), anyhow::Error> {
@@ -218,7 +238,7 @@ fn run() -> Result<(), anyhow::Error> {
 
         #[cfg(feature = "client")]
         Commands::Plot { data, plot } => {
-            let result = RawResult::load(data).expect("Unable to load data");
+            let result = RawResult::load(data).ok_or(anyhow!("Unable to load data"))?;
             let root = data.parent().unwrap_or(Path::new(""));
             let file = crusader_lib::plot::save_graph(
                 &plot.config(),
@@ -232,6 +252,29 @@ fn run() -> Result<(), anyhow::Error> {
                 "{}",
                 with_time(&format!("Saved plot as {}", root.join(file).display()))
             );
+            Ok(())
+        }
+        #[cfg(feature = "client")]
+        Commands::Export {
+            data,
+            output,
+            force,
+        } => {
+            let result = RawResult::load(data).ok_or(anyhow!("Unable to load data"))?;
+            let output = output
+                .clone()
+                .unwrap_or_else(|| data.with_extension("json"));
+            let file = OpenOptions::new()
+                .create_new(!*force)
+                .create(*force)
+                .truncate(true)
+                .write(true)
+                .open(output)
+                .context("Failed to create output file")?;
+            let mut file = BufWriter::new(file);
+            serde_json::to_writer_pretty(&mut file, &result).context("Failed to serialize data")?;
+            file.flush().context("Failed to flush output")?;
+
             Ok(())
         }
     }

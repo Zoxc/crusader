@@ -1137,6 +1137,7 @@ dependencies = [
  "clap-num",
  "crusader-lib",
  "env_logger",
+ "serde_json",
 ]
 
 [[package]]
