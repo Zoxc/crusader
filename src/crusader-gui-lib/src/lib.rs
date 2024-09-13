@@ -1236,7 +1236,8 @@ impl Tester {
                                     TextEdit::singleline(&mut self.result_name)
                                         .desired_width(175.0),
                                 )
-                                .lost_focus();
+                                .lost_focus()
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter));
                             click |= ui.button("Save").clicked();
                             if click {
                                 let name = timed(&self.result_name);
