@@ -19,6 +19,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Add file dialog to save options in GUI
 * Add buttons to save and load from the `crusader-results` folder in GUI
 * Add an `export` command line command to convert result files to JSON
+* Change timeout when connecting a peer to the server to 8 seconds
 
 ## 0.2 - 2024-08-29
 

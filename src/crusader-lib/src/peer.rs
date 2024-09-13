@@ -1,5 +1,8 @@
+use crate::common::connect;
 #[cfg(feature = "client")]
 use crate::common::{Config, Msg};
+#[cfg(feature = "client")]
+use crate::discovery;
 use crate::protocol::PeerLatency;
 use crate::serve::State;
 use crate::{
@@ -7,7 +10,6 @@ use crate::{
     protocol::{codec, receive, send, ClientMessage, RawLatency, ServerMessage},
 };
 use anyhow::bail;
-use anyhow::Context;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
@@ -21,8 +23,6 @@ use tokio::{
     time,
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-#[cfg(feature = "client")]
-use {crate::common::connect, crate::discovery};
 
 #[cfg(feature = "client")]
 pub struct Peer {
@@ -136,9 +136,7 @@ pub async fn run_peer(
     stream_rx: &mut FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     stream_tx: &mut FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
 ) -> Result<(), anyhow::Error> {
-    let control = net::TcpStream::connect(server)
-        .await
-        .context("Peer failed to connect to server")?;
+    let control = connect(server, "server").await?;
     control.set_nodelay(true)?;
 
     let server = control.peer_addr()?;

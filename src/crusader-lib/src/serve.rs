@@ -174,7 +174,8 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), anyhow::Erro
                     &mut stream_rx,
                     &mut stream_tx,
                 )
-                .await?;
+                .await
+                .context("Failed to run peer")?;
                 return Ok(());
             }
             ClientMessage::NewClient => {
