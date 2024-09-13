@@ -66,9 +66,7 @@ impl eframe::App for App {
                 ui.separator();
 
                 SAVED_FILE.lock().unwrap().take().map(|(image, name)| {
-                    if image {
-                        self.tester.save_plot(name);
-                    } else {
+                    if !image {
                         self.tester.save_raw(name);
                     }
                 });

@@ -170,7 +170,6 @@ pub struct Tester {
     client: Option<Client>,
     result_plot_reset: bool,
     result: Option<TestResult>,
-    result_plot_saved: Option<String>,
     raw_result_saved: Option<String>,
     open_result: Vec<PathBuf>,
     result_name: String,
@@ -441,7 +440,6 @@ impl Tester {
             client_state: ClientState::Stopped,
             client: None,
             result: None,
-            result_plot_saved: None,
             result_plot_reset: false,
             raw_result_saved: None,
             result_name: "".to_string(),
@@ -469,7 +467,6 @@ impl Tester {
         self.result = Some(TestResult::new(result));
         self.result_name = "test".to_owned();
         self.result_plot_reset = true;
-        self.result_plot_saved = None;
         self.raw_result_saved = None;
     }
 
@@ -480,10 +477,6 @@ impl Tester {
 
     pub fn save_raw(&mut self, name: String) {
         self.raw_result_saved = Some(name);
-    }
-
-    pub fn save_plot(&mut self, name: String) {
-        self.result_plot_saved = Some(name);
     }
 
     fn save_settings(&mut self) {
@@ -1049,9 +1042,11 @@ impl Tester {
 
     fn load_popup(&mut self, ui: &mut Ui) {
         if cfg!(not(target_os = "android")) {
+            ui.add_space(10.0);
+
             let popup_id = ui.make_persistent_id("Load-Popup");
 
-            let button = ui.button("Load from results");
+            let button = ui.button("Open from results");
 
             if button.clicked() {
                 ui.memory_mut(|mem| {
@@ -1118,10 +1113,9 @@ impl Tester {
     fn result(&mut self, _ctx: &egui::Context, ui: &mut Ui) {
         if self.result.is_none() {
             ui.horizontal_wrapped(|ui| {
-                if ui.button("Load data").clicked() {
+                if ui.button("Open").clicked() {
                     self.load_result();
                 }
-                ui.add_space(10.0);
                 self.load_popup(ui);
             });
             ui.separator();
@@ -1130,40 +1124,11 @@ impl Tester {
         }
 
         ui.horizontal_wrapped(|ui| {
-            if ui.button("Save plot").clicked() {
-                match self.plot_saver.as_ref() {
-                    Some(saver) => {
-                        saver(&self.result.as_ref().unwrap().result);
-                    }
-                    None => {
-                        #[cfg(not(target_os = "android"))]
-                        {
-                            FileDialog::new()
-                                .add_filter("Portable Network Graphics", &["png"])
-                                .add_filter("All files", &["*"])
-                                .set_file_name(&format!("{}.png", timed("test")))
-                                .save_file()
-                                .map(|file| {
-                                    if plot::save_graph_to_path(
-                                        &file,
-                                        &PlotConfig::default(),
-                                        &self.result.as_ref().unwrap().result,
-                                    )
-                                    .is_ok()
-                                    {
-                                        self.result_plot_saved = file
-                                            .file_name()
-                                            .unwrap_or_default()
-                                            .to_str()
-                                            .map(|s| s.to_owned());
-                                    }
-                                });
-                        }
-                    }
-                }
+            if ui.button("Open").clicked() {
+                self.load_result();
             }
 
-            if ui.button("Save data").clicked() {
+            if ui.button("Save").clicked() {
                 match self.raw_saver.as_ref() {
                     Some(saver) => {
                         saver(&self.result.as_ref().unwrap().result.raw_result);
@@ -1198,13 +1163,9 @@ impl Tester {
                 }
             }
 
-            if ui.button("Load data").clicked() {
-                self.load_result();
-            }
+            self.load_popup(ui);
 
             if cfg!(not(target_os = "android")) {
-                ui.add_space(10.0);
-
                 let popup_id = ui.make_persistent_id("Save-Popup");
 
                 let button = ui.button("Save to results");
@@ -1247,7 +1208,7 @@ impl Tester {
                                     Path::new("crusader-results"),
                                 )
                                 .ok();
-                                self.result_plot_saved = plot::save_graph(
+                                plot::save_graph(
                                     &PlotConfig::default(),
                                     &self.result.as_ref().unwrap().result,
                                     &name,
@@ -1263,16 +1224,44 @@ impl Tester {
                 );
             }
 
-            self.load_popup(ui);
+            ui.add_space(10.0);
+
+            if ui.button("Export plot").clicked() {
+                match self.plot_saver.as_ref() {
+                    Some(saver) => {
+                        saver(&self.result.as_ref().unwrap().result);
+                    }
+                    None => {
+                        #[cfg(not(target_os = "android"))]
+                        {
+                            FileDialog::new()
+                                .add_filter("Portable Network Graphics", &["png"])
+                                .add_filter("All files", &["*"])
+                                .set_file_name(&format!("{}.png", timed("test")))
+                                .save_file()
+                                .map(|file| {
+                                    if plot::save_graph_to_path(
+                                        &file,
+                                        &PlotConfig::default(),
+                                        &self.result.as_ref().unwrap().result,
+                                    )
+                                    .is_ok()
+                                    {
+                                        file.file_name()
+                                            .unwrap_or_default()
+                                            .to_str()
+                                            .map(|s| s.to_owned());
+                                    }
+                                });
+                        }
+                    }
+                }
+            }
         });
         ui.separator();
 
-        self.result_plot_saved.as_ref().map(|file| {
-            ui.label(format!("Saved plot as: {file}"));
-            ui.separator();
-        });
         self.raw_result_saved.as_ref().map(|file| {
-            ui.label(format!("Saved data as: {file}"));
+            ui.label(format!("Saved as: {file}"));
             ui.separator();
         });
 
