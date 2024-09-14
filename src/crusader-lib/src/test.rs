@@ -525,7 +525,10 @@ pub(crate) async fn test_async(
                     .binary_search_by_key(&index, |e| e.0.index)
                     .ok()
                     .map(|ping| {
-                        latency.total = Some(pongs[ping].1.saturating_sub(sent));
+                        let total = pongs[ping].1.saturating_sub(sent);
+                        latency.total = Some(total);
+                        // Ensure `up` stays below `total`
+                        latency.up = latency.up.min(total);
                     });
             });
 
