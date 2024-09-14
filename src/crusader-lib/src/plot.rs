@@ -306,36 +306,42 @@ impl TestResult {
 
         let width = 20;
 
-        let mut kind = |kind: TestKind| -> Result<(), anyhow::Error> {
-            writeln!(&mut o, "-- {} test --", kind.name())?;
+        let mut kind = |kind: Option<TestKind>| -> Result<(), anyhow::Error> {
+            writeln!(
+                &mut o,
+                "-- {} test --",
+                kind.map(|kind| kind.name()).unwrap_or("Idle")
+            )?;
 
-            if let Some(throughput) = self.throughputs.get(&(kind, kind)) {
-                write!(
-                    &mut o,
-                    "{:>width$}: {:.02} Mbps",
-                    "Throughput",
-                    throughput,
-                    width = width
-                )?;
-                if kind == TestKind::Bidirectional {
-                    if let Some(down) = self
-                        .throughputs
-                        .get(&(TestKind::Bidirectional, TestKind::Download))
-                    {
-                        if let Some(up) = self
+            if let Some(kind) = kind {
+                if let Some(throughput) = self.throughputs.get(&(kind, kind)) {
+                    write!(
+                        &mut o,
+                        "{:>width$}: {:.02} Mbps",
+                        "Throughput",
+                        throughput,
+                        width = width
+                    )?;
+                    if kind == TestKind::Bidirectional {
+                        if let Some(down) = self
                             .throughputs
-                            .get(&(TestKind::Bidirectional, TestKind::Upload))
+                            .get(&(TestKind::Bidirectional, TestKind::Download))
                         {
-                            write!(&mut o, " ({:.02} Mbps down, {:.02} Mbps up)", down, up)?;
+                            if let Some(up) = self
+                                .throughputs
+                                .get(&(TestKind::Bidirectional, TestKind::Upload))
+                            {
+                                write!(&mut o, " ({:.02} Mbps down, {:.02} Mbps up)", down, up)?;
+                            }
                         }
                     }
+                    writeln!(&mut o)?;
                 }
-                writeln!(&mut o)?;
             }
 
             let mut latency =
                 |latencies: &LatencyLossSummary, peer: bool| -> Result<(), anyhow::Error> {
-                    if let Some(latency) = latencies.latencies.get(&Some(kind)) {
+                    if let Some(latency) = latencies.latencies.get(&kind) {
                         let label = if peer { "Peer latency" } else { "Latency" };
                         writeln!(
                             &mut o,
@@ -347,7 +353,7 @@ impl TestResult {
                             width = width
                         )?;
                     }
-                    if let Some(&(down, up)) = latencies.loss.get(&Some(kind)) {
+                    if let Some(&(down, up)) = latencies.loss.get(&kind) {
                         let label = if peer {
                             "Peer packet loss"
                         } else {
@@ -380,9 +386,21 @@ impl TestResult {
             Ok(())
         };
 
-        kind(TestKind::Download)?;
-        kind(TestKind::Upload)?;
-        kind(TestKind::Bidirectional)?;
+        if self.raw_result.download() {
+            kind(Some(TestKind::Download))?;
+        }
+
+        if self.raw_result.upload() {
+            kind(Some(TestKind::Upload))?;
+        }
+
+        if self.raw_result.both() {
+            kind(Some(TestKind::Bidirectional))?;
+        }
+
+        if self.raw_result.idle() {
+            kind(None)?;
+        }
 
         Ok(o)
     }
