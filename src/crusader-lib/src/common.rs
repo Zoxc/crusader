@@ -52,7 +52,7 @@ pub(crate) enum TestState {
 }
 
 #[cfg(feature = "client")]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub struct Config {
     pub download: bool,
     pub upload: bool,

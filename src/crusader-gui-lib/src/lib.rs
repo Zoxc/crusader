@@ -122,6 +122,23 @@ pub struct ClientSettings {
     pub latency_peer_server: String,
 }
 
+impl ClientSettings {
+    fn config(&self) -> Config {
+        Config {
+            port: protocol::PORT,
+            streams: self.streams,
+            grace_duration: Duration::from_secs_f64(self.grace_duration),
+            load_duration: Duration::from_secs_f64(self.load_duration),
+            stream_stagger: Duration::from_secs_f64(self.stream_stagger),
+            download: self.download,
+            upload: self.upload,
+            bidirectional: self.bidirectional,
+            ping_interval: Duration::from_millis(self.latency_sample_interval),
+            throughput_interval: Duration::from_millis(self.throughput_sample_interval),
+        }
+    }
+}
+
 impl Default for ClientSettings {
     fn default() -> Self {
         Self {
@@ -489,23 +506,6 @@ impl Tester {
         }
     }
 
-    fn config(&self) -> Config {
-        Config {
-            port: protocol::PORT,
-            streams: self.settings.client.streams,
-            grace_duration: Duration::from_secs_f64(self.settings.client.grace_duration),
-            load_duration: Duration::from_secs_f64(self.settings.client.load_duration),
-            stream_stagger: Duration::from_secs_f64(self.settings.client.stream_stagger),
-            download: self.settings.client.download,
-            upload: self.settings.client.upload,
-            bidirectional: self.settings.client.bidirectional,
-            ping_interval: Duration::from_millis(self.settings.client.latency_sample_interval),
-            throughput_interval: Duration::from_millis(
-                self.settings.client.throughput_sample_interval,
-            ),
-        }
-    }
-
     fn start_client(&mut self, ctx: &egui::Context) {
         self.save_settings();
         self.msgs.clear();
@@ -518,7 +518,7 @@ impl Tester {
         let ctx_ = ctx.clone();
 
         let abort = test::test_callback(
-            self.config(),
+            self.settings.client.config(),
             (!self.settings.client.server.trim().is_empty())
                 .then_some(&self.settings.client.server),
             self.settings.client.latency_peer.then_some(
@@ -743,6 +743,18 @@ impl Tester {
                             ui.end_row();
                         });
                     }
+
+                    let parameters_changed = self.settings.client.config() != ClientSettings::default().config();
+
+                    ui.add_enabled_ui(parameters_changed, |ui| {
+                        if ui.button("Reset").clicked()  {
+                            let mut default = ClientSettings::default();
+                            default.server = self.settings.client.server.clone();
+                            default.latency_peer_server = self.settings.client.latency_peer_server.clone();
+                            default.latency_peer = self.settings.client.latency_peer;
+                            self.settings.client = default;
+                        }
+                    });
 
                     ui.separator();
 
