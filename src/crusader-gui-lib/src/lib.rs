@@ -123,7 +123,7 @@ pub struct Tester {
     client: Option<Client>,
     result_plot_reset: bool,
     result: Option<TestResult>,
-    raw_result_saved: Option<String>,
+    raw_result_saved: Option<PathBuf>,
     open_result: Vec<PathBuf>,
     result_name: String,
     msgs: Vec<String>,
@@ -422,12 +422,12 @@ impl Tester {
         self.raw_result_saved = None;
     }
 
-    pub fn load_file(&mut self, name: String, raw: RawResult) {
+    pub fn load_file(&mut self, name: PathBuf, raw: RawResult) {
         self.set_result(raw.to_test_result());
         self.raw_result_saved = Some(name);
     }
 
-    pub fn save_raw(&mut self, name: String) {
+    pub fn save_raw(&mut self, name: PathBuf) {
         self.raw_result_saved = Some(name);
     }
 
@@ -451,14 +451,7 @@ impl Tester {
                 .pick_file()
                 .map(|file| {
                     RawResult::load(&file).map(|raw| {
-                        self.load_file(
-                            file.file_name()
-                                .unwrap_or_default()
-                                .to_str()
-                                .unwrap_or_default()
-                                .to_string(),
-                            raw,
-                        );
+                        self.load_file(file, raw);
                     })
                 });
         }
@@ -763,14 +756,7 @@ impl Tester {
                                     if ui.toggle_value(&mut false, prefix).clicked() {
                                         ui.memory_mut(|mem| mem.close_popup());
                                         RawResult::load(&file).map(|raw| {
-                                            self.load_file(
-                                                file.file_name()
-                                                    .unwrap_or_default()
-                                                    .to_str()
-                                                    .unwrap_or_default()
-                                                    .to_string(),
-                                                raw,
-                                            );
+                                            self.load_file(file, raw);
                                         });
                                     }
                                 }
@@ -823,11 +809,7 @@ impl Tester {
                                         .save(&file)
                                         .is_ok()
                                     {
-                                        self.raw_result_saved = file
-                                            .file_name()
-                                            .unwrap_or_default()
-                                            .to_str()
-                                            .map(|s| s.to_owned());
+                                        self.raw_result_saved = Some(file);
                                     }
                                 });
                         }
@@ -906,25 +888,42 @@ impl Tester {
                     None => {
                         #[cfg(not(target_os = "android"))]
                         {
-                            FileDialog::new()
+                            let name = self
+                                .raw_result_saved
+                                .as_ref()
+                                .and_then(|file| {
+                                    file.file_stem()
+                                        .unwrap_or_default()
+                                        .to_str()
+                                        .map(|s| s.to_owned())
+                                })
+                                .unwrap_or(timed("test"));
+
+                            let mut dialog = FileDialog::new()
                                 .add_filter("Portable Network Graphics", &["png"])
                                 .add_filter("All files", &["*"])
-                                .set_file_name(&format!("{}.png", timed("test")))
-                                .save_file()
-                                .map(|file| {
-                                    if plot::save_graph_to_path(
-                                        &file,
-                                        &PlotConfig::default(),
-                                        &self.result.as_ref().unwrap().result,
-                                    )
-                                    .is_ok()
-                                    {
-                                        file.file_name()
-                                            .unwrap_or_default()
-                                            .to_str()
-                                            .map(|s| s.to_owned());
-                                    }
-                                });
+                                .set_file_name(&format!("{}.png", name));
+
+                            if let Some(file) = self.raw_result_saved.as_ref() {
+                                if let Some(parent) = file.parent() {
+                                    dialog = dialog.set_directory(parent);
+                                }
+                            }
+
+                            dialog.save_file().map(|file| {
+                                if plot::save_graph_to_path(
+                                    &file,
+                                    &PlotConfig::default(),
+                                    &self.result.as_ref().unwrap().result,
+                                )
+                                .is_ok()
+                                {
+                                    file.file_name()
+                                        .unwrap_or_default()
+                                        .to_str()
+                                        .map(|s| s.to_owned());
+                                }
+                            });
                         }
                     }
                 }
@@ -932,10 +931,18 @@ impl Tester {
         });
         ui.separator();
 
-        self.raw_result_saved.as_ref().map(|file| {
-            ui.label(format!("Saved as: {file}"));
-            ui.separator();
-        });
+        self.raw_result_saved
+            .as_ref()
+            .and_then(|file| {
+                file.file_name()
+                    .unwrap_or_default()
+                    .to_str()
+                    .map(|s| s.to_owned())
+            })
+            .map(|file| {
+                ui.label(format!("Saved as: {file}"));
+                ui.separator();
+            });
 
         let result = self.result.as_ref().unwrap();
 
@@ -1673,14 +1680,7 @@ impl Tester {
                 .and_then(|file| file.path.as_deref())
             {
                 RawResult::load(file).map(|raw| {
-                    self.load_file(
-                        file.file_name()
-                            .unwrap_or_default()
-                            .to_str()
-                            .unwrap_or_default()
-                            .to_string(),
-                        raw,
-                    );
+                    self.load_file(file.to_owned(), raw);
                     self.tab = Tab::Result;
                 });
             }

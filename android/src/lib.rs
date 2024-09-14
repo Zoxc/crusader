@@ -15,6 +15,7 @@ use jni::{
 use std::{
     error::Error,
     io::Cursor,
+    path::Path,
     sync::{Arc, Mutex},
 };
 
@@ -67,13 +68,13 @@ impl eframe::App for App {
 
                 SAVED_FILE.lock().unwrap().take().map(|(image, name)| {
                     if !image {
-                        self.tester.save_raw(name);
+                        self.tester.save_raw(Path::new(&name).to_owned());
                     }
                 });
 
                 LOADED_FILE.lock().unwrap().take().map(|(name, data)| {
                     RawResult::load_from_reader(Cursor::new(data))
-                        .map(|data| self.tester.load_file(name, data));
+                        .map(|data| self.tester.load_file(Path::new(&name).to_owned(), data));
                 });
 
                 self.tester.show(ctx, ui);

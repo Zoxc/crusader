@@ -19,7 +19,7 @@ use futures::{select, Sink, Stream};
 use futures::{stream, StreamExt};
 use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::{
@@ -637,11 +637,16 @@ pub(crate) async fn test_async(
     Ok(raw_result)
 }
 
-pub fn save_raw(result: &RawResult, name: &str, root_path: &Path) -> Result<String, anyhow::Error> {
+pub fn save_raw(
+    result: &RawResult,
+    name: &str,
+    root_path: &Path,
+) -> Result<PathBuf, anyhow::Error> {
     std::fs::create_dir_all(root_path)?;
     let name = unique(name, "crr");
-    result.save(&root_path.join(&name))?;
-    Ok(name)
+    let path = root_path.join(&name);
+    result.save(&path)?;
+    Ok(path)
 }
 
 fn setup_loaders(
