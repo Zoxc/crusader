@@ -185,7 +185,7 @@ pub async fn locate(peer_server: bool) -> Result<Server, anyhow::Error> {
     })
 }
 
-pub fn serve(state: Arc<State>, port: u16, peer_server: bool) -> Result<(), anyhow::Error> {
+pub fn serve(state: Arc<State>, port: u16) -> Result<(), anyhow::Error> {
     async fn handle_packet(
         port: u16,
         peer_server: bool,
@@ -253,12 +253,19 @@ pub fn serve(state: Arc<State>, port: u16, peer_server: bool) -> Result<(), anyh
         let mut buf = [0; 1500];
         loop {
             if let Ok((len, src)) = socket.recv_from(&mut buf).await {
-                handle_packet(port, peer_server, &hostname, &buf[..len], &socket, src)
-                    .await
-                    .map_err(|error| {
-                        (state.msg)(&format!("Unable to handle discovery packet: {:?}", error));
-                    })
-                    .ok();
+                handle_packet(
+                    port,
+                    state.peer_server,
+                    &hostname,
+                    &buf[..len],
+                    &socket,
+                    src,
+                )
+                .await
+                .map_err(|error| {
+                    (state.msg)(&format!("Unable to handle discovery packet: {:?}", error));
+                })
+                .ok();
             }
         }
     });

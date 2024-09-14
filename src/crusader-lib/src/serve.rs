@@ -103,6 +103,7 @@ pub(crate) struct State {
     clients: Mutex<Vec<Option<Arc<Client>>>>,
     pong_servers: Mutex<HashMap<SocketAddr, Arc<Pong>>>,
     pub(crate) msg: Box<dyn Fn(&str) + Send + Sync>,
+    pub(crate) peer_server: bool,
 }
 
 fn ip_to_ipv6_mapped(ip: IpAddr) -> Ipv6Addr {
@@ -160,6 +161,9 @@ async fn client(state: Arc<State>, stream: TcpStream) -> Result<(), anyhow::Erro
                 ping_interval,
                 estimated_duration,
             } => {
+                if !state.peer_server {
+                    bail!("Server not accepting peers")
+                }
                 (state.msg)(&format!(
                     "Serving as peer for {}, version {}",
                     addr, hello.version
@@ -631,6 +635,7 @@ async fn serve_async(
         clients: Mutex::new((0..SLOTS).map(|_| None).collect()),
         pong_servers: Default::default(),
         msg,
+        peer_server,
     });
 
     let v6 = Socket::new(Domain::IPV6, socket2::Type::STREAM, Some(Protocol::TCP))?;
@@ -655,7 +660,7 @@ async fn serve_async(
     task::spawn(listen(state.clone(), v6));
     task::spawn(listen(state.clone(), v4));
 
-    if let Err(error) = discovery::serve(state.clone(), port, peer_server) {
+    if let Err(error) = discovery::serve(state.clone(), port) {
         (state.msg)(&format!("Failed to run discovery: {:?}", error));
     }
 

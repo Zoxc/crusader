@@ -9,7 +9,7 @@ use crate::{
     common::{hello, measure_latency, ping_recv, ping_send, TestState},
     protocol::{codec, receive, send, ClientMessage, RawLatency, ServerMessage},
 };
-use anyhow::bail;
+use anyhow::{bail, Context};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
@@ -34,7 +34,9 @@ pub struct Peer {
 #[cfg(feature = "client")]
 impl Peer {
     pub async fn start(&mut self) -> Result<(), anyhow::Error> {
-        let reply: ServerMessage = receive(&mut self.rx).await?;
+        let reply: ServerMessage = receive(&mut self.rx)
+            .await
+            .context("Peer failed to get ready")?;
         match reply {
             ServerMessage::PeerReady { server_latency } => {
                 (self.msg)(&format!(
@@ -115,7 +117,9 @@ pub async fn connect_to_peer(
     )
     .await?;
 
-    let reply: ServerMessage = receive(&mut control_rx).await?;
+    let reply: ServerMessage = receive(&mut control_rx)
+        .await
+        .context("Failed to create peer")?;
     match reply {
         ServerMessage::NewPeer => (),
         _ => bail!("Unexpected message {:?}", reply),

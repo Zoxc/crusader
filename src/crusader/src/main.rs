@@ -72,7 +72,7 @@ enum Commands {
     Serve {
         #[arg(long, default_value_t = protocol::PORT, help = "Specifies the TCP and UDP port used by the server")]
         port: u16,
-        #[arg(long, help = "Allow discovery as a peer")]
+        #[arg(long, help = "Allow use and discovery as a peer")]
         peer: bool,
     },
     #[command(
