@@ -1502,7 +1502,13 @@ pub(crate) fn graph(
 
     let mut data = vec![0; 3 * (width as usize * height as usize)];
 
-    let title = config.title.as_deref().unwrap_or("Latency under load");
+    let idle = result.raw_result.idle();
+
+    let title = config.title.as_deref().unwrap_or(if idle {
+        "Latency"
+    } else {
+        "Latency under load"
+    });
 
     {
         let root = BitMapBackend::with_buffer(&mut data, (width, height)).into_drawing_area();
@@ -1553,10 +1559,17 @@ pub(crate) fn graph(
             .unwrap();
 
             root.draw_text(
-                &format!(
-                    "Load duration: {:.2} s",
-                    result.raw_result.config.load_duration.as_secs_f64(),
-                ),
+                &if idle {
+                    format!(
+                        "Grace duration: {:.2} s",
+                        result.raw_result.config.grace_duration.as_secs_f64(),
+                    )
+                } else {
+                    format!(
+                        "Load duration: {:.2} s",
+                        result.raw_result.config.load_duration.as_secs_f64(),
+                    )
+                },
                 &small_style.pos(Pos::new(HPos::Left, VPos::Top)),
                 (100, top_margin),
             )
