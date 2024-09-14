@@ -6,7 +6,7 @@ use crusader_lib::{
     with_time, Config,
 };
 use eframe::{
-    egui::{self, Grid, ScrollArea, TextEdit, Ui},
+    egui::{self, vec2, Grid, ScrollArea, TextEdit, Ui},
     emath::Align,
 };
 use serde::{Deserialize, Serialize};
@@ -203,46 +203,90 @@ impl Tester {
         }
     }
 
-    fn latency_under_load_settings(&mut self, ui: &mut Ui) {
-        ui.horizontal_wrapped(|ui| {
-            ui.checkbox(&mut self.settings.client.download, "Download")
-                .on_hover_text("Run a download test");
-            ui.add_space(10.0);
-            ui.checkbox(&mut self.settings.client.upload, "Upload")
-                .on_hover_text("Run an upload test");
-            ui.add_space(10.0);
-            ui.checkbox(&mut self.settings.client.bidirectional, "Bidirectional")
-                .on_hover_text("Run a test doing both download and upload");
-        });
-        Grid::new("settings").show(ui, |ui| {
-            ui.label("Streams: ").on_hover_text(
-                "The number of TCP connections used to generate traffic in a single direction",
-            );
-            ui.add(
-                egui::DragValue::new(&mut self.settings.client.streams)
-                    .range(1..=1000)
-                    .speed(0.05),
-            );
-            ui.end_row();
-            ui.label("Load duration: ")
-                .on_hover_text("The duration in which traffic is generated");
-            ui.add(
-                egui::DragValue::new(&mut self.settings.client.load_duration)
-                    .range(0..=1000)
-                    .speed(0.05),
-            );
-            ui.label("seconds");
-            ui.end_row();
-            if self.settings.client.advanced {
-                ui.label("Grace duration: ")
-                    .on_hover_text("The idle time between each test");
+    fn latency_under_load_settings(&mut self, ui: &mut Ui, compact: bool) {
+        if !self.settings.client.advanced || compact {
+            ui.horizontal_wrapped(|ui| {
+                ui.checkbox(&mut self.settings.client.download, "Download")
+                    .on_hover_text("Run a download test");
+                ui.add_space(10.0);
+                ui.checkbox(&mut self.settings.client.upload, "Upload")
+                    .on_hover_text("Run an upload test");
+                ui.add_space(10.0);
+                ui.checkbox(&mut self.settings.client.bidirectional, "Bidirectional")
+                    .on_hover_text("Run a test doing both download and upload");
+            });
+            Grid::new("settings-compact").show(ui, |ui| {
+                ui.label("Streams: ").on_hover_text(
+                    "The number of TCP connections used to generate traffic in a single direction",
+                );
                 ui.add(
-                    egui::DragValue::new(&mut self.settings.client.grace_duration)
+                    egui::DragValue::new(&mut self.settings.client.streams)
+                        .range(1..=1000)
+                        .speed(0.05),
+                );
+                ui.end_row();
+                ui.label("Load duration: ")
+                    .on_hover_text("The duration in which traffic is generated");
+                ui.add(
+                    egui::DragValue::new(&mut self.settings.client.load_duration)
                         .range(0..=1000)
                         .speed(0.05),
                 );
                 ui.label("seconds");
                 ui.end_row();
+                if self.settings.client.advanced {
+                    ui.label("Grace duration: ")
+                        .on_hover_text("The idle time between each test");
+                    ui.add(
+                        egui::DragValue::new(&mut self.settings.client.grace_duration)
+                            .range(0..=1000)
+                            .speed(0.05),
+                    );
+                    ui.label("seconds");
+                    ui.end_row();
+                    ui.label("Stream stagger: ")
+                        .on_hover_text("The delay between the start of each stream");
+                    ui.add(
+                        egui::DragValue::new(&mut self.settings.client.stream_stagger)
+                            .range(0..=1000)
+                            .speed(0.05),
+                    );
+                    ui.label("seconds");
+                    ui.end_row();
+                    ui.label("Latency sample interval:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.settings.client.latency_sample_interval)
+                            .range(1..=1000)
+                            .speed(0.05),
+                    );
+                    ui.label("milliseconds");
+                    ui.end_row();
+                    ui.label("Throughput sample interval:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.settings.client.throughput_sample_interval)
+                            .range(1..=1000)
+                            .speed(0.05),
+                    );
+                    ui.label("milliseconds");
+                    ui.end_row();
+                }
+            });
+        } else {
+            Grid::new("settings").show(ui, |ui| {
+                ui.checkbox(&mut self.settings.client.download, "Download")
+                    .on_hover_text("Run a download test");
+                ui.allocate_space(vec2(1.0, 1.0));
+                ui.label("Streams: ").on_hover_text(
+                    "The number of TCP connections used to generate traffic in a single direction",
+                );
+                ui.add(
+                    egui::DragValue::new(&mut self.settings.client.streams)
+                        .range(1..=1000)
+                        .speed(0.05),
+                );
+                ui.label("");
+                ui.allocate_space(vec2(1.0, 1.0));
+
                 ui.label("Stream stagger: ")
                     .on_hover_text("The delay between the start of each stream");
                 ui.add(
@@ -252,7 +296,21 @@ impl Tester {
                 );
                 ui.label("seconds");
                 ui.end_row();
-                ui.label("Latency sample interval:");
+
+                ui.checkbox(&mut self.settings.client.upload, "Upload")
+                    .on_hover_text("Run an upload test");
+                ui.label("");
+                ui.label("Load duration: ")
+                    .on_hover_text("The duration in which traffic is generated");
+                ui.add(
+                    egui::DragValue::new(&mut self.settings.client.load_duration)
+                        .range(0..=1000)
+                        .speed(0.05),
+                );
+                ui.label("seconds");
+                ui.label("");
+
+                ui.label("Latency sample interval: ");
                 ui.add(
                     egui::DragValue::new(&mut self.settings.client.latency_sample_interval)
                         .range(1..=1000)
@@ -260,7 +318,20 @@ impl Tester {
                 );
                 ui.label("milliseconds");
                 ui.end_row();
-                ui.label("Throughput sample interval:");
+
+                ui.checkbox(&mut self.settings.client.bidirectional, "Bidirectional")
+                    .on_hover_text("Run a test doing both download and upload");
+                ui.label("");
+                ui.label("Grace duration: ")
+                    .on_hover_text("The idle time between each test");
+                ui.add(
+                    egui::DragValue::new(&mut self.settings.client.grace_duration)
+                        .range(0..=1000)
+                        .speed(0.05),
+                );
+                ui.label("seconds");
+                ui.label("");
+                ui.label("Throughput sample interval: ");
                 ui.add(
                     egui::DragValue::new(&mut self.settings.client.throughput_sample_interval)
                         .range(1..=1000)
@@ -268,8 +339,8 @@ impl Tester {
                 );
                 ui.label("milliseconds");
                 ui.end_row();
-            }
-        });
+            });
+        }
 
         if self.settings.client.advanced {
             ui.separator();
@@ -337,7 +408,7 @@ impl Tester {
         }
     }
 
-    pub fn client(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+    pub fn client(&mut self, ctx: &egui::Context, ui: &mut Ui, compact: bool) {
         let active = self.client_state == ClientState::Stopped;
 
         ui.horizontal_wrapped(|ui| {
@@ -397,7 +468,7 @@ impl Tester {
                     if self.settings.client.idle_test {
                         self.idle_settings(ui);
                     } else {
-                        self.latency_under_load_settings(ui);
+                        self.latency_under_load_settings(ui, compact);
                     }
 
                     ui.horizontal(|ui| {

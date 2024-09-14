@@ -1686,6 +1686,7 @@ impl Tester {
             }
         });
 
+        let compact = ui.available_width() < 660.0;
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Client, "Client");
             ui.selectable_value(&mut self.tab, Tab::Server, "Server");
@@ -1696,7 +1697,7 @@ impl Tester {
         ui.separator();
 
         match self.tab {
-            Tab::Client => self.client(ctx, ui),
+            Tab::Client => self.client(ctx, ui, compact),
             Tab::Server => self.server(ctx, ui),
             Tab::Remote => self.remote(ctx, ui),
             Tab::Monitor => self.monitor(ctx, ui),
