@@ -9,7 +9,7 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
-* Show throughput, latency, and packet loss summaries in plots
+* Show throughput, latency, and packet loss summaries in plots and with the `test` command
 * Rename both option to bidirectional
 * Rename `--latency-peer-server` to `--latency-peer-address`
 * Continuous clock synchronization with the latency monitor
@@ -20,6 +20,9 @@ This file lists the changes that have occurred since January 2024 in the project
 * Add buttons to save and load from the `crusader-results` folder in GUI
 * Add an `export` command line command to convert result files to JSON
 * Change timeout when connecting a peer to the server to 8 seconds
+* Hide advanced parameters in GUI
+* Add a reset parameters button in GUI
+* Add an option to measure latency-only for the client in the GUI
 
 ## 0.2 - 2024-08-29
 
