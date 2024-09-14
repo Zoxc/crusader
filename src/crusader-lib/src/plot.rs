@@ -153,8 +153,8 @@ impl RawResult {
             TestKind::Bidirectional,
         );
 
-        let add_latency = |map: &mut HashMap<TestKind, LatencySummary>,
-                           loss: &mut HashMap<TestKind, (f64, f64)>,
+        let add_latency = |map: &mut HashMap<Option<TestKind>, LatencySummary>,
+                           loss: &mut HashMap<Option<TestKind>, (f64, f64)>,
                            stream: &Option<Vec<(u64, f64)>>,
                            kind: TestKind,
                            smooth_pings: &[RawPing],
@@ -166,7 +166,7 @@ impl RawResult {
                     self.config.load_duration,
                     smooth_pings,
                 ) {
-                    map.insert(kind, t);
+                    map.insert(Some(kind), t);
                 }
                 if let Some(t) = ping_loss(
                     stream,
@@ -174,7 +174,7 @@ impl RawResult {
                     self.config.load_duration,
                     pings,
                 ) {
-                    loss.insert(kind, t);
+                    loss.insert(Some(kind), t);
                 }
             }
         };
@@ -209,6 +209,22 @@ impl RawResult {
                 &smooth_pings,
                 pings,
             );
+
+            if self.idle() {
+                let whole_data = TestData {
+                    kind: TestKind::Bidirectional,
+                    start: self.start,
+                    end: self.start + self.duration,
+                };
+
+                if let Some(t) = ping_peak(&[], Some(&whole_data), self.duration, &smooth_pings) {
+                    latencies.insert(None, t);
+                }
+
+                if let Some(t) = ping_loss(&[], Some(&whole_data), self.duration, pings) {
+                    loss.insert(None, t);
+                }
+            }
 
             LatencyLossSummary { latencies, loss }
         };
@@ -259,8 +275,8 @@ pub struct LatencySummary {
 
 #[derive(Default)]
 pub struct LatencyLossSummary {
-    pub latencies: HashMap<TestKind, LatencySummary>,
-    pub loss: HashMap<TestKind, (f64, f64)>,
+    pub latencies: HashMap<Option<TestKind>, LatencySummary>,
+    pub loss: HashMap<Option<TestKind>, (f64, f64)>,
 }
 
 pub struct TestResult {
@@ -316,7 +332,7 @@ impl TestResult {
 
             let mut latency =
                 |latencies: &LatencyLossSummary, peer: bool| -> Result<(), anyhow::Error> {
-                    if let Some(latency) = latencies.latencies.get(&kind) {
+                    if let Some(latency) = latencies.latencies.get(&Some(kind)) {
                         let label = if peer { "Peer latency" } else { "Latency" };
                         writeln!(
                             &mut o,
@@ -328,7 +344,7 @@ impl TestResult {
                             width = width
                         )?;
                     }
-                    if let Some(&(down, up)) = latencies.loss.get(&kind) {
+                    if let Some(&(down, up)) = latencies.loss.get(&Some(kind)) {
                         let label = if peer {
                             "Peer packet loss"
                         } else {
@@ -602,7 +618,7 @@ fn ping_peak(
     load_duration: Duration,
     pings: &[RawPing],
 ) -> Option<LatencySummary> {
-    if stream.is_empty() {
+    if pings.is_empty() {
         return None;
     }
 
@@ -644,7 +660,7 @@ fn ping_loss(
     load_duration: Duration,
     pings: &[RawPing],
 ) -> Option<(f64, f64)> {
-    if stream.is_empty() {
+    if pings.is_empty() {
         return None;
     }
 
@@ -963,21 +979,44 @@ fn latency<'a>(
     let center = text_height / 2 + 5;
 
     let side = 107;
-    let width = (area.dim_in_pixel().0.saturating_sub(side * 2) as f64 / 1.14)
-        / (throughputs.iter().filter(|t| t.phase.is_some()).count() as f64);
+
+    struct Summary {
+        phase: Option<TestKind>,
+        color: RGBColor,
+    }
+
+    let summaries: Vec<_> = throughputs
+        .iter()
+        .filter(|t| t.phase.is_some())
+        .map(|throughput| Summary {
+            phase: throughput.phase,
+            color: throughput.color,
+        })
+        .chain(result.raw_result.idle().then_some(Summary {
+            phase: None,
+            color: RGBColor(0, 0, 0),
+        }))
+        .collect();
+
+    let width =
+        (area.dim_in_pixel().0.saturating_sub(side * 2) as f64 / 1.14) / (summaries.len() as f64);
 
     let (area, textarea) = area.split_vertically(area.dim_in_pixel().1 - (text_height as u32 + 10));
 
-    for (i, throughput) in throughputs.iter().filter(|t| t.phase.is_some()).enumerate() {
-        if let Some((phase, latency)) = throughput.phase.and_then(|phase| {
-            summary
-                .latencies
-                .get(&phase)
-                .map(|latency| (phase, latency))
-        }) {
+    for (i, current_summary) in summaries.iter().enumerate() {
+        if let Some(latency) = summary.latencies.get(&current_summary.phase) {
             let mut text = Vec::new();
 
-            text.push((format!("{}", phase.name()), darken(throughput.color, 0.5)));
+            text.push((
+                format!(
+                    "{}",
+                    current_summary
+                        .phase
+                        .map(|phase| phase.name())
+                        .unwrap_or("Latency")
+                ),
+                darken(current_summary.color, 0.5),
+            ));
             text.push((
                 format!(": {:.01} ms", latency.total.as_secs_f64() * 1000.0),
                 RGBColor(0, 0, 0),
@@ -1005,14 +1044,21 @@ fn latency<'a>(
 
     let (packet_loss_area, textarea) =
         packet_loss_area.split_vertically(packet_loss_area.dim_in_pixel().1);
-    for (i, throughput) in throughputs.iter().filter(|t| t.phase.is_some()).enumerate() {
-        if let Some((phase, (down, up))) = throughput
-            .phase
-            .and_then(|phase| summary.loss.get(&phase).map(|latency| (phase, *latency)))
-        {
+
+    for (i, current_summary) in summaries.iter().enumerate() {
+        if let Some(&(down, up)) = summary.loss.get(&current_summary.phase) {
             let mut text = Vec::new();
 
-            text.push((format!("{}", phase.name()), darken(throughput.color, 0.5)));
+            text.push((
+                format!(
+                    "{}",
+                    current_summary
+                        .phase
+                        .map(|phase| phase.name())
+                        .unwrap_or("Packet loss")
+                ),
+                darken(current_summary.color, 0.5),
+            ));
             if down == 0.0 && up == 0.0 {
                 text.push((": 0%".to_owned(), RGBColor(0, 0, 0)));
             } else {

@@ -219,6 +219,10 @@ impl RawResult {
             .any(|group| !group.download && !group.both)
     }
 
+    pub fn idle(&self) -> bool {
+        self.stream_groups.is_empty()
+    }
+
     pub fn both(&self) -> bool {
         self.stream_groups.iter().any(|group| group.both)
     }

@@ -529,21 +529,25 @@ impl Tester {
                         });
                     };
 
-                    if let Some(latency) = latencies.latencies.get(&TestKind::Download) {
+                    if let Some(latency) = latencies.latencies.get(&Some(TestKind::Download)) {
                         stats(ui, "Download", Color32::from_rgb(95, 145, 62), latency);
                     }
 
-                    if let Some(latency) = latencies.latencies.get(&TestKind::Upload) {
+                    if let Some(latency) = latencies.latencies.get(&Some(TestKind::Upload)) {
                         stats(ui, "Upload", Color32::from_rgb(37, 83, 169), latency);
                     }
 
-                    if let Some(latency) = latencies.latencies.get(&TestKind::Bidirectional) {
+                    if let Some(latency) = latencies.latencies.get(&Some(TestKind::Bidirectional)) {
                         stats(
                             ui,
                             "Bidirectional",
                             Color32::from_rgb(149, 96, 153),
                             latency,
                         );
+                    }
+
+                    if let Some(latency) = latencies.latencies.get(&None) {
+                        stats(ui, "Latency", Color32::from_rgb(0, 0, 0), latency);
                     }
                 });
             });
@@ -634,16 +638,20 @@ impl Tester {
                         });
                     };
 
-                    if let Some(loss) = latencies.loss.get(&TestKind::Download) {
+                    if let Some(loss) = latencies.loss.get(&Some(TestKind::Download)) {
                         stats(ui, "Download", Color32::from_rgb(95, 145, 62), *loss);
                     }
 
-                    if let Some(loss) = latencies.loss.get(&TestKind::Upload) {
+                    if let Some(loss) = latencies.loss.get(&Some(TestKind::Upload)) {
                         stats(ui, "Upload", Color32::from_rgb(37, 83, 169), *loss);
                     }
 
-                    if let Some(loss) = latencies.loss.get(&TestKind::Bidirectional) {
+                    if let Some(loss) = latencies.loss.get(&Some(TestKind::Bidirectional)) {
                         stats(ui, "Bidirectional", Color32::from_rgb(149, 96, 153), *loss);
+                    }
+
+                    if let Some(loss) = latencies.loss.get(&None) {
+                        stats(ui, "Packet loss", Color32::from_rgb(0, 0, 0), *loss);
                     }
                 });
             });
