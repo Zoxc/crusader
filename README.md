@@ -141,6 +141,8 @@ crusader remote
           Run an upload test
 * **`--bidirectional`**
           Run a test doing both download and upload
+* **`--idle`**
+          Run a test only measuring latency. The duration is specified by `grace_duration`
 * **`--port <PORT>`**
           Specifies the TCP and UDP port used by the server
           [default: 35481]
