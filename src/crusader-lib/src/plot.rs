@@ -9,7 +9,7 @@ use plotters::style::{register_font, RGBColor};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Duration;
-use std::{cmp, mem};
+use std::{cmp, fmt::Write, mem};
 
 use crate::file_format::{RawPing, RawResult, TestData, TestKind};
 use crate::protocol::RawLatency;
@@ -281,6 +281,94 @@ pub struct TestResult {
     pub peer_latencies: LatencyLossSummary,
 }
 
+impl TestResult {
+    pub fn summary(&self) -> Result<String, anyhow::Error> {
+        let mut o = String::new();
+
+        let width = 20;
+
+        let mut kind = |kind: TestKind| -> Result<(), anyhow::Error> {
+            writeln!(&mut o, "-- {} test --", kind.name())?;
+
+            if let Some(throughput) = self.throughputs.get(&(kind, kind)) {
+                write!(
+                    &mut o,
+                    "{:>width$}: {:.02} Mbps",
+                    "Throughput",
+                    throughput,
+                    width = width
+                )?;
+                if kind == TestKind::Bidirectional {
+                    if let Some(down) = self
+                        .throughputs
+                        .get(&(TestKind::Bidirectional, TestKind::Download))
+                    {
+                        if let Some(up) = self
+                            .throughputs
+                            .get(&(TestKind::Bidirectional, TestKind::Upload))
+                        {
+                            write!(&mut o, " ({:.02} Mbps down, {:.02} Mbps up)", down, up)?;
+                        }
+                    }
+                }
+                writeln!(&mut o)?;
+            }
+
+            let mut latency =
+                |latencies: &LatencyLossSummary, peer: bool| -> Result<(), anyhow::Error> {
+                    if let Some(latency) = latencies.latencies.get(&kind) {
+                        let label = if peer { "Peer latency" } else { "Latency" };
+                        writeln!(
+                            &mut o,
+                            "{:>width$}: {:.01} ms ({:.01} ms down, {:.01} ms up)",
+                            label,
+                            latency.total.as_secs_f64() * 1000.0,
+                            latency.down.as_secs_f64() * 1000.0,
+                            latency.up.as_secs_f64() * 1000.0,
+                            width = width
+                        )?;
+                    }
+                    if let Some(&(down, up)) = latencies.loss.get(&kind) {
+                        let label = if peer {
+                            "Peer packet loss"
+                        } else {
+                            "Packet loss"
+                        };
+                        if down == 0.0 && up == 0.0 {
+                            writeln!(&mut o, "{:>width$}: 0%", label)?;
+                        } else {
+                            writeln!(
+                                &mut o,
+                                "{:>width$}: {:.*}% down, {:.*}% up",
+                                label,
+                                if down == 0.0 { 0 } else { 2 },
+                                down * 100.0,
+                                if up == 0.0 { 0 } else { 2 },
+                                up * 100.0,
+                                width = width
+                            )?;
+                        }
+                    }
+
+                    Ok(())
+                };
+
+            latency(&self.latencies, false)?;
+            latency(&self.peer_latencies, true)?;
+
+            writeln!(&mut o)?;
+
+            Ok(())
+        };
+
+        kind(TestKind::Download)?;
+        kind(TestKind::Upload)?;
+        kind(TestKind::Bidirectional)?;
+
+        Ok(o)
+    }
+}
+
 pub fn save_graph(
     config: &PlotConfig,
     result: &TestResult,
@@ -469,8 +557,8 @@ fn throughput(
         return None;
     }
 
-    let start_offset = (load_duration.as_secs_f64() * 0.2).max(2.0);
-    let end_offset = load_duration.as_secs_f64() - (load_duration.as_secs_f64() * 0.1).max(0.5);
+    let start_offset = (load_duration.as_secs_f64() * 0.2).min(2.0);
+    let end_offset = load_duration.as_secs_f64() - (load_duration.as_secs_f64() * 0.1).min(0.5);
 
     let test_start = if let Some(test_data) = test_data {
         test_data.start
@@ -896,7 +984,7 @@ fn latency<'a>(
             ));
 
             text.push((
-                format!(" ({:.01} ", latency.down.as_secs_f64() * 1000.0),
+                format!("  ({:.01} ", latency.down.as_secs_f64() * 1000.0),
                 RGBColor(0, 0, 0),
             ));
             text.push(("down".to_owned(), darken(DOWN_COLOR, 0.5)));
@@ -1216,7 +1304,7 @@ fn plot_throughput(
             text.push((format!(": {:.02} Mbps", rate), RGBColor(0, 0, 0)));
 
             if let Some((down, up)) = throughput.dual_rates {
-                text.push((format!(" ({:.02} ", down), RGBColor(0, 0, 0)));
+                text.push((format!("  ({:.02} ", down), RGBColor(0, 0, 0)));
                 text.push(("down".to_owned(), darken(DOWN_COLOR, 0.5)));
                 text.push((format!(", {:.02} ", up), RGBColor(0, 0, 0)));
                 text.push(("up".to_owned(), darken(UP_COLOR, 0.5)));

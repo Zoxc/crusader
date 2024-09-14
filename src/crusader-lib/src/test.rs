@@ -935,6 +935,8 @@ pub fn test(
         }
     };
     let out_name = timed(out_name);
+    let test_result = result.to_test_result();
+    print!("\n{}", test_result.summary()?);
     println!("{}", with_time("Writing data..."));
     let path = Path::new("crusader-results");
     let raw = save_raw(&result, &out_name, path)?;
@@ -942,7 +944,7 @@ pub fn test(
         "{}",
         with_time(&format!("Saved raw data as {}", path.join(raw).display()))
     );
-    let plot = save_graph(&plot, &result.to_test_result(), &out_name, path)?;
+    let plot = save_graph(&plot, &test_result, &out_name, path)?;
     println!(
         "{}",
         with_time(&format!("Saved plot as {}", path.join(plot).display()))

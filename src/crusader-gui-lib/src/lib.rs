@@ -462,8 +462,7 @@ impl Tester {
         }
     }
 
-    pub fn set_result(&mut self, raw: RawResult) {
-        let result = raw.to_test_result();
+    pub fn set_result(&mut self, result: plot::TestResult) {
         self.result = Some(TestResult::new(result));
         self.result_name = "test".to_owned();
         self.result_plot_reset = true;
@@ -471,7 +470,7 @@ impl Tester {
     }
 
     pub fn load_file(&mut self, name: String, raw: RawResult) {
-        self.set_result(raw);
+        self.set_result(raw.to_test_result());
         self.raw_result_saved = Some(name);
     }
 
@@ -772,6 +771,7 @@ impl Tester {
                         match result {
                             Some(Ok(result)) => {
                                 self.msgs.push(with_time("Test complete"));
+                                let result = result.to_test_result();
                                 self.set_result(result);
                                 if self.tab == Tab::Client {
                                     self.tab = Tab::Result;
