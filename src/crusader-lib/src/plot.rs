@@ -183,7 +183,10 @@ impl RawResult {
             let mut latencies = HashMap::new();
             let mut loss = HashMap::new();
 
-            let smooth_pings = smooth_ping(pings, Duration::from_millis(200));
+            let smooth_pings = smooth_ping(
+                pings,
+                (self.config.ping_interval * 3).max(Duration::from_millis(200)),
+            );
 
             add_latency(
                 &mut latencies,
