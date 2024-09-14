@@ -411,21 +411,12 @@ impl Tester {
                         let parameters_changed = self.settings.client != default;
 
                         ui.add_enabled_ui(parameters_changed, |ui| {
-                            if ui.button("Reset").clicked() {
+                            if ui.button("Reset settings").clicked() {
                                 self.settings.client = default;
                             }
                         });
 
-                        if ui
-                            .button(if self.settings.client.advanced {
-                                "Less parameters"
-                            } else {
-                                "More parameters"
-                            })
-                            .clicked()
-                        {
-                            self.settings.client.advanced = !self.settings.client.advanced;
-                        }
+                        ui.toggle_value(&mut self.settings.client.advanced, "Advanced mode");
                     })
                 });
 
