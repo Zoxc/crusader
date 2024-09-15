@@ -542,6 +542,35 @@ impl Tester {
                     if let Some(latency) = latencies.latencies.get(&None) {
                         stats(ui, "Latency", Color32::from_rgb(0, 0, 0), latency);
                     }
+
+                    ui.vertical(|ui| {
+                        ui.add_space(5.0);
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("Idle latency: ")
+                                    .color(Color32::from_rgb(128, 128, 128)),
+                            );
+                            ui.label(format!(
+                                "{:.02} ms",
+                                result.result.raw_result.server_latency.as_secs_f64() * 1000.0
+                            ));
+                        });
+                    });
+
+                    ui.vertical(|ui| {
+                        ui.add_space(5.0);
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("Latency sample interval: ")
+                                    .color(Color32::from_rgb(128, 128, 128)),
+                            );
+                            ui.label(format!(
+                                "{:.02} ms",
+                                result.result.raw_result.config.ping_interval.as_secs_f64()
+                                    * 1000.0
+                            ));
+                        });
+                    });
                 });
             });
 
@@ -1068,6 +1097,51 @@ impl Tester {
                                     }
                                 });
                             }
+
+                            ui.vertical(|ui| {
+                                ui.add_space(5.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new("Streams: ")
+                                            .color(Color32::from_rgb(128, 128, 128)),
+                                    );
+                                    ui.label(format!("{}", result.result.raw_result.streams()));
+                                });
+                            });
+
+                            ui.vertical(|ui| {
+                                ui.add_space(5.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new("Stream Stagger: ")
+                                            .color(Color32::from_rgb(128, 128, 128)),
+                                    );
+                                    ui.label(format!(
+                                        "{:.02} seconds",
+                                        result.result.raw_result.config.stagger.as_secs_f64()
+                                    ));
+                                });
+                            });
+
+                            ui.vertical(|ui| {
+                                ui.add_space(5.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new("Throughput sample interval: ")
+                                            .color(Color32::from_rgb(128, 128, 128)),
+                                    );
+                                    ui.label(format!(
+                                        "{:.02} ms",
+                                        result
+                                            .result
+                                            .raw_result
+                                            .config
+                                            .bandwidth_interval
+                                            .as_secs_f64()
+                                            * 1000.0
+                                    ));
+                                });
+                            });
                         });
                     });
 
