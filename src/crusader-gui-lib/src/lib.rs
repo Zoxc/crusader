@@ -670,7 +670,7 @@ impl Tester {
 
             // Latency
             let mut plot = Plot::new((peer, "ping"))
-                .legend(Legend::default())
+                .legend(Legend::default().insertion_order(true))
                 .y_axis_min_width(y_axis_size)
                 .link_axis(link, true, false)
                 .link_cursor(link, true, false)
