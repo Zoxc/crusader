@@ -24,6 +24,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Add a reset parameters button in GUI
 * Add an option to measure latency-only for the client in the GUI
 * Don't allow peers to connect with the regular server
+* Added average lines in GUI
 
 ## 0.2 - 2024-08-29
 

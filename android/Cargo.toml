@@ -24,6 +24,7 @@ winit = { git = "https://github.com/Zoxc/winit", branch = "crusader2" }
 egui = { git = "https://github.com/Zoxc/egui", branch = "crusader2" }
 epaint = { git = "https://github.com/Zoxc/egui", branch = "crusader2" }
 emath = { git = "https://github.com/Zoxc/egui", branch = "crusader2" }
+egui_plot = { git = "https://github.com/Zoxc/egui_plot", branch = "crusader" }
 
 [lib]
 name = "main"
