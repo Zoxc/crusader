@@ -460,7 +460,11 @@ impl Tester {
                             false,
                             "Latency under load",
                         );
-                        ui.selectable_value(&mut self.settings.client.idle_test, true, "Latency");
+                        ui.selectable_value(
+                            &mut self.settings.client.idle_test,
+                            true,
+                            "Latency only",
+                        );
                     });
 
                     ui.separator();
