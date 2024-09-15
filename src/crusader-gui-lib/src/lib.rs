@@ -1821,7 +1821,7 @@ impl Tester {
 
             // Latency
             let mut plot = Plot::new("latency-ping")
-                .legend(Legend::default())
+                .legend(Legend::default().insertion_order(true))
                 .link_axis(link, true, false)
                 .link_cursor(link, true, false)
                 .include_x(-duration)
