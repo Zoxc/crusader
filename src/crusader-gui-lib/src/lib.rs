@@ -583,89 +583,102 @@ impl Tester {
                 let label = if peer { "Peer latency" } else { "Latency" };
                 ui.label(label);
 
-                hover_popup(ui, (label, "Popup"), AboveOrBelow::Above, |ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.spacing_mut().interact_size.y = 10.0;
+                hover_popup(
+                    ui,
+                    (label, "Popup"),
+                    if !peer && result.result.raw_result.idle() {
+                        AboveOrBelow::Below
+                    } else {
+                        AboveOrBelow::Above
+                    },
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        ui.spacing_mut().interact_size.y = 10.0;
 
-                    let stats = |ui: &mut Ui, name, color, latency: &LatencySummary| {
+                        let stats = |ui: &mut Ui, name, color, latency: &LatencySummary| {
+                            ui.vertical(|ui| {
+                                ui.add_space(5.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(format!("{name}: ")).color(color));
+                                    ui.label(format!(
+                                        "{:.01} ms",
+                                        latency.total.as_secs_f64() * 1000.0
+                                    ));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(format!(
+                                        "\t\t{:.01} ms ",
+                                        latency.down.as_secs_f64() * 1000.0
+                                    ));
+                                    ui.label(
+                                        RichText::new("down").color(Color32::from_rgb(95, 145, 62)),
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(format!(
+                                        "\t\t{:.01} ms ",
+                                        latency.up.as_secs_f64() * 1000.0
+                                    ));
+                                    ui.label(
+                                        RichText::new("up").color(Color32::from_rgb(37, 83, 169)),
+                                    );
+                                });
+                            });
+                        };
+
+                        if let Some(latency) = latencies.latencies.get(&Some(TestKind::Download)) {
+                            stats(ui, "Download", Color32::from_rgb(95, 145, 62), latency);
+                        }
+
+                        if let Some(latency) = latencies.latencies.get(&Some(TestKind::Upload)) {
+                            stats(ui, "Upload", Color32::from_rgb(37, 83, 169), latency);
+                        }
+
+                        if let Some(latency) =
+                            latencies.latencies.get(&Some(TestKind::Bidirectional))
+                        {
+                            stats(
+                                ui,
+                                "Bidirectional",
+                                Color32::from_rgb(149, 96, 153),
+                                latency,
+                            );
+                        }
+
+                        if let Some(latency) = latencies.latencies.get(&None) {
+                            stats(ui, "Latency", Color32::from_rgb(0, 0, 0), latency);
+                        }
+
                         ui.vertical(|ui| {
                             ui.add_space(5.0);
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("{name}: ")).color(color));
-                                ui.label(format!(
-                                    "{:.01} ms",
-                                    latency.total.as_secs_f64() * 1000.0
-                                ));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(format!(
-                                    "\t\t{:.01} ms ",
-                                    latency.down.as_secs_f64() * 1000.0
-                                ));
                                 ui.label(
-                                    RichText::new("down").color(Color32::from_rgb(95, 145, 62)),
+                                    RichText::new("Idle latency: ")
+                                        .color(Color32::from_rgb(128, 128, 128)),
                                 );
-                            });
-                            ui.horizontal(|ui| {
                                 ui.label(format!(
-                                    "\t\t{:.01} ms ",
-                                    latency.up.as_secs_f64() * 1000.0
+                                    "{:.02} ms",
+                                    result.result.raw_result.server_latency.as_secs_f64() * 1000.0
                                 ));
-                                ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
                             });
                         });
-                    };
 
-                    if let Some(latency) = latencies.latencies.get(&Some(TestKind::Download)) {
-                        stats(ui, "Download", Color32::from_rgb(95, 145, 62), latency);
-                    }
-
-                    if let Some(latency) = latencies.latencies.get(&Some(TestKind::Upload)) {
-                        stats(ui, "Upload", Color32::from_rgb(37, 83, 169), latency);
-                    }
-
-                    if let Some(latency) = latencies.latencies.get(&Some(TestKind::Bidirectional)) {
-                        stats(
-                            ui,
-                            "Bidirectional",
-                            Color32::from_rgb(149, 96, 153),
-                            latency,
-                        );
-                    }
-
-                    if let Some(latency) = latencies.latencies.get(&None) {
-                        stats(ui, "Latency", Color32::from_rgb(0, 0, 0), latency);
-                    }
-
-                    ui.vertical(|ui| {
-                        ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new("Idle latency: ")
-                                    .color(Color32::from_rgb(128, 128, 128)),
-                            );
-                            ui.label(format!(
-                                "{:.02} ms",
-                                result.result.raw_result.server_latency.as_secs_f64() * 1000.0
-                            ));
+                        ui.vertical(|ui| {
+                            ui.add_space(5.0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("Latency sample interval: ")
+                                        .color(Color32::from_rgb(128, 128, 128)),
+                                );
+                                ui.label(format!(
+                                    "{:.02} ms",
+                                    result.result.raw_result.config.ping_interval.as_secs_f64()
+                                        * 1000.0
+                                ));
+                            });
                         });
-                    });
-
-                    ui.vertical(|ui| {
-                        ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new("Latency sample interval: ")
-                                    .color(Color32::from_rgb(128, 128, 128)),
-                            );
-                            ui.label(format!(
-                                "{:.02} ms",
-                                result.result.raw_result.config.ping_interval.as_secs_f64()
-                                    * 1000.0
-                            ));
-                        });
-                    });
-                });
+                    },
+                );
             });
 
             // Latency
