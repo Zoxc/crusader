@@ -9,6 +9,8 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
+## 0.3 - 2024-09-16
+
 * Show throughput, latency, and packet loss summaries in plots and with the `test` command
 * Rename both option to bidirectional
 * Rename `--latency-peer-server` to `--latency-peer-address`
