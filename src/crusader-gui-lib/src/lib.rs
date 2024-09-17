@@ -15,7 +15,7 @@ use std::{
 };
 
 use client::{Client, ClientSettings, ClientState};
-use crusader_lib::plot::LatencySummary;
+use crusader_lib::plot::{smooth, LatencySummary};
 use crusader_lib::test::timed;
 use crusader_lib::{
     file_format::{RawPing, RawResult, TestKind},
@@ -34,7 +34,7 @@ use eframe::{
     epaint::Color32,
 };
 use egui_extras::{Size, Strip, StripBuilder};
-use egui_plot::{Legend, Line, Plot, PlotPoints};
+use egui_plot::{ColorConflictHandling, Legend, Line, Plot, PlotPoints};
 
 #[cfg(not(target_os = "android"))]
 use rfd::FileDialog;
@@ -213,9 +213,16 @@ impl LatencyResult {
 
 pub struct TestResult {
     result: plot::TestResult,
-    download: Vec<(f64, f64)>,
-    upload: Vec<(f64, f64)>,
-    both: Vec<(f64, f64)>,
+    download: Option<Vec<(f64, f64)>>,
+    download_avg: Option<Vec<(f64, f64)>>,
+    upload: Option<Vec<(f64, f64)>>,
+    upload_avg: Option<Vec<(f64, f64)>>,
+    both_download: Option<Vec<(f64, f64)>>,
+    both_download_avg: Option<Vec<(f64, f64)>>,
+    both_upload: Option<Vec<(f64, f64)>>,
+    both_upload_avg: Option<Vec<(f64, f64)>>,
+    both: Option<Vec<(f64, f64)>>,
+    both_avg: Option<Vec<(f64, f64)>>,
     local_latency: LatencyResult,
     peer_latency: Option<LatencyResult>,
     throughput_max: f64,
@@ -223,20 +230,95 @@ pub struct TestResult {
 
 impl TestResult {
     fn new(result: plot::TestResult) -> Self {
-        let start = result.start.as_secs_f64();
-        let download = handle_bytes(&result.combined_download_bytes, start);
-        let upload = handle_bytes(&result.combined_upload_bytes, start);
-        let both = handle_bytes(result.both_bytes.as_deref().unwrap_or(&[]), start);
+        let smooth_interval =
+            Duration::from_secs_f64(1.0).min(result.raw_result.config.grace_duration);
+        let interval = result.raw_result.config.bandwidth_interval;
 
-        let download_max = float_max(download.iter().map(|v| v.1));
-        let upload_max = float_max(upload.iter().map(|v| v.1));
-        let both_max = float_max(both.iter().map(|v| v.1));
-        let throughput_max = float_max([download_max, upload_max, both_max].into_iter());
+        let start = result.start.as_secs_f64();
+
+        let download = result
+            .download_bytes
+            .as_ref()
+            .map(|bytes| handle_bytes(bytes, start));
+        let download_avg = result
+            .download_bytes
+            .as_ref()
+            .map(|bytes| smooth_bytes(bytes, start, interval, smooth_interval));
+
+        let upload = result
+            .upload_bytes
+            .as_ref()
+            .map(|bytes| handle_bytes(bytes, start));
+        let upload_avg = result
+            .upload_bytes
+            .as_ref()
+            .map(|bytes| smooth_bytes(bytes, start, interval, smooth_interval));
+
+        let both_upload = result
+            .both_upload_bytes
+            .as_ref()
+            .map(|bytes| handle_bytes(bytes, start));
+        let both_upload_avg = result
+            .both_upload_bytes
+            .as_ref()
+            .map(|bytes| smooth_bytes(bytes, start, interval, smooth_interval));
+
+        let both_download = result
+            .both_download_bytes
+            .as_ref()
+            .map(|bytes| handle_bytes(bytes, start));
+        let both_download_avg = result
+            .both_download_bytes
+            .as_ref()
+            .map(|bytes| smooth_bytes(bytes, start, interval, smooth_interval));
+
+        let both = result
+            .both_bytes
+            .as_ref()
+            .map(|bytes| handle_bytes(bytes, start));
+        let both_avg = result
+            .both_bytes
+            .as_ref()
+            .map(|bytes| smooth_bytes(bytes, start, interval, smooth_interval));
+
+        let download_max = download
+            .as_ref()
+            .map(|data| float_max(data.iter().map(|v| v.1)));
+        let upload_max = upload
+            .as_ref()
+            .map(|data| float_max(data.iter().map(|v| v.1)));
+        let both_upload_max = both_upload
+            .as_ref()
+            .map(|data| float_max(data.iter().map(|v| v.1)));
+        let both_download_max = both_download
+            .as_ref()
+            .map(|data| float_max(data.iter().map(|v| v.1)));
+        let both_max = both
+            .as_ref()
+            .map(|data| float_max(data.iter().map(|v| v.1)));
+        let throughput_max = float_max(
+            [
+                download_max,
+                upload_max,
+                both_upload_max,
+                both_download_max,
+                both_max,
+            ]
+            .into_iter()
+            .flatten(),
+        );
 
         TestResult {
             download,
+            download_avg,
             upload,
+            upload_avg,
+            both_download,
+            both_download_avg,
+            both_upload,
+            both_upload_avg,
             both,
+            both_avg,
             throughput_max,
             local_latency: LatencyResult::new(&result, &result.pings),
             peer_latency: result
@@ -251,6 +333,18 @@ impl TestResult {
 
 pub fn handle_bytes(data: &[(u64, f64)], start: f64) -> Vec<(f64, f64)> {
     to_rates(data)
+        .into_iter()
+        .map(|(time, speed)| (Duration::from_micros(time).as_secs_f64() - start, speed))
+        .collect()
+}
+
+pub fn smooth_bytes(
+    data: &[(u64, f64)],
+    start: f64,
+    interval: Duration,
+    smoothing_interval: Duration,
+) -> Vec<(f64, f64)> {
+    smooth(data, interval, smoothing_interval)
         .into_iter()
         .map(|(time, speed)| (Duration::from_micros(time).as_secs_f64() - start, speed))
         .collect()
@@ -489,94 +583,107 @@ impl Tester {
                 let label = if peer { "Peer latency" } else { "Latency" };
                 ui.label(label);
 
-                hover_popup(ui, (label, "Popup"), AboveOrBelow::Above, |ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.spacing_mut().interact_size.y = 10.0;
+                hover_popup(
+                    ui,
+                    (label, "Popup"),
+                    if !peer && result.result.raw_result.idle() {
+                        AboveOrBelow::Below
+                    } else {
+                        AboveOrBelow::Above
+                    },
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        ui.spacing_mut().interact_size.y = 10.0;
 
-                    let stats = |ui: &mut Ui, name, color, latency: &LatencySummary| {
+                        let stats = |ui: &mut Ui, name, color, latency: &LatencySummary| {
+                            ui.vertical(|ui| {
+                                ui.add_space(5.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(format!("{name}: ")).color(color));
+                                    ui.label(format!(
+                                        "{:.01} ms",
+                                        latency.total.as_secs_f64() * 1000.0
+                                    ));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(format!(
+                                        "\t\t{:.01} ms ",
+                                        latency.down.as_secs_f64() * 1000.0
+                                    ));
+                                    ui.label(
+                                        RichText::new("down").color(Color32::from_rgb(95, 145, 62)),
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(format!(
+                                        "\t\t{:.01} ms ",
+                                        latency.up.as_secs_f64() * 1000.0
+                                    ));
+                                    ui.label(
+                                        RichText::new("up").color(Color32::from_rgb(37, 83, 169)),
+                                    );
+                                });
+                            });
+                        };
+
+                        if let Some(latency) = latencies.latencies.get(&Some(TestKind::Download)) {
+                            stats(ui, "Download", Color32::from_rgb(95, 145, 62), latency);
+                        }
+
+                        if let Some(latency) = latencies.latencies.get(&Some(TestKind::Upload)) {
+                            stats(ui, "Upload", Color32::from_rgb(37, 83, 169), latency);
+                        }
+
+                        if let Some(latency) =
+                            latencies.latencies.get(&Some(TestKind::Bidirectional))
+                        {
+                            stats(
+                                ui,
+                                "Bidirectional",
+                                Color32::from_rgb(149, 96, 153),
+                                latency,
+                            );
+                        }
+
+                        if let Some(latency) = latencies.latencies.get(&None) {
+                            stats(ui, "Latency", Color32::from_rgb(0, 0, 0), latency);
+                        }
+
                         ui.vertical(|ui| {
                             ui.add_space(5.0);
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("{name}: ")).color(color));
-                                ui.label(format!(
-                                    "{:.01} ms",
-                                    latency.total.as_secs_f64() * 1000.0
-                                ));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(format!(
-                                    "\t\t{:.01} ms ",
-                                    latency.down.as_secs_f64() * 1000.0
-                                ));
                                 ui.label(
-                                    RichText::new("down").color(Color32::from_rgb(95, 145, 62)),
+                                    RichText::new("Idle latency: ")
+                                        .color(Color32::from_rgb(128, 128, 128)),
                                 );
-                            });
-                            ui.horizontal(|ui| {
                                 ui.label(format!(
-                                    "\t\t{:.01} ms ",
-                                    latency.up.as_secs_f64() * 1000.0
+                                    "{:.02} ms",
+                                    result.result.raw_result.server_latency.as_secs_f64() * 1000.0
                                 ));
-                                ui.label(RichText::new("up").color(Color32::from_rgb(37, 83, 169)));
                             });
                         });
-                    };
 
-                    if let Some(latency) = latencies.latencies.get(&Some(TestKind::Download)) {
-                        stats(ui, "Download", Color32::from_rgb(95, 145, 62), latency);
-                    }
-
-                    if let Some(latency) = latencies.latencies.get(&Some(TestKind::Upload)) {
-                        stats(ui, "Upload", Color32::from_rgb(37, 83, 169), latency);
-                    }
-
-                    if let Some(latency) = latencies.latencies.get(&Some(TestKind::Bidirectional)) {
-                        stats(
-                            ui,
-                            "Bidirectional",
-                            Color32::from_rgb(149, 96, 153),
-                            latency,
-                        );
-                    }
-
-                    if let Some(latency) = latencies.latencies.get(&None) {
-                        stats(ui, "Latency", Color32::from_rgb(0, 0, 0), latency);
-                    }
-
-                    ui.vertical(|ui| {
-                        ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new("Idle latency: ")
-                                    .color(Color32::from_rgb(128, 128, 128)),
-                            );
-                            ui.label(format!(
-                                "{:.02} ms",
-                                result.result.raw_result.server_latency.as_secs_f64() * 1000.0
-                            ));
+                        ui.vertical(|ui| {
+                            ui.add_space(5.0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("Latency sample interval: ")
+                                        .color(Color32::from_rgb(128, 128, 128)),
+                                );
+                                ui.label(format!(
+                                    "{:.02} ms",
+                                    result.result.raw_result.config.ping_interval.as_secs_f64()
+                                        * 1000.0
+                                ));
+                            });
                         });
-                    });
-
-                    ui.vertical(|ui| {
-                        ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new("Latency sample interval: ")
-                                    .color(Color32::from_rgb(128, 128, 128)),
-                            );
-                            ui.label(format!(
-                                "{:.02} ms",
-                                result.result.raw_result.config.ping_interval.as_secs_f64()
-                                    * 1000.0
-                            ));
-                        });
-                    });
-                });
+                    },
+                );
             });
 
             // Latency
             let mut plot = Plot::new((peer, "ping"))
-                .legend(Legend::default())
+                .legend(Legend::default().insertion_order(true))
                 .y_axis_min_width(y_axis_size)
                 .link_axis(link, true, false)
                 .link_cursor(link, true, false)
@@ -1147,7 +1254,11 @@ impl Tester {
 
                     // Throughput
                     let mut plot = Plot::new("result")
-                        .legend(Legend::default())
+                        .legend(
+                            Legend::default()
+                                .color_conflict_handling(ColorConflictHandling::PickFirst)
+                                .insertion_order(true),
+                        )
                         .y_axis_min_width(y_axis_size)
                         .link_axis(link, true, false)
                         .link_cursor(link, true, false)
@@ -1165,26 +1276,123 @@ impl Tester {
                     }
 
                     plot.show(ui, |plot_ui| {
-                        if result.result.raw_result.download() || result.result.raw_result.both() {
-                            let download = result.download.iter().map(|v| [v.0, v.1]);
+                        let width = 1.0;
+                        if let Some(data) = result.download.as_ref() {
+                            let download = data.iter().map(|v| [v.0, v.1]);
                             let download = Line::new(PlotPoints::from_iter(download))
                                 .color(Color32::from_rgb(95, 145, 62))
+                                .width(width)
                                 .name("Download");
 
                             plot_ui.line(download);
                         }
-                        if result.result.raw_result.upload() || result.result.raw_result.both() {
-                            let upload = result.upload.iter().map(|v| [v.0, v.1]);
+                        if let Some(data) = result.upload.as_ref() {
+                            let upload = data.iter().map(|v| [v.0, v.1]);
                             let upload = Line::new(PlotPoints::from_iter(upload))
                                 .color(Color32::from_rgb(37, 83, 169))
+                                .width(width)
                                 .name("Upload");
 
                             plot_ui.line(upload);
                         }
-                        if result.result.raw_result.both() {
-                            let both = result.both.iter().map(|v| [v.0, v.1]);
+                        if let Some(data) = result.both_download.as_ref() {
+                            let download = data.iter().map(|v| [v.0, v.1]);
+                            let download = Line::new(PlotPoints::from_iter(download))
+                                .color(Color32::from_rgb(95, 145, 62))
+                                .width(width)
+                                .name("Download");
+
+                            plot_ui.line(download);
+                        }
+                        if let Some(data) = result.both_upload.as_ref() {
+                            let upload = data.iter().map(|v| [v.0, v.1]);
+                            let upload = Line::new(PlotPoints::from_iter(upload))
+                                .color(Color32::from_rgb(37, 83, 169))
+                                .width(width)
+                                .name("Upload");
+
+                            plot_ui.line(upload);
+                        }
+                        if let Some(data) = result.both.as_ref() {
+                            let both = data.iter().map(|v| [v.0, v.1]);
                             let both = Line::new(PlotPoints::from_iter(both))
                                 .color(Color32::from_rgb(149, 96, 153))
+                                .width(width)
+                                .name("Aggregate");
+
+                            plot_ui.line(both);
+                        }
+
+                        // Average lines
+                        let darken = 0.5;
+                        let alpha = 0.35;
+
+                        if let Some(data) = result.download_avg.as_ref() {
+                            let download = data.iter().map(|v| [v.0, v.1]);
+                            let download = Line::new(PlotPoints::from_iter(download))
+                                .color(
+                                    Color32::from_rgb(95, 145, 62)
+                                        .lerp_to_gamma(Color32::BLACK, darken)
+                                        .gamma_multiply(alpha),
+                                )
+                                .allow_hover(false)
+                                .width(3.5)
+                                .name("Download");
+
+                            plot_ui.line(download);
+                        }
+                        if let Some(data) = result.upload_avg.as_ref() {
+                            let upload = data.iter().map(|v| [v.0, v.1]);
+                            let upload = Line::new(PlotPoints::from_iter(upload))
+                                .color(
+                                    Color32::from_rgb(37, 83, 169)
+                                        .lerp_to_gamma(Color32::BLACK, darken)
+                                        .gamma_multiply(alpha),
+                                )
+                                .allow_hover(false)
+                                .width(3.5)
+                                .name("Upload");
+
+                            plot_ui.line(upload);
+                        }
+                        if let Some(data) = result.both_download_avg.as_ref() {
+                            let download = data.iter().map(|v| [v.0, v.1]);
+                            let download = Line::new(PlotPoints::from_iter(download))
+                                .color(
+                                    Color32::from_rgb(95, 145, 62)
+                                        .lerp_to_gamma(Color32::BLACK, darken)
+                                        .gamma_multiply(alpha),
+                                )
+                                .allow_hover(false)
+                                .width(3.5)
+                                .name("Download");
+
+                            plot_ui.line(download);
+                        }
+                        if let Some(data) = result.both_upload_avg.as_ref() {
+                            let upload = data.iter().map(|v| [v.0, v.1]);
+                            let upload = Line::new(PlotPoints::from_iter(upload))
+                                .color(
+                                    Color32::from_rgb(37, 83, 169)
+                                        .lerp_to_gamma(Color32::BLACK, darken)
+                                        .gamma_multiply(alpha),
+                                )
+                                .allow_hover(false)
+                                .width(3.5)
+                                .name("Upload");
+
+                            plot_ui.line(upload);
+                        }
+                        if let Some(data) = result.both_avg.as_ref() {
+                            let both = data.iter().map(|v| [v.0, v.1]);
+                            let both = Line::new(PlotPoints::from_iter(both))
+                                .color(
+                                    Color32::from_rgb(149, 96, 153)
+                                        .lerp_to_gamma(Color32::BLACK, darken)
+                                        .gamma_multiply(alpha),
+                                )
+                                .allow_hover(false)
+                                .width(3.5)
                                 .name("Aggregate");
 
                             plot_ui.line(both);
@@ -1626,7 +1834,7 @@ impl Tester {
 
             // Latency
             let mut plot = Plot::new("latency-ping")
-                .legend(Legend::default())
+                .legend(Legend::default().insertion_order(true))
                 .link_axis(link, true, false)
                 .link_cursor(link, true, false)
                 .include_x(-duration)
