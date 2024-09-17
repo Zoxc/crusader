@@ -7,15 +7,14 @@ Here are some hints for evaluating the results.
 
 ![Result with statistics](./media/Crusader-Result-with-stats.png)
 
-As described in the [README](../README.md), Crusader tests the connection
-using three bursts of traffic.
+Crusader tests the connection using three bursts of traffic.
 The Throughput, Latency, and Packet loss are shown in the charts.
 In the image above notice:
 
 * Hovering over a chart shows crosshairs that give the throughput
   or latency of that point in the chart.
   In the screen shot above, the Down latency
-  peaks around 250 msec.
+  peaks around 250 ms.
 * Hovering over, or clicking the ⓘ symbol opens a window that gives
   a summary of the statistics.
   See the description below for more definitions of the values.
@@ -42,7 +41,7 @@ The Crusader GUI displays charts showing Throughput, Latency, and Packet loss. T
 
 <img width="209" alt="image" src="https://github.com/user-attachments/assets/fbcc361f-15cf-45d0-9f40-a497c12b0cfd">
 
-Crusader smooths all the latency samples over a 400 msec window.
+Crusader smooths all the latency samples over a 400 ms window.
 The values shown in the window display the maximum of those smoothed values.
 This emphasizes the peaks of latency.
 

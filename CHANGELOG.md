@@ -11,8 +11,8 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## 0.3 - 2024-09-16
 
-* Show throughput, latency, and packet loss summaries in plots and with the `test` command
-* Rename both option to bidirectional
+* Show numeric throughput, latency, and packet loss summaries in plots and with the `test` command
+* Rename "both" option to "bidirectional"
 * Rename `--latency-peer-server` to `--latency-peer-address`
 * Continuous clock synchronization with the latency monitor
 * Support opening result files in the GUI by drag and drop
@@ -32,7 +32,7 @@ This file lists the changes that have occurred since January 2024 in the project
 
 * Added support for local discovery of server and peers using UDP port 35483
 * The `test` command line option `--latency-peer` is renamed to `--latency-peer-server`.
-  A new flag `--latency-peer` will instead search for a local peer.
+  A new boolean flag `--latency-peer` triggers a search for a local peer.
 * Improved error messages
 * Fix date/time display in remote web page
 * Rename the `Latency` tab to `Monitor`
@@ -58,7 +58,7 @@ This file lists the changes that have occurred since January 2024 in the project
 * Added `--idle` option to the client to test without traffic
 * Save results in a `crusader-results` folder
 * Allow building of a server-only binary
-* Generated files will use a YYYY-MM-DD HH.MM.SS format
+* Generated files use a YYYY-MM-DD HH.MM.SS format
 * Rename bandwidth to throughput
 * Rename sample rate to sample interval
 * Rename `Both` to `Aggregate` and `Total` to `Round-trip` in plots

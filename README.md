@@ -7,11 +7,11 @@
 
 ![Crusader Results Screenshot](./media/Crusader-Result.png)
 
-The **Crusader Network Tester** measures network rates and latency
-in the presence of upload and download traffic.
+The **Crusader Network Tester** measures and plots network throughput,
+latency in the presence of upload and download traffic,
+and packet loss.
 It also incorporates a continuous latency tester for
 monitoring background responsiveness.
-It produces plots of the traffic rates, latency and packet loss.
 Crusader uses TCP and UDP ports 35481 (only) for its tests.
 The remote web server option uses TCP port 35482.
 Local server discovery uses UDP port 35483.
@@ -20,10 +20,13 @@ Local server discovery uses UDP port 35483.
 and Android are available on the
 [Releases](https://github.com/Zoxc/crusader/releases) page.
 The GUI is not prebuilt for Linux and must be built from source.
-See the [COMMANDLINE.md](COMMANDLINE.md) page for running Crusader
-from the command-line or to build it from source.
+
 A **Docker container** for running the server may be found on
 [dockerhub](https://hub.docker.com/r/zoxc/crusader).
+
+**Command line/Build from source** See the [CLI.md](CLI.md)
+page for running Crusader
+from the command-line or to build it from source.
 
 **Status:** The latest Crusader release version is shown above.
   The [pre-built binaries](https://github.com/Zoxc/crusader/releases)

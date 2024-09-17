@@ -47,52 +47,56 @@ The resulting `.json` is saved in the same directory as the input file.
 **Options:**
 
 * **`--download`**
-          Run a download test
+          Run a download test 
 * **`--upload`**
           Run an upload test
 * **`--bidirectional`**
           Run a test doing both download and upload
 * **`--idle`**
-          Run a test only measuring latency. The duration is specified by `grace_duration`
+          Run a test, only measuring latency without inducing traffic.
+          The duration is specified by `grace_duration`
 * **`--port <PORT>`**
-          Specifies the TCP and UDP port used by the server
+          Specify the TCP and UDP port used by the server
           [default: 35481]
 * **`--streams <STREAMS>`**
           The number of TCP connections used to generate
            traffic in a single direction
-          [default: 16]
+          [default: 8]
 * **`--stream-stagger <SECONDS>`**
           The delay between the start of each stream
           [default: 0.0]
 * **`--load-duration <SECONDS>`**
           The duration in which traffic is generated
-          [default: 5.0]
+          [default: 10.0]
 * **`--grace-duration <SECONDS>`**
           The idle time between each test
-          [default: 1.0]
+          [default: 2.0]
 * **`--latency-sample-interval <MILLISECONDS>`**
           [default: 5.0]
 * **`--throughput-sample-interval <MILLISECONDS>`**
-          [default: 20.0]
+          [default: 60.0]
 * **`--plot-transferred`**
           Plot transferred bytes
 * **`--plot-split-throughput`**
           Plot upload and download separately and plot streams
 * **`--plot-max-throughput <BPS>`**
-          Sets the axis for throughput to at least this value.
+          Set the axis for throughput to at least this value.
           SI units are supported so `100M` would specify 100 Mbps
 * **`--plot-max-latency <MILLISECONDS>`**
-          Sets the axis for latency to at least this value
+          Set the axis for latency to at least this value
 * **`--plot-width <PIXELS>`**
 * **`--plot-height <PIXELS>`**
 * **`--plot-title <PLOT_TITLE>`**
 * **`--latency-peer-address <LATENCY_PEER_ADDRESS>`**
-          Specifies another server (peer) which will
-          also measure the latency to the server independently of the client
+          Address of another Crusader server (the "peer") which
+          concurrently measures the latency to the server and reports
+          the values to the client
 * **`--latency-peer`**
-          Use another server (peer) which will also measure the latency to the server independently of the client
+          Trigger the client to instruct a peer (another Crusader server)
+          to begin measuring the latency to the main server 
+          and report the latency back
 * **`--out-name <OUT_NAME>`**
-          The filename prefix used for the test result raw data and plot filenames
+          The filename prefix used for the raw data and plot filenames
 * **`-h, --help`**
           Print help (see a summary with '-h')
 
@@ -103,7 +107,7 @@ for everyday tests if available.
 
 To develop or debug Crusader, use the commands below
 to build the full set of binaries.
-Executables will be placed in `src/target/release`
+Executables are placed in `src/target/release`
 
 ### Required dependencies
 
