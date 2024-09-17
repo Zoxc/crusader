@@ -1,5 +1,31 @@
-_First cut at numerical summary window documentation_
--------
+# Understanding Crusader Results
+
+The Crusader GUI provides a compact summary of the test data.
+Here are some hints for evaluating the results.
+
+## Result window
+
+![Result with statistics](./media/Crusader-Result-with-stats.png)
+
+As described in the [README](../README.md), Crusader tests the connection
+using three bursts of traffic.
+The Throughput, Latency, and Packet loss are shown in the charts.
+In the image above notice:
+
+* Hovering over a chart shows crosshairs that give the throughput
+  or latency of that point in the chart.
+  In the screen shot above, the Latency is about 400 msec.
+* Hovering over, or clicking the ⓘ symbol opens a window that gives
+  a summary of the statistics.
+  See the description below for more definitions of the values.
+* Clicking a legend ("color") in the charts shows/hides that chart.
+  In the screen shot above, the Latency's "Down" legend has been clicked,
+  hiding the Down chart, and showing only the Up and Round-trip values.
+* Crusader shows that latency increases dramatically both
+  for the download and upload portions of the test.
+  During download, it grows to 200 msec;
+  during the upload portion of the test, it's over 400 msec.
+
 ## Numerical Summary Windows
 
 The Crusader GUI displays charts showing Throughput, Latency, and Packet loss. The ⓘ symbol opens a window showing a numerical summary of the charted data.
@@ -19,13 +45,15 @@ The Crusader GUI displays charts showing Throughput, Latency, and Packet loss. T
 
 <img width="209" alt="image" src="https://github.com/user-attachments/assets/fbcc361f-15cf-45d0-9f40-a497c12b0cfd">
 
-Crusader smooths all the latency samples over a 400 msec window. The values shown below display the maximum of those smoothed values. This emphasizes the peaks of latency.
+Crusader smooths all the latency samples over a 400 msec window.
+The values shown in the window display the maximum of those smoothed values.
+This emphasizes the peaks of latency.
 
 * Download - Summarizes the round-trip latency during the Download portion of the test.
   Also displays the measured one-way delay for Download (from server to client)
   and Upload (client to server)
 * Upload - Summarizes the latency for the Upload portion of the test
-* Bidirectional - Summarizes the latency or the Bidirectional portion of the test
+* Bidirectional - Summarizes the latency for the Bidirectional portion of the test
 * Idle latency - Measured latency when no traffic is present.
 * Latency sample interval - Interval between latency measurements
 

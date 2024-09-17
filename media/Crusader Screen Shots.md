@@ -1,11 +1,13 @@
-# Crusader Screen Shots
+# Verify Crusader Screen Shots
 
-This page is useful to check the appearance of the screen shots.
-Use this process: get an image (screen shot) then
-trim off the drop shadow that the Mac captures.
-Then save the image in the _media_ directory.
-This page helps verify that the image retains the window border,
-but not the additional drop shadow.
+This page is useful for checking the appearance of screen shots.
+Capture the screen shots (Cmd-Shift-5 on macOS) and save with filenames
+like "Client.png", "Server.png", etc., one for each of the tabs.
+
+Run the `batch_add_border.sh` script - it finds all these files,
+removes the drop shadow and adds "Crusader-" to each result file.
+
+Remove the original files before committing to git.
 
 ## Client
 ![Options](./Crusader-Client.png)
@@ -21,3 +23,7 @@ but not the additional drop shadow.
 
 ## Result
 ![Options](./Crusader-Result.png)
+
+## Result with stats
+![Options](./Crusader-Result-with-stats.png)
+
