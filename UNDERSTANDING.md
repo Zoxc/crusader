@@ -14,7 +14,8 @@ In the image above notice:
 
 * Hovering over a chart shows crosshairs that give the throughput
   or latency of that point in the chart.
-  In the screen shot above, the Latency is about 400 msec.
+  In the screen shot above, the download and upload latency
+  are about 160 msec.
 * Hovering over, or clicking the ⓘ symbol opens a window that gives
   a summary of the statistics.
   See the description below for more definitions of the values.
@@ -23,8 +24,8 @@ In the image above notice:
   hiding the Down chart, and showing only the Up and Round-trip values.
 * Crusader shows that latency increases dramatically both
   for the download and upload portions of the test.
-  During download, it grows to 200 msec;
-  during the upload portion of the test, it's over 400 msec.
+  During download and upload, it's about 160 msec;
+  during the bidirectional portion of the test, it peaks at over 600 msec.
 
 ## Numerical Summary Windows
 
