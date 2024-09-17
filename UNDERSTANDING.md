@@ -14,18 +14,14 @@ In the image above notice:
 
 * Hovering over a chart shows crosshairs that give the throughput
   or latency of that point in the chart.
-  In the screen shot above, the download and upload latency
-  are about 160 msec.
+  In the screen shot above, the Down latency
+  peaks around 250 msec.
 * Hovering over, or clicking the ⓘ symbol opens a window that gives
   a summary of the statistics.
   See the description below for more definitions of the values.
 * Clicking a legend ("color") in the charts shows/hides that chart.
-  In the screen shot above, the Latency's "Down" legend has been clicked,
-  hiding the Down chart, and showing only the Up and Round-trip values.
-* Crusader shows that latency increases dramatically both
-  for the download and upload portions of the test.
-  During download and upload, it's about 160 msec;
-  during the bidirectional portion of the test, it peaks at over 600 msec.
+  In the screen shot above, the Latency's "Round-trip" legend has been clicked,
+  hiding the round-trip chart, and showing only the Up and Down values.
 
 ## Numerical Summary Windows
 
