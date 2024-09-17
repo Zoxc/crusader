@@ -13,17 +13,25 @@ Remove the original files before committing to git.
 ![Options](./Crusader-Client.png)
 
 ## Server
-![Options](./Crusader-Server.png)
+![Server](./Crusader-Server.png)
 
 ## Remote
-![Options](./Crusader-Remote.png)
+![Remote](./Crusader-Remote.png)
 
 ## Monitor
-![Options](./Crusader-Monitor.png)
+![Monitor](./Crusader-Monitor.png)
 
 ## Result
-![Options](./Crusader-Result.png)
+![Result](./Crusader-Result.png)
 
 ## Result with stats
 ![Options](./Crusader-Result-with-stats.png)
 
+## Throughput popup
+![Throughput](./Crusader-Throughput.png)
+
+## Latency popup
+![Latency](./Crusader-Latency.png)
+
+## Packet loss popup
+![Packet Loss](./Crusader-Loss.png)

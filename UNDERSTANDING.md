@@ -28,7 +28,7 @@ The Crusader GUI displays charts showing Throughput, Latency, and Packet loss. T
 
 ### Throughput
 
-<img width="239" alt="image" src="https://github.com/user-attachments/assets/f2078aff-17e1-4599-8e10-c798a917f040">
+![Throughput](media/Crusader-Throughput.png)
 
 * Download - Average throughput (total data received divided by the elapsed time) during the Download portion of the test
 * Upload - Average throughput during the Upload portion of the test
@@ -39,7 +39,7 @@ The Crusader GUI displays charts showing Throughput, Latency, and Packet loss. T
 
 ### Latency
 
-<img width="209" alt="image" src="https://github.com/user-attachments/assets/fbcc361f-15cf-45d0-9f40-a497c12b0cfd">
+![Latency](media/Crusader-Latency.png)
 
 Crusader smooths all the latency samples over a 400 ms window.
 The values shown in the window display the maximum of those smoothed values.
@@ -53,10 +53,9 @@ This emphasizes the peaks of latency.
 * Idle latency - Measured latency when no traffic is present.
 * Latency sample interval - Interval between latency measurements
 
-
 ### Packet loss
 
-<img width="184" alt="image" src="https://github.com/user-attachments/assets/6b3681b3-c369-48ae-8b49-6e9dec034b82">
+![Packet Loss](media/Crusader-Loss.png)
 
 * Download - Summarizes packet loss during the Download portion of the test
 * Upload - Summarizes packet loss during the Upload portion of the test
