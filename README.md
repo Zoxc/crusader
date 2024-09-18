@@ -7,7 +7,8 @@
 
 ![Crusader Results Screenshot](./media/Crusader-Result.png)
 
-The **Crusader Network Tester** measures and plots network throughput,
+The **Crusader Network Tester** measures and plots
+network throughput,
 latency in the presence of upload and download traffic,
 and packet loss.
 It also incorporates a continuous latency tester for
@@ -130,10 +131,3 @@ For more details, see the
   or TCP incompatibilities between OSes.
   It's likely benign if you see throughput and latency drop
   to idle values after the tests in the graph.
-
-* The up and down latency measurements rely on symmetric stable latency
-measurements to the server.
-These values may be wrong if those assumption don't hold on test startup.
-
-* The up and down latency measurement may slowly get out of sync due to
-clock drift. Clocks are currently only synchronized on test startup.

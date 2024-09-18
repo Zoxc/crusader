@@ -29,9 +29,12 @@ Remove the original files before committing to git.
 
 ## Throughput popup
 ![Throughput](./Crusader-Throughput.png)
+<img src="./Crusader-Throughput.png" alt="description" width="250" />
 
 ## Latency popup
 ![Latency](./Crusader-Latency.png)
+<img src="./Crusader-Latency.png" alt="description" width="250" />
 
 ## Packet loss popup
 ![Packet Loss](./Crusader-Loss.png)
+<img src="./Crusader-Loss.png" alt="description" width="125" />

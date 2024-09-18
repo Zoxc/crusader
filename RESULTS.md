@@ -11,16 +11,26 @@ Crusader tests the connection using three bursts of traffic.
 The Throughput, Latency, and Packet loss are shown in the charts.
 In the image above notice:
 
-* Hovering over a chart shows crosshairs that give the throughput
+* **Hovering over a chart** shows crosshairs that give the throughput
   or latency of that point in the chart.
   In the screen shot above, the Down latency
   peaks around 250 ms.
-* Hovering over, or clicking the ⓘ symbol opens a window that gives
+* **Hovering over, or clicking the ⓘ symbol** opens a window that gives
   a summary of the statistics.
   See the description below for more definitions of the values.
-* Clicking a legend ("color") in the charts shows/hides that chart.
+* **Clicking a legend** ("color") in the charts shows/hides
+  the trace or that value.
   In the screen shot above, the Latency's "Round-trip" legend has been clicked,
-  hiding the round-trip chart, and showing only the Up and Down values.
+  hiding the (black) round-trip trace,
+  and showing only the Up and Down traces.
+* The **Save to results** button saves two files: a plot (as `.png`) 
+  and the data (as `.crr`) to the _crusader-results_ directory
+  in the user _home directory_. 
+* The **Open from results** button opens a `.crr` file
+  from the _crusader-results_ directory.
+* The **Save** button opens a file dialog to save the current `.crr` file.
+* The **Open** button opens a file dialog to select a `.crr` file to open.
+* The **Export plot** button opens a file dialog to save a `.png` file.
 
 ## Numerical Summary Windows
 
@@ -28,18 +38,20 @@ The Crusader GUI displays charts showing Throughput, Latency, and Packet loss. T
 
 ### Throughput
 
-![Throughput](media/Crusader-Throughput.png)
+<img src="media/Crusader-Throughput.png" alt="description" width="250" />
 
 * Download - Average throughput (total data received divided by the elapsed time) during the Download portion of the test
 * Upload - Average throughput during the Upload portion of the test
-* Bidirectional - Sum of the Download and Upload throughputs during the Bidirectional portion of the test. Also displays the Download and Upload throughputs.
+* Bidirectional - Sum of the Download and Upload throughputs
+  during the Bidirectional portion of the test.
+  Also displays the individual Download and Upload throughputs.
 * Streams - number of TCP connections used in each direction
 * Stream Stagger - The delay between the start of each stream  
 * Throughput sample interval - Interval between throughput measurements
 
 ### Latency
 
-![Latency](media/Crusader-Latency.png)
+<img src="media/Crusader-Latency.png" alt="description" width="250" />
 
 Crusader smooths all the latency samples over a 400 ms window.
 The values shown in the window display the maximum of those smoothed values.
@@ -55,7 +67,7 @@ This emphasizes the peaks of latency.
 
 ### Packet loss
 
-![Packet Loss](media/Crusader-Loss.png)
+<img src="media/Crusader-Loss.png" alt="description" width="125" />
 
 * Download - Summarizes packet loss during the Download portion of the test
 * Upload - Summarizes packet loss during the Upload portion of the test

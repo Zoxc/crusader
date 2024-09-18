@@ -9,15 +9,17 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
+* No unreleased changes
+
 ## 0.3 - 2024-09-16
 
 * Show numeric throughput, latency, and packet loss summaries in plots and with the `test` command
-* Rename "both" option to "bidirectional"
+* Rename `both` option to `bidirectional`
 * Rename `--latency-peer-server` to `--latency-peer-address`
 * Continuous clock synchronization with the latency monitor
 * Support opening result files in the GUI by drag and drop
 * Add `--out-name` command line option to specify result filename prefix
-* Change filename prefix for both raw result and plots to `test`
+* Use `test` as default filename prefix for both raw result and plots
 * Add file dialog to save options in GUI
 * Add buttons to save and load from the `crusader-results` folder in GUI
 * Add an `export` command line command to convert result files to JSON
