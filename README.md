@@ -108,7 +108,7 @@ and back (round-trip time).
 that indicate times when packets were lost.
 
 For more details, see the
-[Understanding Crusader Results](./UNDERSTANDING.md) page.
+[Understanding Crusader Results](./RESULTS.md) page.
 
 ## Troubleshooting
 
