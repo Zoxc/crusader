@@ -11,7 +11,7 @@ crusader serve
 ## Client
 
 To start a test, run this on the _client machine_.
-See the [command-line options](.options-for-the-test-command) for details.
+See the [command-line options](.options-for-the-test-command) below for details.
 
 ```sh
 crusader test <server-ip>
@@ -40,9 +40,9 @@ The resulting `.json` is saved in the same directory as the input file.
 
 ## Options for the `test` command
 
-**Usage: crusader test [OPTIONS] \<SERVER>**
+**Usage: `crusader test [OPTIONS] <SERVER-ADDRESS>`**
 
-**Arguments:** \<SERVER>
+**Arguments:** `<SERVER-ADDRESS>` address of a Crusader server
 
 **Options:**
 
@@ -99,51 +99,3 @@ The resulting `.json` is saved in the same directory as the input file.
           The filename prefix used for the raw data and plot filenames
 * **`-h, --help`**
           Print help (see a summary with '-h')
-
-## Building Crusader from source
-
-Use [pre-built binaries](https://github.com/Zoxc/crusader/releases)
-for everyday tests if available.
-
-To develop or debug Crusader, use the commands below
-to build the full set of binaries.
-Executables are placed in `src/target/release`
-
-### Required dependencies
-
-* A Rust and C toolchain.
-
-### Additional dependencies for `crusader-gui`
-
-Development packages for:
-
-* `fontconfig`
-
-To install these on Ubuntu:
-
-```sh
-sudo apt install libfontconfig1-dev
-```
-
-## Building
-
-To build the `crusader` command line executable:
-
-```sh
-cd src
-cargo build -p crusader --release
-```
-
-To build both command line and GUI executables:
-
-```sh
-cd src
-cargo build --release
-```
-
-To build a docker container running the server:
-
-```sh
-cd docker
-docker build .. -t crusader -f server-static.Dockerfile
-```

@@ -7,9 +7,9 @@
 
 ![Crusader Results Screenshot](./media/Crusader-Result.png)
 
-The **Crusader Network Tester** measures and plots
+The **Crusader Network Tester** measures
 network throughput,
-latency in the presence of upload and download traffic,
+latency under load,
 and packet loss.
 It also incorporates a continuous latency tester for
 monitoring background responsiveness.
@@ -25,9 +25,11 @@ The GUI is not prebuilt for Linux and must be built from source.
 A **Docker container** for running the server may be found on
 [dockerhub](https://hub.docker.com/r/zoxc/crusader).
 
-**Command line/Build from source** See the [CLI.md](CLI.md)
-page for running Crusader
-from the command-line or to build it from source.
+**Command line** See the [CLI.md](CLI.md)
+page for running Crusader from the command-line.
+
+**Build from source** See the [BUILDING.md](BUILDING.md)
+page to build it from source.
 
 **Status:** The latest Crusader release version is shown above.
   The [pre-built binaries](https://github.com/Zoxc/crusader/releases)
@@ -122,11 +124,7 @@ For more details, see the
   Crusader also uses ports 35482 for the remote webserver
   and port 35483 for discovering other Crusader Servers.
   Check that your firewall is letting those ports through.
-  
-* Create a debug build by using `cargo build`
-  (instead of `cargo build --release`).
-  Binaries are saved in the _src/target/debug_ directory
-  
+    
 * The message `Warning: Load termination timed out. There may be residual untracked traffic in the background.` is not harmful. It may happen due to the TCP termination being lost
   or TCP incompatibilities between OSes.
   It's likely benign if you see throughput and latency drop
