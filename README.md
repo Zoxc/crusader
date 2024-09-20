@@ -7,12 +7,11 @@
 
 ![Crusader Results Screenshot](./media/Crusader-Result.png)
 
-The **Crusader Network Tester** measures
-network throughput,
-latency under load,
-and packet loss.
+The **Crusader Network Tester** measures network throughput, latency and packet loss
+in the presence of upload and download traffic.
 It also incorporates a continuous latency tester for
 monitoring background responsiveness.
+
 Crusader uses TCP and UDP ports 35481 (only) for its tests.
 The remote web server option uses TCP port 35482.
 Local server discovery uses UDP port 35483.
