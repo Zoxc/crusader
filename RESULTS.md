@@ -15,14 +15,14 @@ In the image above notice:
   or latency of that point in the chart.
   In the screen shot above, the Down latency
   peaks around 250 ms.
-* **Hovering over, or clicking the ⓘ symbol** opens a window that gives
-  a summary of the statistics.
+* **Hovering over, or clicking the ⓘ symbol** opens a window that displays
+  a summary of the measurements.
   See the description below for more definitions of the values.
 * **Clicking a legend** ("color") in the charts shows/hides
-  the trace or that value.
+  the associated graph.
   In the screen shot above, the Latency's "Round-trip" legend has been clicked,
   hiding the (black) round-trip trace,
-  and showing only the Up and Down traces.
+  and showing only the Up and Down plots.
 * The **Save to results** button saves two files: a plot (as `.png`) 
   and the data (as `.crr`) to the _crusader-results_ directory
   in the user _home directory_. 
@@ -40,8 +40,8 @@ The Crusader GUI displays charts showing Throughput, Latency, and Packet loss. T
 
 <img src="media/Crusader-Throughput.png" alt="description" width="250" />
 
-* Download - Average throughput (total data received divided by the elapsed time) during the Download portion of the test
-* Upload - Average throughput during the Upload portion of the test
+* Download - Steady state throughput, ignoring any startup transients, during the Download portion of the test
+* Upload - Steady state throughput, ignoring any startup transients, during the Upload portion of the test
 * Bidirectional - Sum of the Download and Upload throughputs
   during the Bidirectional portion of the test.
   Also displays the individual Download and Upload throughputs.
