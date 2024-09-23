@@ -362,7 +362,7 @@ async fn ping_measure_send(
     let mut storage = Vec::with_capacity(samples as usize);
     let mut buf = [0; 64];
 
-    let mut interval = time::interval(Duration::from_millis(10));
+    let mut interval = time::interval(Duration::from_millis(5));
 
     for _ in 0..samples {
         interval.tick().await;
@@ -393,7 +393,7 @@ async fn ping_measure_recv(
     let mut storage = Vec::with_capacity(samples as usize);
     let mut buf = [0; 64];
 
-    let end = time::sleep(Duration::from_millis(10) * samples + Duration::from_millis(1000)).fuse();
+    let end = time::sleep(Duration::from_millis(5) * samples + Duration::from_millis(1000)).fuse();
     pin_mut!(end);
 
     loop {
@@ -431,6 +431,7 @@ pub(crate) async fn measure_latency(
 ) -> Result<
     (
         Duration,
+        Duration,
         u64,
         FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     ),
@@ -459,7 +460,7 @@ pub(crate) async fn measure_latency(
     udp_socket.connect(server).await?;
     let udp_socket2 = udp_socket.clone();
 
-    let samples = 50;
+    let samples = 100;
 
     let ping_start_index = *ping_index;
     let ping_send = tokio::spawn(ping_measure_send(
@@ -504,16 +505,36 @@ pub(crate) async fn measure_latency(
     if pings.is_empty() {
         bail!("Unable to measure latency to server");
     }
+    if pings.len() < (samples / 2) as usize {
+        bail!("Unable get enough latency samples from server");
+    }
 
     pings.sort_by_key(|d| d.1);
 
-    let (sent, latency, server_time) = pings[pings.len() / 2];
+    let latency = pings.get(pings.len() / 2).unwrap().1;
 
-    let server_pong = sent + latency / 2;
+    let threshold = pings.get(pings.len() / 3).unwrap().1;
 
-    let server_offset = (server_pong.as_micros() as u64).wrapping_sub(server_time);
+    let pings: Vec<_> = pings
+        .get(0..=(pings.len() / 3))
+        .unwrap()
+        .iter()
+        .map(|&(sent, latency, server_time)| {
+            let server_pong = sent + latency / 2;
 
-    Ok((latency, server_offset, control_rx))
+            let server_offset = (server_pong.as_micros() as u64).wrapping_sub(server_time);
+
+            (server_pong, latency, server_offset)
+        })
+        .collect();
+
+    let server_offset = pings
+        .iter()
+        .map(|&(_, _, offset)| offset as u128)
+        .sum::<u128>()
+        / (pings.len() as u128);
+
+    Ok((latency, threshold, server_offset as u64, control_rx))
 }
 
 pub(crate) async fn ping_send(
