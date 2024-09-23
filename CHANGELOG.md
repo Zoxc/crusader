@@ -9,6 +9,9 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
+* Increase samples used for clock synchronization and idle latency measurement
+* Clock synchronization now uses the average of the lowest 1/3rd of samples
+
 ## 0.3 - 2024-09-16
 
 * Show throughput, latency, and packet loss summaries in plots and with the `test` command

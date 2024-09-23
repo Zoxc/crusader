@@ -133,7 +133,7 @@ async fn test_async(
 
     let mut ping_index = 0;
 
-    let (latency, mut server_time_offset, mut control_rx) = measure_latency(
+    let (_, latency, mut server_time_offset, mut control_rx) = measure_latency(
         id,
         &mut ping_index,
         &mut control_tx,

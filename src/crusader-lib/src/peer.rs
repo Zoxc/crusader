@@ -174,7 +174,7 @@ pub async fn run_peer(
 
     let mut ping_index = 0;
 
-    let (latency, server_time_offset, mut control_rx) = measure_latency(
+    let (latency, _, server_time_offset, mut control_rx) = measure_latency(
         id,
         &mut ping_index,
         &mut control_tx,
