@@ -29,13 +29,13 @@ crusader remote
 
 ## Plot
 
-Crusader creates a `.png` file from a `.crr` file using `./crusader plot path-to-crr-file`
+Crusader creates a `.png` file from a `.crr` file using `crusader plot path-to-crr-file`
 The resulting `.png` is saved in the same directory as the input file.
 
 ## Export
 
 Crusader exports raw data samples from a `.crr` file
-into a `.json` file using `./crusader export path-to-crr-file`
+into a `.json` file using `crusader export path-to-crr-file`
 The resulting `.json` is saved in the same directory as the input file.
 
 ## Options for the `test` command
