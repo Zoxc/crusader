@@ -265,6 +265,3 @@ docker build .. -t crusader -f server-static.Dockerfile
 * The up and down latency measurement rely on symmetric stable latency
 measurements to the server.
 These values may be wrong if those assumption don't hold on test startup.
-
-* The up and down latency measurement may slowly get out of sync due to
-clock drift. Clocks are currently only synchronized on test startup.

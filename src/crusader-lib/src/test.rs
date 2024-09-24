@@ -1,6 +1,6 @@
 use crate::common::{
     connect, data, fresh_socket_addr, hello, measure_latency, ping_recv, ping_send, read_data,
-    wait_for_state, write_data, Config, Msg, TestState,
+    wait_for_state, write_data, Config, LatencyResult, Msg, TestState,
 };
 use crate::file_format::{
     RawConfig, RawHeader, RawPing, RawPoint, RawResult, RawStream, RawStreamGroup, TestData,
@@ -153,7 +153,13 @@ pub(crate) async fn test_async(
 
     let mut ping_index = 0;
 
-    let (latency, _, server_time_offset, mut control_rx) = measure_latency(
+    let LatencyResult {
+        latency,
+        server_pong: pre_server_pong,
+        server_time: pre_server_time,
+        mut control_rx,
+        ..
+    } = measure_latency(
         id,
         &mut ping_index,
         &mut control_tx,
@@ -311,7 +317,7 @@ pub(crate) async fn test_async(
             };
         }
 
-        Ok((latencies, throughput, overload_))
+        Ok((latencies, throughput, overload_, control_rx))
     });
 
     if let Some(peer) = peer.as_mut() {
@@ -472,20 +478,51 @@ pub(crate) async fn test_async(
     state_tx.send((TestState::EndPingRecv, Instant::now()))?;
 
     let peer = if let Some(peer) = peer {
-        Some(peer.complete().await?)
+        Some(
+            peer.complete()
+                .await
+                .context("Failed to wait for peer completion")?,
+        )
     } else {
         None
     };
 
     let duration = start.elapsed();
 
-    let pings_sent = ping_send.await??;
-    send(&mut control_tx, &ClientMessage::StopMeasurements).await?;
-    send(&mut control_tx, &ClientMessage::Done).await?;
-
+    let (pings_sent, mut ping_index) = ping_send.await??;
     let mut pongs = ping_recv.await??;
 
-    let (mut latencies, throughput, server_overload) = measures.await??;
+    send(&mut control_tx, &ClientMessage::StopMeasurements).await?;
+
+    let (mut latencies, throughput, server_overload, control_rx) = measures.await??;
+
+    let LatencyResult {
+        server_pong: post_server_pong,
+        server_time: post_server_time,
+        ..
+    } = measure_latency(
+        id,
+        &mut ping_index,
+        &mut control_tx,
+        control_rx,
+        server,
+        local_udp,
+        setup_start,
+    )
+    .await?;
+
+    send(&mut control_tx, &ClientMessage::Done).await?;
+
+    let server_time = post_server_time.wrapping_sub(pre_server_time);
+    let client_time = post_server_pong.saturating_sub(pre_server_pong);
+    let client_time_micros = client_time.as_micros() as f64;
+    let ratio = client_time_micros / server_time as f64;
+
+    let to_client_time = |server_time: u64| -> u64 {
+        let time = server_time.wrapping_sub(pre_server_time);
+        let time = (time as f64 * ratio) as u64;
+        (pre_server_pong.as_micros() as u64).saturating_add(time)
+    };
 
     let server_overload = server_overload || peer.as_ref().map(|p| p.0).unwrap_or_default();
 
@@ -495,7 +532,7 @@ pub(crate) async fn test_async(
             .enumerate()
             .map(|(i, p)| RawPing {
                 index: i as u64,
-                sent: Duration::from_micros(p.sent.wrapping_add(server_time_offset)),
+                sent: Duration::from_micros(to_client_time(p.sent)),
                 latency: p.latency,
             })
             .collect::<Vec<_>>()
@@ -516,10 +553,8 @@ pub(crate) async fn test_async(
                 .ok()
                 .map(|ping| RawLatency {
                     total: None,
-                    up: Duration::from_micros(
-                        latencies[ping].time.wrapping_add(server_time_offset),
-                    )
-                    .saturating_sub(sent),
+                    up: Duration::from_micros(to_client_time(latencies[ping].time))
+                        .saturating_sub(sent),
                 });
 
             latency.as_mut().map(|latency| {
@@ -573,7 +608,7 @@ pub(crate) async fn test_async(
         throughput
             .iter()
             .filter(|e| e.0.group == group && e.0.id == id)
-            .map(|e| (e.1.wrapping_add(server_time_offset), e.2))
+            .map(|e| (to_client_time(e.1), e.2))
             .collect()
     };
 

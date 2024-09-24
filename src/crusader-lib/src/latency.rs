@@ -21,7 +21,7 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-use crate::common::{connect, hello, measure_latency, udp_handle};
+use crate::common::{connect, hello, measure_latency, udp_handle, LatencyResult};
 use crate::discovery;
 use crate::protocol::{codec, receive, send, ClientMessage, Ping, ServerMessage};
 
@@ -133,7 +133,12 @@ async fn test_async(
 
     let mut ping_index = 0;
 
-    let (_, latency, mut server_time_offset, mut control_rx) = measure_latency(
+    let LatencyResult {
+        threshold: latency,
+        server_offset: mut server_time_offset,
+        mut control_rx,
+        ..
+    } = measure_latency(
         id,
         &mut ping_index,
         &mut control_tx,

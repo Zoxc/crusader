@@ -420,6 +420,15 @@ async fn ping_measure_recv(
     Ok(storage)
 }
 
+pub struct LatencyResult {
+    pub latency: Duration,
+    pub threshold: Duration,
+    pub server_pong: Duration,
+    pub server_offset: u64,
+    pub server_time: u64,
+    pub control_rx: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
+}
+
 pub(crate) async fn measure_latency(
     id: u64,
     ping_index: &mut u64,
@@ -428,15 +437,7 @@ pub(crate) async fn measure_latency(
     server: SocketAddr,
     local_udp: SocketAddr,
     setup_start: Instant,
-) -> Result<
-    (
-        Duration,
-        Duration,
-        u64,
-        FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
-    ),
-    anyhow::Error,
-> {
+) -> Result<LatencyResult, anyhow::Error> {
     send(&mut control_tx, &ClientMessage::GetMeasurements).await?;
 
     let latencies = tokio::spawn(async move {
@@ -524,17 +525,36 @@ pub(crate) async fn measure_latency(
 
             let server_offset = (server_pong.as_micros() as u64).wrapping_sub(server_time);
 
-            (server_pong, latency, server_offset)
+            (server_pong, latency, server_offset, server_time)
         })
         .collect();
 
+    let server_pong = pings
+        .iter()
+        .map(|&(server_pong, _, _, _)| server_pong)
+        .sum::<Duration>()
+        / (pings.len() as u32);
+
     let server_offset = pings
         .iter()
-        .map(|&(_, _, offset)| offset as u128)
+        .map(|&(_, _, offset, _)| offset as u128)
         .sum::<u128>()
         / (pings.len() as u128);
 
-    Ok((latency, threshold, server_offset as u64, control_rx))
+    let server_time = pings
+        .iter()
+        .map(|&(_, _, _, time)| time as u128)
+        .sum::<u128>()
+        / (pings.len() as u128);
+
+    Ok(LatencyResult {
+        latency,
+        threshold,
+        server_pong,
+        server_offset: server_offset as u64,
+        server_time: server_time as u64,
+        control_rx,
+    })
 }
 
 pub(crate) async fn ping_send(
@@ -545,7 +565,7 @@ pub(crate) async fn ping_send(
     socket: Arc<UdpSocket>,
     interval: Duration,
     estimated_duration: Duration,
-) -> Result<Vec<Duration>, anyhow::Error> {
+) -> Result<(Vec<Duration>, u64), anyhow::Error> {
     let mut storage = Vec::with_capacity(
         ((estimated_duration.as_secs_f64() + 2.0) * (1000.0 / interval.as_millis() as f64) * 1.5)
             as usize,
@@ -579,7 +599,7 @@ pub(crate) async fn ping_send(
         storage.push(current);
     }
 
-    Ok(storage)
+    Ok((storage, ping_index))
 }
 
 pub(crate) async fn ping_recv(
