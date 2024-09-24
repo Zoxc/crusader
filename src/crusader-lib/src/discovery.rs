@@ -88,9 +88,13 @@ fn interfaces() -> Vec<u32> {
 
 #[cfg(feature = "client")]
 pub async fn locate(peer_server: bool) -> Result<Server, anyhow::Error> {
-    use crate::common::fresh_socket_addr;
-    use std::{net::SocketAddrV6, time::Duration};
-    use tokio::time::timeout;
+    use crate::{common::fresh_socket_addr, serve::OnDrop};
+    use std::{
+        net::SocketAddrV6,
+        sync::atomic::{AtomicBool, Ordering},
+        time::Duration,
+    };
+    use tokio::time::{self, timeout};
 
     fn handle_packet(
         peer_server: bool,
@@ -142,6 +146,8 @@ pub async fn locate(peer_server: bool) -> Result<Server, anyhow::Error> {
 
     socket.set_broadcast(true)?;
 
+    let socket = Arc::new(socket);
+
     let data = Data {
         hello: Hello::new(),
         message: Message::Discover { peer: peer_server },
@@ -151,19 +157,46 @@ pub async fn locate(peer_server: bool) -> Result<Server, anyhow::Error> {
 
     let ip = Ipv6Addr::from_str("ff02::1").unwrap();
 
-    let mut any = false;
-    for interface in interfaces() {
-        if socket
-            .send_to(&buf, SocketAddrV6::new(ip, DISCOVER_PORT, 0, interface))
-            .await
-            .is_ok()
-        {
-            any = true;
+    let socket_ = socket.clone();
+    let send_packet = move || {
+        let socket = socket_.clone();
+        let buf = buf.clone();
+        async move {
+            let mut any = false;
+            for interface in interfaces() {
+                if socket
+                    .send_to(&buf, SocketAddrV6::new(ip, DISCOVER_PORT, 0, interface))
+                    .await
+                    .is_ok()
+                {
+                    any = true;
+                }
+            }
+            any
         }
-    }
-    if !any {
+    };
+
+    if !send_packet().await {
         bail!("Failed to send any discovery multicast packets");
     }
+
+    let done = Arc::new(AtomicBool::new(false));
+    let done_ = done.clone();
+    let _on_drop = OnDrop(|| {
+        done_.store(true, Ordering::Release);
+    });
+
+    tokio::spawn(async move {
+        loop {
+            time::sleep(Duration::from_millis(100)).await;
+
+            if done.load(Ordering::Acquire) {
+                break;
+            }
+
+            send_packet().await;
+        }
+    });
 
     let find = async {
         let mut buf = [0; 1500];
