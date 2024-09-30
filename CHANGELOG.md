@@ -9,6 +9,8 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
+## 0.3.1 - 2024-09-30
+
 * Increase samples used for clock synchronization and idle latency measurement
 * Clock synchronization now uses the average of the lowest 1/3rd of samples
 * Adjust for clock drift in tests
