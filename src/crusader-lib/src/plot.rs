@@ -1455,6 +1455,7 @@ pub(crate) fn bytes_transferred(
         area,
     );
 
+    let mut seen = HashSet::new();
     for throughput in throughputs {
         for (i, bytes) in throughput.bytes.iter().enumerate() {
             let series = chart
@@ -1469,7 +1470,7 @@ pub(crate) fn bytes_transferred(
                 ))
                 .unwrap();
 
-            if i == 0 {
+            if seen.insert(throughput.name.to_owned()) && i == 0 {
                 series.label(throughput.name).legend(move |(x, y)| {
                     Rectangle::new([(x, y - 5), (x + 18, y + 3)], throughput.color.filled())
                 });

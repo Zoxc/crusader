@@ -10,6 +10,7 @@ This file lists the changes that have occurred since January 2024 in the project
 ## Unreleased
 
 * Fix saved raw data path printed after a test
+* Avoid duplicate legends when plotting transferred bytes
 
 ## 0.3.1 - 2024-09-30
 
