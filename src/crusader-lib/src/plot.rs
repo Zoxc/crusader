@@ -857,7 +857,7 @@ fn interpolate(input: &[(u64, f64)], interval: u64) -> Vec<(u64, f64)> {
     }
 
     let min = input.first().unwrap().0 / interval * interval;
-    let max = (input.last().unwrap().0 + interval - 1) / interval * interval;
+    let max = input.last().unwrap().0.div_ceil(interval) * interval;
 
     let mut data = Vec::new();
 
