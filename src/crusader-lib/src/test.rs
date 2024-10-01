@@ -683,7 +683,7 @@ pub fn save_raw(
     root_path: &Path,
 ) -> Result<PathBuf, anyhow::Error> {
     std::fs::create_dir_all(root_path)?;
-    let name = unique(name, "crr");
+    let name = unique(name, "crr", root_path);
     let path = root_path.join(&name);
     result.save(&path)?;
     Ok(path)
@@ -941,7 +941,7 @@ pub fn timed(name: &str) -> String {
     format!("{}{}", name, time)
 }
 
-pub(crate) fn unique(name: &str, ext: &str) -> String {
+pub(crate) fn unique(name: &str, ext: &str, root_path: &Path) -> String {
     let stem = name.to_owned();
     let mut i: usize = 0;
     loop {
@@ -951,7 +951,7 @@ pub(crate) fn unique(name: &str, ext: &str) -> String {
             stem.to_string()
         };
         let file = format!("{}.{}", file, ext);
-        if !Path::new(&file).exists() {
+        if !root_path.join(&file).exists() {
             return file;
         }
         i += 1;

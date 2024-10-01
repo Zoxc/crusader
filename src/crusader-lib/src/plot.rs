@@ -413,7 +413,7 @@ pub fn save_graph(
     root_path: &Path,
 ) -> Result<String, anyhow::Error> {
     std::fs::create_dir_all(root_path)?;
-    let file = unique(name, "png");
+    let file = unique(name, "png", root_path);
     save_graph_to_path(&root_path.join(&file), config, result)?;
     Ok(file)
 }
