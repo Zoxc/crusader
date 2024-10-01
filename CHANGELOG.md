@@ -9,6 +9,8 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
+* Fix saved raw data path printed after a test
+
 ## 0.3.1 - 2024-09-30
 
 * Increase samples used for clock synchronization and idle latency measurement

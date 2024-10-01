@@ -987,7 +987,7 @@ pub fn test(
     let raw = save_raw(&result, &out_name, path)?;
     println!(
         "{}",
-        with_time(&format!("Saved raw data as {}", path.join(raw).display()))
+        with_time(&format!("Saved raw data as {}", raw.display()))
     );
     let plot = save_graph(&plot, &test_result, &out_name, path)?;
     println!(
