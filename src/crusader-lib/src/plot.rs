@@ -1499,6 +1499,10 @@ pub(crate) fn graph(
         def_height += 380;
     }
 
+    if config.transferred {
+        def_height += 320;
+    }
+
     let height = config.height.unwrap_or(def_height) as u32;
 
     let mut data = vec![0; 3 * (width as usize * height as usize)];
