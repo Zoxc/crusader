@@ -7,7 +7,7 @@
     clippy::option_map_unit_fn
 )]
 
-const VERSION: &str = "0.3.2";
+const VERSION: &str = "0.3.3-dev";
 
 pub fn version() -> String {
     if !VERSION.ends_with("-dev") {
