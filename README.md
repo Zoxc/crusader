@@ -12,7 +12,8 @@ in the presence of upload and download traffic.
 It also incorporates a continuous latency tester for
 monitoring background responsiveness.
 
-Crusader uses TCP and UDP ports 35481 (only) for its tests.
+Crusader makes throughput measurements using TCP on port 35481
+and latency tests using UDP port 35481.
 The remote web server option uses TCP port 35482.
 Local server discovery uses UDP port 35483.
 
