@@ -1,4 +1,4 @@
-use crate::common::connect;
+use crate::common::{connect, LatencyResult};
 #[cfg(feature = "client")]
 use crate::common::{Config, Msg};
 #[cfg(feature = "client")]
@@ -110,7 +110,7 @@ pub async fn connect_to_peer(
                 IpAddr::V6(ip) => ip,
             }
             .octets(),
-            port: config.port,
+            port: server.port(),
             ping_interval: config.ping_interval.as_millis() as u64,
             estimated_duration: estimated_duration.as_millis(),
         },
@@ -174,7 +174,13 @@ pub async fn run_peer(
 
     let mut ping_index = 0;
 
-    let (latency, _, server_time_offset, mut control_rx) = measure_latency(
+    let LatencyResult {
+        latency,
+        server_pong: pre_server_pong,
+        server_time: pre_server_time,
+        mut control_rx,
+        ..
+    } = measure_latency(
         id,
         &mut ping_index,
         &mut control_tx,
@@ -216,7 +222,7 @@ pub async fn run_peer(
             };
         }
 
-        Ok((latencies, overload_))
+        Ok((latencies, overload_, control_rx))
     });
 
     send(
@@ -268,13 +274,47 @@ pub async fn run_peer(
 
     state_tx.send((TestState::EndPingRecv, Instant::now())).ok();
 
-    let pings_sent = ping_send.await??;
-    send(&mut control_tx, &ClientMessage::StopMeasurements).await?;
-    send(&mut control_tx, &ClientMessage::Done).await?;
-
+    let (pings_sent, mut ping_index) = ping_send.await??;
     let mut pongs = ping_recv.await??;
 
-    let (mut latencies, server_overload) = measures.await??;
+    send(&mut control_tx, &ClientMessage::StopMeasurements).await?;
+
+    let (mut latencies, server_overload, control_rx) = measures.await??;
+
+    let LatencyResult {
+        server_pong: post_server_pong,
+        server_time: post_server_time,
+        ..
+    } = measure_latency(
+        id,
+        &mut ping_index,
+        &mut control_tx,
+        control_rx,
+        server,
+        local_udp,
+        setup_start,
+    )
+    .await?;
+
+    send(&mut control_tx, &ClientMessage::Done).await?;
+
+    let server_time = post_server_time.wrapping_sub(pre_server_time);
+    let peer_time = post_server_pong.saturating_sub(pre_server_pong);
+    let peer_time_micros = peer_time.as_micros() as f64;
+    let ratio = peer_time_micros / server_time as f64;
+    let inv_ratio = server_time as f64 / peer_time_micros;
+
+    let to_peer_time = |server_time: u64| -> u64 {
+        let time = server_time.wrapping_sub(pre_server_time);
+        let time = (time as f64 * ratio) as u64;
+        (pre_server_pong.as_micros() as u64).saturating_add(time)
+    };
+
+    let to_server_time = |peer_time: Duration| -> u64 {
+        let time = peer_time.saturating_sub(pre_server_pong).as_micros() as u64;
+        let time = (time as f64 * inv_ratio) as u64;
+        pre_server_time.wrapping_add(time)
+    };
 
     latencies.sort_by_key(|d| d.index);
     pongs.sort_by_key(|d| d.0.index);
@@ -288,10 +328,8 @@ pub async fn run_peer(
                 .ok()
                 .map(|ping| RawLatency {
                     total: None,
-                    up: Duration::from_micros(
-                        latencies[ping].time.wrapping_add(server_time_offset),
-                    )
-                    .saturating_sub(sent),
+                    up: Duration::from_micros(to_peer_time(latencies[ping].time))
+                        .saturating_sub(sent),
                 });
 
             latency.as_mut().map(|latency| {
@@ -304,7 +342,7 @@ pub async fn run_peer(
             });
 
             PeerLatency {
-                sent: (sent.as_micros() as u64).wrapping_sub(server_time_offset),
+                sent: to_server_time(sent),
                 latency,
             }
         })

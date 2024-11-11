@@ -9,8 +9,20 @@ This file lists the changes that have occurred since January 2024 in the project
 
 ## Unreleased
 
+## 0.3.2 - 2024-10-03
+
+* Fix saved raw data path printed after a test
+* Avoid duplicate legends when plotting transferred bytes
+* Make `--plot-transferred` increase default plot height
+* Fix unique output path generation
+
+## 0.3.1 - 2024-09-30
+
 * Increase samples used for clock synchronization and idle latency measurement
 * Clock synchronization now uses the average of the lowest 1/3rd of samples
+* Adjust for clock drift in tests
+* Fix connecting to servers on non-standard port with peers
+* Make discovery more robust by sending multiple packets
 
 ## 0.3 - 2024-09-16
 

@@ -413,7 +413,7 @@ pub fn save_graph(
     root_path: &Path,
 ) -> Result<String, anyhow::Error> {
     std::fs::create_dir_all(root_path)?;
-    let file = unique(name, "png");
+    let file = unique(name, "png", root_path);
     save_graph_to_path(&root_path.join(&file), config, result)?;
     Ok(file)
 }
@@ -857,7 +857,7 @@ fn interpolate(input: &[(u64, f64)], interval: u64) -> Vec<(u64, f64)> {
     }
 
     let min = input.first().unwrap().0 / interval * interval;
-    let max = (input.last().unwrap().0 + interval - 1) / interval * interval;
+    let max = input.last().unwrap().0.div_ceil(interval) * interval;
 
     let mut data = Vec::new();
 
@@ -1455,6 +1455,7 @@ pub(crate) fn bytes_transferred(
         area,
     );
 
+    let mut seen = HashSet::new();
     for throughput in throughputs {
         for (i, bytes) in throughput.bytes.iter().enumerate() {
             let series = chart
@@ -1469,7 +1470,7 @@ pub(crate) fn bytes_transferred(
                 ))
                 .unwrap();
 
-            if i == 0 {
+            if seen.insert(throughput.name.to_owned()) && i == 0 {
                 series.label(throughput.name).legend(move |(x, y)| {
                     Rectangle::new([(x, y - 5), (x + 18, y + 3)], throughput.color.filled())
                 });
@@ -1496,6 +1497,10 @@ pub(crate) fn graph(
 
     if peer_latency {
         def_height += 380;
+    }
+
+    if config.transferred {
+        def_height += 320;
     }
 
     let height = config.height.unwrap_or(def_height) as u32;
