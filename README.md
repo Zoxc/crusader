@@ -22,14 +22,8 @@ and Android are available on the
 [Releases](https://github.com/Zoxc/crusader/releases) page.
 The GUI is not prebuilt for Linux and must be built from source.
 
-A **Docker container** for running the server may be found on
-[dockerhub](https://hub.docker.com/r/zoxc/crusader).
-
-**Command line** See the [CLI.md](CLI.md)
-page for running Crusader from the command-line.
-
-**Build from source** See the [BUILDING.md](BUILDING.md)
-page to build it from source.
+**Documentation** See the [Documentation](#documentation)
+section below.
 
 **Status:** The latest Crusader release version is shown above.
   The [pre-built binaries](https://github.com/Zoxc/crusader/releases)
@@ -65,7 +59,7 @@ The Crusader GUI has five tabs:
 * **Client tab**
   Runs the Crusader client program.
   The options shown above are described in the
-  [Command-line options](./COMMANDLINE.md) page.
+  [Command-line options](./docs/CLI.md) page.
 
 * **Server tab**
   Runs the Crusader server, listening for connections from other clients
@@ -110,29 +104,16 @@ and back (round-trip time).
 that indicate times when packets were lost.
 
 For more details, see the
-[Understanding Crusader Results](./RESULTS.md) page.
+[Understanding Crusader Results](./docs/RESULTS.md) page.
 
-## Troubleshooting
+## Documentation
 
-* On macOS, the first time you double-click
-  the pre-built `crusader` or `crusader-gui` icon,
-  the OS refuses to let it run.
-  You must use **System Preferences -> Security**
-  to approve Crusader to run.
-  
-* Crusader requires that TCP and UDP ports 35481 are open for its tests.
-  Crusader also uses ports 35482 for the remote webserver
-  and port 35483 for discovering other Crusader Servers.
-  Check that your firewall is letting those ports through.
-    
-* The message `Warning: Load termination timed out. There may be residual untracked traffic in the background.` is not harmful. It may happen due to the TCP termination being lost
-  or TCP incompatibilities between OSes.
-  It's likely benign if you see throughput and latency drop
-  to idle values after the tests in the graph.
-
-* The up and down latency measurements rely on symmetric stable latency
-measurements to the server.
-These values may be wrong if those assumption don't hold on test startup.
-
-* The up and down latency measurement may slowly get out of sync due to
-clock drift. Clocks are currently only synchronized on test startup.
+* [This README](./README.md)
+* [Understanding Crusader Results](./docs/RESULTS.md)
+* [Local Testing](./docs/LOCAL_TESTS.md)
+* [Command-line Options](./docs/CLI.md)
+* [Building Crusader from source](./docs/BUILDING.md)
+* [Troubleshooting](./docs/TROUBLESHOOTING.md)
+* [Docker container](https://hub.docker.com/r/zoxc/crusader)
+  for the server is available on
+  [dockerhub](https://hub.docker.com/r/zoxc/crusader).

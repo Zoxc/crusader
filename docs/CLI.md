@@ -11,7 +11,7 @@ crusader serve
 ## Client
 
 To start a test, run this on the _client machine_.
-See the [command-line options](.options-for-the-test-command) below for details.
+See the [command-line options](#options-for-the-test-command) below for details.
 
 ```sh
 crusader test <server-ip>
@@ -47,7 +47,7 @@ The resulting `.json` is saved in the same directory as the input file.
 **Options:**
 
 * **`--download`**
-          Run a download test 
+          Run a download test
 * **`--upload`**
           Run an upload test
 * **`--bidirectional`**
@@ -93,7 +93,7 @@ The resulting `.json` is saved in the same directory as the input file.
           the values to the client
 * **`--latency-peer`**
           Trigger the client to instruct a peer (another Crusader server)
-          to begin measuring the latency to the main server 
+          to begin measuring the latency to the main server
           and report the latency back
 * **`--out-name <OUT_NAME>`**
           The filename prefix used for the raw data and plot filenames
