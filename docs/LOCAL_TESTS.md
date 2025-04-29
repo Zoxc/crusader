@@ -38,12 +38,13 @@ on two separate computers. Then:
   [Crusader README](../README.md) and
   [Understanding Crusader Results](./RESULTS.md)
   for details.
-4. _Note:_ If both the computers (client and server) are on the LAN
+
+**Note:** If both the computers (client and server) are on the LAN
    side of the router (whether they are on Wi-Fi or Ethernet),
    the results will reflect the _switching_ capability, not the
    _routing_ capability of the router.
    To test the routing capability, test against a server that's
-   on the broader Internet.
+   on the WAN side of the router or the broader Internet.
 
 **Note:** The Crusader program has both a GUI and a command-line binary.
 Both act as a client or a server.
