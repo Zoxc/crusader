@@ -2,7 +2,7 @@
 
 * Crusader requires that TCP and UDP ports 35481 are open for its tests.
   Crusader also uses ports 35482 for the remote webserver
-  and port 35483 for discovering other Crusader Servers.
+  and port 35483 for discovering other Crusader servers.
   Check that your firewall is letting those ports through.
 
 * On macOS, the first time you double-click
@@ -13,7 +13,7 @@
 
 * The message
   `Warning: Load termination timed out. There may be residual untracked traffic in the background.`
-  is not harmful.
+  is not necessarily harmful.
   It may happen due to the TCP termination being lost
   or TCP incompatibilities between OSes.
   It's likely benign if you see throughput and latency drop
@@ -21,7 +21,6 @@
 
 * The up and down latency measurements rely on symmetric stable latency
   measurements to the server.
-  These values may be wrong if those assumption don't hold on test startup.
 
 * The up and down latency measurement may slowly get out of sync due to
   clock drift. Clocks are currently only synchronized on test startup.

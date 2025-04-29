@@ -25,7 +25,7 @@ In the image above notice:
   and showing only the Up and Down latency plots.
 * The **Save to results** button saves two files: a plot (as `.png`)
   and the data (as `.crr`) to the _crusader-results_ directory
-  in the user _home directory_.
+  in the _current directory_.
 * The **Open from results** button opens a `.crr` file
   from the _crusader-results_ directory.
 * The **Save** button opens a file dialog to save the current `.crr` file.
@@ -59,7 +59,7 @@ The ⓘ symbol opens a window showing a numerical summary of the charted data.
 
 Crusader smooths all the latency samples over a 400 ms window.
 The values shown in the window display the maximum of those smoothed values.
-This emphasizes the peaks of latency.
+This emphasizes sustained peaks of latency.
 
 * Download - Summarizes the round-trip latency during the
   Download portion of the test.
@@ -73,6 +73,9 @@ This emphasizes the peaks of latency.
 ### Packet loss
 
 <img src="../media/Crusader-Loss.png" alt="description" width="125" />
+
+When it measures packet loss, Crusader is using the UDP packets
+that it also uses for latency measurements.
 
 * Download - Summarizes packet loss during the Download portion of the test
 * Upload - Summarizes packet loss during the Upload portion of the test

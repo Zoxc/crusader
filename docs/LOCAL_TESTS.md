@@ -5,7 +5,7 @@ The Crusader Network Tester measures network throughput
 and latency in the presence of upload and download traffic
 and produces plots of the traffic rates, latency and packet loss.
 
-## Making local tests
+## Making local tests - Wifi or Wired
 
 To test the equipment between two points on your network,
 Crusader requires two computers,
@@ -38,6 +38,12 @@ on two separate computers. Then:
   [Crusader README](../README.md) and
   [Understanding Crusader Results](./RESULTS.md)
   for details.
+4. _Note:_ If both the computers (client and server) are on the LAN
+   side of the router (whether they are on Wi-Fi or Ethernet),
+   the results will reflect the _switching_ capability, not the
+   _routing_ capability of the router.
+   To test the routing capability, test against a server that's
+   on the broader Internet.
 
 **Note:** The Crusader program has both a GUI and a command-line binary.
 Both act as a client or a server.
@@ -59,7 +65,7 @@ In particular:
 * Ethernet-to-Ethernet connections tend to be good:
   high throughput with low latency.
   But you should always check your network.
-  On a 1Gbps network, typical results are above 950 mbps,
+  On a 1Gbps network, typical results are above 950 Mbps,
   and less than a dozen milliseconds of latency.
 * Wi-fi has a reputation for "being slow".
   This often is a result of the Wi-fi drivers injecting
@@ -76,13 +82,17 @@ the performance of that portion of the network.
 
 ## Why is this important?
 
-These test results, in themselves, are not important.
+These test results - the actual throughput or latency numbers -
+are not very important.
 If you are satisfied with you network's performance,
 then these numerical results don't matter.
 
 But if you are experiencing problems,
 these tests help divide the troubleshooting problem in two.
 
-* If the local network is running fine, performance problems must be elsewhere.
+* If the local network is running fine,
+  performance problems must be elsewhere 
+  (in your ISP or their upstream service,
+  which likely is out of your control).
 * But if the local performance is not what you expected,
-  that could explain the problem
+  you can start investigating your router, switch, etc.
